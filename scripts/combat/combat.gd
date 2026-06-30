@@ -9,6 +9,7 @@ extends Control
 
 const Db := preload("res://scripts/combat/card_db.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
+const Card := preload("res://scripts/ui/card.gd")
 
 const DWARF_CLASSES := ["warrior", "sorcerer", "paladin"]
 const DWARF_HP := 30
@@ -45,17 +46,19 @@ var active_name_label: Label
 var active_energy_label: Label
 var active_res_label: Label
 
-var hand_box: HBoxContainer
+var hand_box: Control
 var end_turn_btn: Button
 var log_label: Label
 
 var overlay: ColorRect
 var overlay_label: Label
 var overlay_btn: Button
+var reticle_tex: ImageTexture
 
 # ================================================================ Lifecycle
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	reticle_tex = _make_reticle()
 	_build_ui()
 	_start_combat()
 
@@ -118,11 +121,11 @@ func _build_ui() -> void:
 	active_energy_label = _label2("", Vector2(20, 866), Vector2(300, 24), 17)
 	active_res_label = _label2("", Vector2(330, 866), Vector2(370, 24), 17)
 
-	# --- Hand ---
-	hand_box = HBoxContainer.new()
-	hand_box.add_theme_constant_override("separation", 2)
-	hand_box.position = Vector2(16, 900)
-	hand_box.size = Vector2(688, 210)
+	# --- Hand (manual arc layout; cards self-fan & hover-lift) ---
+	hand_box = Control.new()
+	hand_box.position = Vector2(0, 905)
+	hand_box.size = Vector2(720, 220)
+	hand_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hand_box)
 
 	# --- End Turn ---
@@ -375,6 +378,9 @@ func _random_living_dwarf():
 	return living[randi() % living.size()]
 
 # ================================================================ Card play
+func _on_card_clicked(card) -> void:
+	_on_card_pressed(card.index)
+
 func _on_card_pressed(index: int) -> void:
 	if phase != "playerTurn" or active_dwarf == null:
 		return
@@ -549,6 +555,42 @@ func _end(won: bool) -> void:
 func _on_overlay_btn() -> void:
 	_start_combat()
 
+# ================================================================ Targeting cursor
+## Swap the OS cursor to a red reticle whenever an enemy-target card is armed,
+## restoring the default arrow otherwise (Hearthstone-style "now pick a target").
+func _update_cursor() -> void:
+	var targeting: bool = phase == "playerTurn" and selected_card_index >= 0
+	if targeting:
+		Input.set_custom_mouse_cursor(reticle_tex, Input.CURSOR_ARROW, Vector2(24, 24))
+	else:
+		Input.set_custom_mouse_cursor(null)
+
+## Reticle drawn procedurally (two rings + gapped crosshair + center dot).
+func _make_reticle() -> ImageTexture:
+	var s: int = 48
+	var img: Image = Image.create(s, s, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var c := Vector2(s * 0.5, s * 0.5)
+	var col := Color(1.0, 0.27, 0.27, 1.0)
+	for deg: int in range(0, 360):
+		var dir := Vector2(cos(deg_to_rad(float(deg))), sin(deg_to_rad(float(deg))))
+		for r: float in [21.0, 20.0, 12.0, 11.0]:
+			_plot(img, c + dir * r, col)
+	for d: int in range(6, 23):
+		_plot(img, c + Vector2(d, 0), col)
+		_plot(img, c + Vector2(-d, 0), col)
+		_plot(img, c + Vector2(0, d), col)
+		_plot(img, c + Vector2(0, -d), col)
+	for o: Vector2 in [Vector2.ZERO, Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		_plot(img, c + o, col)
+	return ImageTexture.create_from_image(img)
+
+func _plot(img: Image, p: Vector2, col: Color) -> void:
+	var x: int = int(round(p.x))
+	var y: int = int(round(p.y))
+	if x >= 0 and y >= 0 and x < img.get_width() and y < img.get_height():
+		img.set_pixel(x, y, col)
+
 # ================================================================ VFX
 func _flash(c: Dictionary) -> void:
 	var n: Label = c.get("node")
@@ -589,6 +631,7 @@ func _refresh() -> void:
 	_rebuild_hand()
 	end_turn_btn.disabled = phase != "playerTurn"
 	end_turn_btn.visible = not overlay.visible
+	_update_cursor()
 
 func _refresh_track() -> void:
 	for child in init_box.get_children():
@@ -669,16 +712,21 @@ func _rebuild_hand() -> void:
 	if phase != "playerTurn" or active_dwarf == null:
 		return
 	var hand: Array = active_dwarf["hand"]
-	for i: int in range(hand.size()):
+	var n: int = hand.size()
+	var cx: float = 360.0
+	var spacing: float = minf(116.0, 624.0 / float(maxi(1, n)))
+	var base_y: float = 196.0                 # bottom-center y within hand_box
+	for i: int in range(n):
 		var cid: String = hand[i]
 		var def: Dictionary = Db.CARDS[cid]
-		var b := Button.new()
-		b.custom_minimum_size = Vector2(130, 210)
-		b.add_theme_font_size_override("font_size", 13)
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.text = "%s\n%s\n(%d)\n%s" % [def["emoji"], def["name"], def["cost"], def["text"]]
-		b.disabled = (phase != "playerTurn") or (def["cost"] > active_dwarf["energy"])
-		if i == selected_card_index:
-			b.modulate = Color(1.0, 0.95, 0.45, 1.0)
-		b.pressed.connect(_on_card_pressed.bind(i))
-		hand_box.add_child(b)
+		var card := Card.new()
+		hand_box.add_child(card)
+		card.index = i
+		var face: Dictionary = Db.describe(def, active_dwarf)
+		var armed: bool = (i == selected_card_index)
+		card.setup(def, face, def["cost"] <= active_dwarf["energy"], armed)
+		card.clicked.connect(_on_card_clicked)
+		var t: float = float(i) - float(n - 1) / 2.0
+		var rot: float = deg_to_rad(t * 5.0)
+		var bottom_center := Vector2(cx + t * spacing, base_y + absf(t) * 9.0)
+		card.set_slot(bottom_center - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y), rot)

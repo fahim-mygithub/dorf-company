@@ -110,3 +110,75 @@ const ENEMIES := {
 
 ## The fixed encounter: 1 boss + 4 minions.
 const ENCOUNTER := ["boss", "grunt", "imp", "skeleton", "bat"]
+
+# ================================================================ Card face (display layer)
+## Single source of truth for how a card reads. combat.gd renders from these,
+## so adding a card row auto-generates a clear, correct face (text never desyncs
+## from behaviour). Mirrors the Slay-the-Spire "the number on the card is the real
+## number, right now" principle.
+
+## Classify for frame tint so the verb reads before you read a word.
+## "attack" | "skill" | "power".
+static func card_type(def: Dictionary) -> String:
+	for op: Array in def["effect"]:
+		if op[0] == "power":
+			return "power"
+	for op: Array in def["effect"]:
+		if op[0] == "damage" or op[0] == "damage_per_resource":
+			return "attack"
+	return "skill"
+
+## Frame tint per type (StS: red=hit, blue=defend/utility, violet=permanent power).
+static func type_tint(t: String) -> Color:
+	match t:
+		"attack": return Color(0.46, 0.14, 0.14)
+		"power":  return Color(0.34, 0.17, 0.46)
+		_:        return Color(0.13, 0.26, 0.42)
+
+## Build the readable body with LIVE numbers for the given dwarf.
+## Returns {"text": String, "buffed": bool}. dwarf may be null (uses base values).
+static func describe(def: Dictionary, dwarf) -> Dictionary:
+	var res: int = 0
+	var rname: String = "Res"
+	if dwarf != null:
+		res = int(dwarf.get("resource", 0))
+		rname = str(dwarf.get("resource_name", "Res"))
+	var lines: Array = []
+	var buffed: bool = false
+	for op: Array in def["effect"]:
+		match op[0]:
+			"damage":
+				lines.append("Deal %d" % op[1])
+			"block":
+				lines.append("Gain %d block" % op[1])
+			"self_damage":
+				lines.append("Lose %d HP" % op[1])
+			"draw":
+				lines.append("Draw %d" % op[1])
+			"resource":
+				lines.append("+%d %s" % [op[1], rname])
+			"damage_per_resource":
+				var live: int = op[1] + op[2] * res
+				if res > 0:
+					buffed = true
+				lines.append("Deal %d  (+%d/%s)" % [live, op[2], rname])
+			"resource_if_bloodied":
+				lines.append("If bloodied: +%d %s" % [op[1], rname])
+			"status":
+				lines.append("+%d %s" % [op[2], _status_name(op[1])])
+			"status_per_resource":
+				var st: int = op[2] + op[3] * res
+				if res > 0:
+					buffed = true
+				lines.append("+%d %s  (+%d/%s)" % [st, _status_name(op[1]), op[3], rname])
+			"power":
+				if op[1] == "resource_per_turn":
+					lines.append("Each turn: +%d %s" % [op[2], rname])
+	if def.get("target", "") == "all_enemies":
+		lines.append("to all enemies")
+	return {"text": "\n".join(lines), "buffed": buffed}
+
+static func _status_name(id: String) -> String:
+	match id:
+		"mark": return "Mark"
+		_: return id.capitalize()
