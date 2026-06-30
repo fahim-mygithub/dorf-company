@@ -1,64 +1,62 @@
 extends Control
-
-## "Demon Lord MBA" — mobile party combat (portrait 720x1280).
-## Party of 3 dwarves (Warrior/Sorcerer/Paladin), each its own class + deck.
-## 1 boss + 4 minions. Unified initiative: every combatant rolls once at start,
-## a single interleaved order persists for the whole combat. Data-driven cards via
-## card_db.gd (preloaded as Db). Reuses the [op,...] resolver, block-then-hp damage,
-## draw/reshuffle, win/lose overlay and Play Again from the original single-dwarf build.
+## "Demon Lord MBA" — Slice 2 party puzzle (portrait 720x1280, emoji).
+##
+## 3 roles (Warrior tank / Cleric support / Sorcerer dps), per-character decks + energy.
+## Clean PLAYER phase (act with each character in any order) -> ENEMY phase.
+## 3 archetype enemies with PREFERRED TARGETING + live threat arrows + Taunt redirect.
+## Data-driven via card_db.gd (Db). Reuses card.gd (Card), threat_arrows.gd, momentum_hit VFX.
+## Resolution order (Db op semantics): base -> +flat (Channel/Aura) -> xMark -> block,hp -> Retaliate.
 
 const Db := preload("res://scripts/combat/card_db.gd")
-const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 const Card := preload("res://scripts/ui/card.gd")
-const TargetArrow := preload("res://scripts/ui/target_arrow.gd")
+const Threat := preload("res://scripts/ui/threat_arrows.gd")
+const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 
-const DWARF_CLASSES := ["warrior", "sorcerer", "paladin"]
-const DWARF_HP := 30
 const HAND_SIZE := 5
-const START_ENERGY := 3
 
 # ---------------------------------------------------------------- State
-var combatants: Array = []        # dicts: 0..2 dwarves, 3..7 enemies
-var order: Array = []             # combatant indices, initiative DESC
-var turn_ptr: int = -1
-var round_num: int = 1
-var phase: String = ""
-var selected_card_index: int = -1
-var active_dwarf = null           # the dwarf dict whose turn it is
+var party: Array = []          # 3 char dicts: 0 warrior, 1 cleric, 2 sorcerer
+var enemies: Array = []        # 3 enemy dicts
+var phase := ""                # playerTurn / enemyTurn / win / lose
+var turn := 0
+var active_idx := 0            # selected character
+var selected_card := -1        # armed card index in active char's hand
+var party_attack_buff := 0     # Aura of Valor (this player phase)
+var taunt_last_turn := -99
+var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
+var combat_epoch := 0
+var _is_touch := false
+var reticle_tex: ImageTexture
+var _cursor_on := false
 
 # ---------------------------------------------------------------- UI refs
-var init_box: HBoxContainer
+# enemies (parallel to enemies[])
+var en_emoji: Array = []
+var en_name: Array = []
+var en_intent: Array = []
+var en_hp: Array = []
+var en_block: Array = []
+# party (parallel to party[])
+var pc_emoji: Array = []
+var pc_name: Array = []
+var pc_hp: Array = []
+var pc_block: Array = []
+var pc_energy: Array = []
+var pc_outline: Array = []
 
-# enemy slots (0 = boss, 1..4 = minions); parallel to combatants[3 + slot]
-var enemy_emoji: Array = []
-var enemy_hp: Array = []
-var enemy_block: Array = []
-var enemy_intent: Array = []
-var enemy_name: Array = []
-
-# dwarf slots (0..2); parallel to combatants[slot]
-var dwarf_emoji: Array = []
-var dwarf_hp: Array = []
-var dwarf_block: Array = []
-var dwarf_res: Array = []
-var dwarf_outline: Array = []
-
-var active_name_label: Label
-var active_energy_label: Label
-var active_res_label: Label
-
+var threat: Node2D
+var active_label: Label
+var hint_label: Label
 var hand_box: Control
 var end_turn_btn: Button
 var log_label: Label
-
 var overlay: ColorRect
 var overlay_label: Label
 var overlay_btn: Button
-var reticle_tex: ImageTexture
-var target_arrow: Node2D
-var _is_touch: bool = false
-var combat_epoch: int = 0
-var _cursor_on: bool = false
+
+# enemy slot screen positions / party slot screen positions
+const EN_POS := [Vector2(170, 200), Vector2(360, 200), Vector2(550, 200)]
+const PC_POS := [Vector2(170, 700), Vector2(360, 700), Vector2(550, 700)]
 
 # ================================================================ Lifecycle
 func _ready() -> void:
@@ -68,38 +66,8 @@ func _ready() -> void:
 	_build_ui()
 	_start_combat()
 
-func _process(_delta: float) -> void:
-	if combatants.is_empty() or target_arrow == null:
-		return
-	# Touch devices have no hover; the emulated mouse freezes at the last tap (on the
-	# hand card), which would draw a stale arrow. Rely on the enemy gold pulse instead.
-	if _is_touch:
-		if target_arrow.enabled:
-			target_arrow.set_arrow(false, Vector2.ZERO, Vector2.ZERO, false)
-		return
-	var targeting: bool = phase == "playerTurn" and selected_card_index >= 0 and active_dwarf != null and active_dwarf["alive"]
-	if not targeting:
-		if target_arrow.enabled:
-			target_arrow.set_arrow(false, Vector2.ZERO, Vector2.ZERO, false)
-		return
-	var src: Label = active_dwarf["node"]
-	var from_pt: Vector2 = src.global_position + src.size * 0.5
-	var mouse: Vector2 = get_global_mouse_position()
-	var to_pt: Vector2 = mouse
-	var locked: bool = false
-	for slot: int in range(enemy_emoji.size()):
-		var en: Dictionary = combatants[3 + slot]
-		if not en["alive"]:
-			continue
-		var node: Label = enemy_emoji[slot]
-		if Rect2(node.global_position, node.size).has_point(mouse):
-			to_pt = node.global_position + node.size * 0.5
-			locked = true
-			break
-	target_arrow.set_arrow(true, from_pt, to_pt, locked)
-
 # ================================================================ UI helpers
-func _label2(text: String, pos: Vector2, sz: Vector2, font: int = 14, center: bool = false) -> Label:
+func _label(text: String, pos: Vector2, sz: Vector2, font: int, center := true) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", font)
@@ -111,12 +79,12 @@ func _label2(text: String, pos: Vector2, sz: Vector2, font: int = 14, center: bo
 	add_child(l)
 	return l
 
-func _emoji_label(center_pos: Vector2, box: Vector2, font: int, tappable: bool) -> Label:
+func _emoji(center_pos: Vector2, box: Vector2, font: int) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", font)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.mouse_filter = Control.MOUSE_FILTER_STOP if tappable else Control.MOUSE_FILTER_IGNORE
+	l.mouse_filter = Control.MOUSE_FILTER_STOP
 	l.size = box
 	l.position = center_pos - box * 0.5
 	l.pivot_offset = box * 0.5
@@ -126,65 +94,45 @@ func _emoji_label(center_pos: Vector2, box: Vector2, font: int, tappable: bool) 
 # ================================================================ UI build
 func _build_ui() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.10, 0.10, 0.13)
-	bg.position = Vector2.ZERO
+	bg.color = Color(0.09, 0.09, 0.12)
 	bg.size = Vector2(720, 1280)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	# --- Initiative track (top) ---
-	init_box = HBoxContainer.new()
-	init_box.add_theme_constant_override("separation", 4)
-	init_box.position = Vector2(20, 14)
-	init_box.size = Vector2(680, 48)
-	init_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(init_box)
+	_label("— THE QUARTERLY RAID —", Vector2(60, 24), Vector2(600, 26), 18)
 
-	# --- Boss (centered) + 4 minions ---
-	_build_enemy_slot(Vector2(360, 150), 64, true)    # slot 0 = boss
-	_build_enemy_slot(Vector2(110, 300), 40, false)   # slot 1
-	_build_enemy_slot(Vector2(260, 300), 40, false)   # slot 2
-	_build_enemy_slot(Vector2(460, 300), 40, false)   # slot 3
-	_build_enemy_slot(Vector2(610, 300), 40, false)   # slot 4
+	for i: int in range(3):
+		_build_enemy_slot(i)
 
-	# --- 3 dwarves ---
-	_build_dwarf_slot(Vector2(170, 720), 52)
-	_build_dwarf_slot(Vector2(360, 720), 52)
-	_build_dwarf_slot(Vector2(550, 720), 52)
+	# threat arrows drawn above the board, below cards
+	threat = Threat.new()
+	threat.z_index = 40
+	add_child(threat)
 
-	# --- Active dwarf panel ---
-	active_name_label = _label2("", Vector2(20, 838), Vector2(400, 26), 19)
-	active_energy_label = _label2("", Vector2(20, 866), Vector2(300, 24), 17)
-	active_res_label = _label2("", Vector2(330, 866), Vector2(370, 24), 17)
+	for i: int in range(3):
+		_build_party_slot(i)
 
-	# --- Hand (manual arc layout; cards self-fan & hover-lift) ---
+	active_label = _label("", Vector2(20, 800), Vector2(680, 26), 20)
+	hint_label = _label("", Vector2(20, 830), Vector2(680, 22), 15)
+
 	hand_box = Control.new()
 	hand_box.position = Vector2(0, 905)
 	hand_box.size = Vector2(720, 220)
 	hand_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hand_box)
 
-	# --- End Turn ---
 	end_turn_btn = Button.new()
 	end_turn_btn.text = "End Turn"
 	end_turn_btn.add_theme_font_size_override("font_size", 20)
-	end_turn_btn.position = Vector2(540, 1180)
-	end_turn_btn.size = Vector2(160, 52)
+	end_turn_btn.position = Vector2(540, 1184)
+	end_turn_btn.size = Vector2(165, 52)
 	end_turn_btn.pressed.connect(_on_end_turn)
 	add_child(end_turn_btn)
 
-	# --- Log ---
-	log_label = _label2("", Vector2(16, 1232), Vector2(688, 36), 15)
+	log_label = _label("", Vector2(16, 1244), Vector2(688, 30), 15, false)
 
-	# --- Targeting arrow (Hearthstone-style), above the board ---
-	target_arrow = TargetArrow.new()
-	target_arrow.z_index = 90
-	add_child(target_arrow)
-
-	# --- Win/lose overlay ---
 	overlay = ColorRect.new()
-	overlay.color = Color(0, 0, 0, 0.8)
-	overlay.position = Vector2.ZERO
+	overlay.color = Color(0, 0, 0, 0.82)
 	overlay.size = Vector2(720, 1280)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(overlay)
@@ -193,411 +141,436 @@ func _build_ui() -> void:
 	overlay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	overlay_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	overlay_label.position = Vector2(40, 520)
-	overlay_label.size = Vector2(640, 140)
+	overlay_label.size = Vector2(640, 160)
 	overlay.add_child(overlay_label)
 	overlay_btn = Button.new()
 	overlay_btn.text = "Play Again"
 	overlay_btn.add_theme_font_size_override("font_size", 22)
-	overlay_btn.position = Vector2(260, 690)
+	overlay_btn.position = Vector2(260, 700)
 	overlay_btn.size = Vector2(200, 60)
 	overlay_btn.pressed.connect(_on_overlay_btn)
 	overlay.add_child(overlay_btn)
 	overlay.visible = false
 
-func _build_enemy_slot(pos: Vector2, font: int, big: bool) -> void:
-	var slot: int = enemy_emoji.size()
-	var box := Vector2(130 if big else 90, font + 24)
-	var e := _emoji_label(pos, box, font, true)
-	e.gui_input.connect(_on_enemy_gui_input.bind(slot))
-	enemy_emoji.append(e)
+func _build_enemy_slot(i: int) -> void:
+	var pos: Vector2 = EN_POS[i]
+	var e := _emoji(pos, Vector2(96, 76), 50)
+	e.gui_input.connect(_on_enemy_input.bind(i))
+	en_emoji.append(e)
+	en_name.append(_label("", Vector2(pos.x - 80, pos.y - 74), Vector2(160, 20), 14))
+	en_intent.append(_label("", Vector2(pos.x - 80, pos.y - 52), Vector2(160, 22), 18))
+	en_hp.append(_label("", Vector2(pos.x - 80, pos.y + 40), Vector2(160, 20), 16))
+	en_block.append(_label("", Vector2(pos.x - 80, pos.y + 60), Vector2(160, 18), 14))
 
-	var nm := _label2("", Vector2(pos.x - 70, pos.y - box.y * 0.5 - 48), Vector2(140, 22), 14, true)
-	nm.visible = big
-	enemy_name.append(nm)
-	var intent := _label2("", Vector2(pos.x - 70, pos.y - box.y * 0.5 - 26), Vector2(140, 24), 20 if big else 16, true)
-	enemy_intent.append(intent)
-	var hp := _label2("", Vector2(pos.x - 70, pos.y + box.y * 0.5 + 2), Vector2(140, 22), 18 if big else 13, true)
-	enemy_hp.append(hp)
-	var blk := _label2("", Vector2(pos.x - 70, pos.y + box.y * 0.5 + 22), Vector2(140, 20), 15 if big else 12, true)
-	enemy_block.append(blk)
-
-func _build_dwarf_slot(pos: Vector2, font: int) -> void:
+func _build_party_slot(i: int) -> void:
+	var pos: Vector2 = PC_POS[i]
 	var o := ColorRect.new()
 	o.color = Color(1.0, 0.85, 0.2, 0.16)
-	o.position = pos - Vector2(62, 70)
-	o.size = Vector2(124, 160)
+	o.position = pos - Vector2(64, 60)
+	o.size = Vector2(128, 150)
 	o.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	o.visible = false
 	add_child(o)
-	dwarf_outline.append(o)
-
-	var box := Vector2(110, font + 20)
-	var e := _emoji_label(pos, box, font, false)
-	dwarf_emoji.append(e)
-
-	var hp := _label2("", Vector2(pos.x - 70, pos.y + box.y * 0.5 + 2), Vector2(140, 22), 16, true)
-	dwarf_hp.append(hp)
-	var blk := _label2("", Vector2(pos.x - 70, pos.y + box.y * 0.5 + 22), Vector2(140, 20), 14, true)
-	dwarf_block.append(blk)
-	var res := _label2("", Vector2(pos.x - 75, pos.y + box.y * 0.5 + 42), Vector2(150, 20), 13, true)
-	dwarf_res.append(res)
+	pc_outline.append(o)
+	var e := _emoji(pos, Vector2(110, 70), 50)
+	e.gui_input.connect(_on_party_input.bind(i))
+	pc_emoji.append(e)
+	pc_name.append(_label("", Vector2(pos.x - 80, pos.y - 58), Vector2(160, 20), 14))
+	pc_hp.append(_label("", Vector2(pos.x - 80, pos.y + 38), Vector2(160, 20), 16))
+	pc_block.append(_label("", Vector2(pos.x - 80, pos.y + 58), Vector2(160, 18), 14))
+	pc_energy.append(_label("", Vector2(pos.x - 80, pos.y + 76), Vector2(160, 18), 14))
 
 # ================================================================ Combat start
 func _start_combat() -> void:
-	combat_epoch += 1   # invalidate any in-flight turn coroutine from a prior combat
-	combatants = []
-
-	# Dwarves (one per class), fixed to slots 0..2.
-	for slot: int in range(DWARF_CLASSES.size()):
-		var cid: String = DWARF_CLASSES[slot]
+	combat_epoch += 1
+	party = []
+	for i: int in range(Db.PARTY_ORDER.size()):
+		var cid: String = Db.PARTY_ORDER[i]
 		var cls: Dictionary = Db.CLASSES[cid]
 		var deck: Array = (cls["deck"] as Array).duplicate()
 		deck.shuffle()
-		var d := {
-			"kind": "dwarf",
-			"name": cls["name"],
-			"emoji": cls["emoji"],
-			"hp": DWARF_HP, "max_hp": DWARF_HP,
-			"block": 0, "alive": true, "init": 0,
-			"node": dwarf_emoji[slot],
-			"slot": slot,
-			"class_id": cid,
-			"resource": 0, "resource_name": cls["resource"],
+		party.append({
+			"role": cls["role"], "name": cls["name"], "emoji": cls["emoji"],
+			"hp": cls["max_hp"], "max_hp": cls["max_hp"], "block": 0,
+			"energy": cls["energy"], "max_energy": cls["energy"], "alive": true,
 			"deck": deck, "hand": [], "discard": [],
-			"energy": START_ENERGY, "powers": {}, "statuses": {},
-		}
-		combatants.append(d)
+			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
+			"node": pc_emoji[i], "slot": i,
+		})
 
-	# Enemies from ENCOUNTER, fixed to slots 0..4.
-	for slot: int in range(Db.ENCOUNTER.size()):
-		var eid: String = Db.ENCOUNTER[slot]
+	enemies = []
+	for i: int in range(Db.ENCOUNTER.size()):
+		var eid: String = Db.ENCOUNTER[i]
 		var ed: Dictionary = Db.ENEMIES[eid]
-		var intents: Array = ed["intents"]
-		var e := {
-			"kind": "enemy",
-			"name": ed["name"],
-			"emoji": ed["emoji"],
-			"hp": ed["max_hp"], "max_hp": ed["max_hp"],
-			"block": 0, "alive": true, "init": 0,
-			"node": enemy_emoji[slot],
-			"slot": slot,
-			"enemy_id": eid,
-			"intent_index": 0,
-			"intent": intents[0],
-			"statuses": {},
-		}
-		combatants.append(e)
+		enemies.append({
+			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
+			"hp": ed["max_hp"], "max_hp": ed["max_hp"], "block": 0, "atk": ed["atk"],
+			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
+			"intent_target": -1, "node": en_emoji[i], "slot": i,
+		})
 
-	# Roll unified initiative once per combat.
-	for c: Dictionary in combatants:
-		c["init"] = randi_range(1, 20)
-
-	order = []
-	for i: int in range(combatants.size()):
-		order.append(i)
-	order.sort_custom(_init_sort)
-
-	round_num = 1
-	turn_ptr = -1
+	turn = 0
+	taunt_last_turn = -99
 	phase = ""
-	selected_card_index = -1
-	active_dwarf = null
-
-	# Reset visuals on the persistent slot nodes.
-	for c: Dictionary in combatants:
-		var n: Label = c["node"]
-		n.text = c["emoji"]
-		n.visible = true
-		n.modulate = Color(1, 1, 1, 1)
-		n.scale = Vector2.ONE
-	for slot: int in range(enemy_name.size()):
-		enemy_name[slot].text = combatants[3 + slot]["name"]
-
-	end_turn_btn.disabled = true
 	overlay.visible = false
-	_log("Initiative rolled. The quarterly raid begins.")
-	_advance_turn()
+	for i: int in range(3):
+		en_emoji[i].text = enemies[i]["emoji"]
+		en_emoji[i].modulate = Color.WHITE
+		en_emoji[i].scale = Vector2.ONE
+		pc_emoji[i].text = party[i]["emoji"]
+		pc_emoji[i].modulate = Color.WHITE
+		pc_emoji[i].scale = Vector2.ONE
+	_log("The demon lord convenes the raid. Sequence your dwarves.")
+	_start_player_phase()
 
-func _init_sort(a: int, b: int) -> bool:
-	var ca: Dictionary = combatants[a]
-	var cb: Dictionary = combatants[b]
-	if ca["init"] != cb["init"]:
-		return ca["init"] > cb["init"]
-	var a_dwarf: bool = ca["kind"] == "dwarf"
-	var b_dwarf: bool = cb["kind"] == "dwarf"
-	if a_dwarf != b_dwarf:
-		return a_dwarf            # dwarves before enemies on ties
-	return a < b                  # then lower index first
+func _fresh_temp() -> Dictionary:
+	# fortify -> Retaliate +2 (persists through enemy phase); fortify_guard -> next Guard +5 (consumed)
+	return {"retaliate": 0, "fortify": false, "fortify_guard": false, "channel_charges": 0, "channel_bonus": 0}
 
-# ================================================================ Turn flow
-func _advance_turn() -> void:
-	var epoch: int = combat_epoch
-	var guard: int = 0
-	var limit: int = order.size() * 2 + 4
-	while true:
-		if phase == "win" or phase == "lose":
-			return
-		guard += 1
-		if guard > limit:
-			return
-		turn_ptr += 1
-		if turn_ptr >= order.size():
-			turn_ptr = 0
-			round_num += 1
-		var c: Dictionary = combatants[order[turn_ptr]]
-		if not c["alive"]:
+# ================================================================ Phase flow
+func _start_player_phase() -> void:
+	turn += 1
+	for a: Dictionary in party:
+		if not a["alive"]:
 			continue
-		if c["kind"] == "dwarf":
-			_begin_dwarf_turn(c)
-			_refresh()
-			return
-		else:
-			await _enemy_turn(c)
-			if epoch != combat_epoch:
-				return        # combat was restarted (Play Again) during the await
-			_refresh()
-			if phase == "win" or phase == "lose":
-				return
-			# fall through to next combatant in the same loop
-
-func _begin_dwarf_turn(d: Dictionary) -> void:
-	active_dwarf = d
-	d["block"] = 0
-	d["energy"] = START_ENERGY
-	# Persistent powers (e.g. Aura of Resolve).
-	var per_turn: int = d["powers"].get("resource_per_turn", 0)
-	if per_turn > 0:
-		d["resource"] += per_turn
-	_draw_cards(d, HAND_SIZE)
+		a["block"] = 0
+		a["energy"] = a["max_energy"]
+		a["temp"] = _fresh_temp()
+		a["shield"] = 0
+		a["attacks_this_turn"] = 0
+		_draw_cards(a, HAND_SIZE)
+	for e: Dictionary in enemies:
+		e["marked"] = false
+		e["forced"] = false
+	party_attack_buff = 0
+	attacks_this_turn = 0
+	selected_card = -1
+	active_idx = _first_living_party()
 	phase = "playerTurn"
-	selected_card_index = -1
-	end_turn_btn.disabled = false
-	_log("%s steps up. Energy %d/%d." % [d["name"], d["energy"], START_ENERGY])
+	_refresh()
 
 func _on_end_turn() -> void:
-	if phase != "playerTurn" or active_dwarf == null:
+	if phase != "playerTurn":
 		return
-	for c: String in active_dwarf["hand"]:
-		active_dwarf["discard"].append(c)
-	active_dwarf["hand"].clear()
-	selected_card_index = -1
+	for a: Dictionary in party:
+		for c: String in a["hand"]:
+			a["discard"].append(c)
+		a["hand"].clear()
+	selected_card = -1
 	phase = "enemyTurn"
-	end_turn_btn.disabled = true
 	_refresh()
-	_advance_turn()
+	await _enemy_phase()
 
-func _enemy_turn(e: Dictionary) -> void:
+func _enemy_phase() -> void:
 	var epoch: int = combat_epoch
-	phase = "enemyTurn"
-	await get_tree().create_timer(0.4).timeout
-	if epoch != combat_epoch:
-		return
-	e["block"] = 0
-	var it: Dictionary = e["intent"]
-	if it["blk"] > 0:
-		e["block"] += it["blk"]
-		_log("%s braces (+%d block)." % [e["name"], it["blk"]])
-		_refresh()
-		await get_tree().create_timer(0.4).timeout
+	for e: Dictionary in enemies:
+		if not e["alive"]:
+			continue
+		await get_tree().create_timer(0.45).timeout
 		if epoch != combat_epoch:
 			return
-	if it["dmg"] > 0:
-		var target = _random_living_dwarf()
-		if target != null:
-			var dealt: int = _apply_damage(target, it["dmg"])
-			_flash(target)
-			_impact(target, dealt)
-			_log("%s uses %s. %s takes %d." % [e["name"], it["label"], target["name"], dealt])
-			if not target["alive"]:
-				_log("%s is downed!" % target["name"])
-	# Telegraph next intent.
-	var intents: Array = Db.ENEMIES[e["enemy_id"]]["intents"]
-	e["intent_index"] = (e["intent_index"] + 1) % intents.size()
-	e["intent"] = intents[e["intent_index"]]
-	_refresh()
-	_check_end()
-	await get_tree().create_timer(0.2).timeout
+		var t: Dictionary = _enemy_target(e)
+		if t.is_empty():
+			continue
+		_enemy_attack(e, t)
+		_refresh()
+		if _check_end():
+			return
+	await get_tree().create_timer(0.25).timeout
+	if epoch != combat_epoch:
+		return
+	_start_player_phase()
 
-func _random_living_dwarf():
-	var living: Array = []
-	for i: int in range(3):
-		if combatants[i]["alive"]:
-			living.append(combatants[i])
-	if living.is_empty():
-		return null
-	return living[randi() % living.size()]
+# ================================================================ Targeting (enemy preference)
+func _enemy_target(e: Dictionary) -> Dictionary:
+	if e["forced"] and party[0]["alive"]:
+		return party[0]            # Taunt -> Warrior
+	match e["pref"]:
+		"tankiest":
+			return _pick_tankiest()
+		"healer_dps":
+			if party[1]["alive"]: return party[1]   # Cleric
+			if party[2]["alive"]: return party[2]   # Sorcerer
+			if party[0]["alive"]: return party[0]
+			return {}
+		"lowest_hp":
+			return _pick_lowest_hp()
+		_:
+			return _pick_lowest_hp()
+
+func _pick_tankiest() -> Dictionary:
+	var best: Dictionary = {}
+	for a: Dictionary in party:
+		if not a["alive"]:
+			continue
+		if best.is_empty() or a["block"] > best["block"] or (a["block"] == best["block"] and a["max_hp"] > best["max_hp"]):
+			best = a
+	return best
+
+func _pick_lowest_hp() -> Dictionary:
+	var best: Dictionary = {}
+	for a: Dictionary in party:
+		if not a["alive"]:
+			continue
+		if best.is_empty() or a["hp"] < best["hp"]:
+			best = a
+	return best
 
 # ================================================================ Card play
-func _on_card_clicked(card) -> void:
-	_on_card_pressed(card.index)
+func _on_party_input(event: InputEvent, idx: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_party_clicked(idx)
 
-func _on_card_pressed(index: int) -> void:
-	if phase != "playerTurn" or active_dwarf == null:
-		return
-	if index < 0 or index >= active_dwarf["hand"].size():
-		return
-	var cid: String = active_dwarf["hand"][index]
-	var def: Dictionary = Db.CARDS[cid]
-	if def["cost"] > active_dwarf["energy"]:
-		_log("Not enough energy for %s." % def["name"])
-		return
-	var tgt: String = def["target"]
+func _on_enemy_input(event: InputEvent, idx: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_enemy_clicked(idx)
 
-	if tgt == "self":
-		active_dwarf["energy"] -= def["cost"]
-		active_dwarf["hand"].remove_at(index)        # remove before resolve so draws land
-		_resolve(def["effect"], active_dwarf)
-		active_dwarf["discard"].append(cid)
-		selected_card_index = -1
-		_log("Played %s." % def["name"])
-		_refresh()
-		_check_end()
+func _on_party_clicked(idx: int) -> void:
+	if phase != "playerTurn" or not party[idx]["alive"]:
 		return
-
-	if tgt == "all_enemies":
-		active_dwarf["energy"] -= def["cost"]
-		active_dwarf["hand"].remove_at(index)
-		for i: int in range(3, combatants.size()):
-			var en: Dictionary = combatants[i]
-			if en["alive"]:
-				_resolve(def["effect"], en)
-		active_dwarf["discard"].append(cid)
-		selected_card_index = -1
-		_log("Played %s — it hits every demon." % def["name"])
-		_refresh()
-		_check_end()
-		return
-
-	# enemy-target card: tap to arm, tap same to cancel.
-	if selected_card_index == index:
-		selected_card_index = -1
-		_log("Cancelled %s." % def["name"])
-	else:
-		selected_card_index = index
-		_log("%s armed — tap a demon to strike." % def["name"])
+	# If an ally-target card is armed, this tap chooses the ally.
+	if selected_card >= 0:
+		var def: Dictionary = _armed_def()
+		if def.get("target", "") in ["ally", "ally_or_enemy"]:
+			_play_on_ally(idx)
+			return
+	# Otherwise just switch the active character.
+	active_idx = idx
+	selected_card = -1
 	_refresh()
 
-func _on_enemy_gui_input(event: InputEvent, slot: int) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_on_enemy_pressed(3 + slot)
+func _on_enemy_clicked(idx: int) -> void:
+	if phase != "playerTurn" or not enemies[idx]["alive"]:
+		return
+	if selected_card < 0:
+		return
+	var def: Dictionary = _armed_def()
+	if def.get("target", "") in ["enemy", "ally_or_enemy"]:
+		_play_on_enemy(idx)
 
-func _on_enemy_pressed(ci: int) -> void:
-	if phase != "playerTurn" or active_dwarf == null:
+func _armed_def() -> Dictionary:
+	var a: Dictionary = party[active_idx]
+	if selected_card < 0 or selected_card >= a["hand"].size():
+		return {}
+	return Db.CARDS[a["hand"][selected_card]]
+
+## Two-stage: first tap SELECTS (shows tooltip; arms target cards) — works on touch and
+## desktop; second tap on a self/all card PLAYS it; target cards play by tapping a target.
+func _on_card_clicked(card) -> void:
+	if phase != "playerTurn":
 		return
-	if selected_card_index < 0:
+	var a: Dictionary = party[active_idx]
+	var idx: int = card.index
+	if idx < 0 or idx >= a["hand"].size():
 		return
-	if ci < 0 or ci >= combatants.size():
-		return
-	var target: Dictionary = combatants[ci]
-	if not target["alive"] or target["kind"] != "enemy":
-		return
-	var index: int = selected_card_index
-	if index >= active_dwarf["hand"].size():
-		selected_card_index = -1
-		return
-	var cid: String = active_dwarf["hand"][index]
+	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
-	if def["cost"] > active_dwarf["energy"]:
-		_log("Not enough energy for %s." % def["name"])
+	if selected_card != idx:
+		selected_card = idx                      # inspect (+ arm if it targets)
+		_log("%s — %s" % [def["name"], _select_hint(def)])
+		_refresh()
 		return
-	active_dwarf["energy"] -= def["cost"]
-	active_dwarf["hand"].remove_at(index)
-	selected_card_index = -1
-	_resolve(def["effect"], target)
-	active_dwarf["discard"].append(cid)
-	_log("%s strikes %s." % [def["name"], target["name"]])
+	var tgt: String = def["target"]
+	if tgt == "self" or tgt == "all_enemies":
+		if not _can_play(a, cid, def):
+			return
+		_spend(a, idx)
+		if tgt == "all_enemies":
+			for e: Dictionary in enemies:
+				if e["alive"]:
+					_resolve(def, a, e)
+		else:
+			_resolve(def, a, {})
+		_finish_play(a, def, cid)
+	else:
+		selected_card = -1                       # deselect a target card
+		_refresh()
+
+func _select_hint(def: Dictionary) -> String:
+	match def.get("target", ""):
+		"enemy": return "tap an enemy to strike"
+		"ally": return "tap an ally"
+		"ally_or_enemy": return "tap an ally to heal, or an enemy to strike"
+		"all_enemies": return "tap again to hit ALL enemies"
+		_: return "tap again to play"
+
+func _can_play(a: Dictionary, cid: String, def: Dictionary) -> bool:
+	if def["cost"] > a["energy"]:
+		_log("Not enough energy for %s." % def["name"])
+		return false
+	if cid == "taunt" and turn - taunt_last_turn < 2:
+		_log("Taunt is recovering — not two turns in a row.")
+		return false
+	return true
+
+func _play_on_enemy(e_idx: int) -> void:
+	var a: Dictionary = party[active_idx]
+	var idx: int = selected_card
+	var cid: String = a["hand"][idx]
+	var def: Dictionary = Db.CARDS[cid]
+	if not _can_play(a, cid, def):
+		return
+	_spend(a, idx)
+	_resolve(def, a, enemies[e_idx])
+	_finish_play(a, def, cid)
+
+func _play_on_ally(c_idx: int) -> void:
+	var a: Dictionary = party[active_idx]
+	var idx: int = selected_card
+	var cid: String = a["hand"][idx]
+	var def: Dictionary = Db.CARDS[cid]
+	if not _can_play(a, cid, def):
+		return
+	_spend(a, idx)
+	_resolve(def, a, party[c_idx])   # target is an ally char
+	_finish_play(a, def, cid)
+
+func _spend(a: Dictionary, idx: int) -> void:
+	var cid: String = a["hand"][idx]
+	a["energy"] -= Db.CARDS[cid]["cost"]
+	a["hand"].remove_at(idx)
+
+func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
+	a["discard"].append(cid)
+	if def.get("is_attack", false):
+		attacks_this_turn += 1   # party-wide count for Finisher
+	selected_card = -1
+	_log("%s played %s." % [a["name"], def["name"]])
 	_refresh()
 	_check_end()
 
 # ================================================================ Resolver
-func _resolve(effect: Array, target: Dictionary) -> void:
-	for op: Array in effect:
+## a = acting character; target = enemy OR ally char (or {} for self/none).
+func _resolve(def: Dictionary, a: Dictionary, target: Dictionary) -> void:
+	for op: Array in def["effect"]:
 		match op[0]:
 			"damage":
-				_attack(target, op[1])
+				_attack(a, target, op[1], def.get("is_attack", false))
 			"block":
-				active_dwarf["block"] += op[1]
+				var bonus: int = 0
+				if a["temp"]["fortify_guard"] and def.get("fortifiable", false):
+					bonus = 5
+					a["temp"]["fortify_guard"] = false   # consume the +5; Retaliate +2 persists
+				a["block"] += op[1] + bonus
 			"self_damage":
-				active_dwarf["hp"] = maxi(0, active_dwarf["hp"] - op[1])
-				if active_dwarf["hp"] <= 0:
-					active_dwarf["alive"] = false
+				a["hp"] = maxi(0, a["hp"] - op[1])
+				if a["hp"] <= 0:
+					a["alive"] = false
 			"draw":
-				_draw_cards(active_dwarf, op[1])
-			"resource":
-				active_dwarf["resource"] += op[1]
-			"damage_per_resource":
-				var amt: int = op[1] + op[2] * active_dwarf["resource"]
-				active_dwarf["resource"] = 0
-				_attack(target, amt)
-			"resource_if_bloodied":
-				if active_dwarf["hp"] * 2 < active_dwarf["max_hp"]:
-					active_dwarf["resource"] += op[1]
-			"status":
-				target["statuses"][op[1]] = target["statuses"].get(op[1], 0) + op[2]
-			"status_per_resource":
-				var stacks: int = op[2] + op[3] * active_dwarf["resource"]
-				active_dwarf["resource"] = 0
-				target["statuses"][op[1]] = target["statuses"].get(op[1], 0) + stacks
-			"power":
-				active_dwarf["powers"][op[1]] = active_dwarf["powers"].get(op[1], 0) + op[2]
+				_draw_cards(a, op[1])
+			"damage_scaling":
+				var base: int = op[2] + op[3] * attacks_this_turn
+				_attack(a, target, base, true)
+			"heal_or_damage":
+				if target.get("role", "") != "":     # an ally char
+					target["hp"] = mini(target["max_hp"], target["hp"] + op[1])
+				else:                                  # an enemy
+					_attack(a, target, op[1], false)
+			"apply_status":
+				if op[1] == "marked":
+					target["marked"] = true
+			"force_target_all":
+				for e: Dictionary in enemies:
+					e["forced"] = true
+				taunt_last_turn = turn
+			"temp":
+				match op[1]:
+					"retaliate":
+						a["temp"]["retaliate"] = op[2]
+					"fortify":
+						a["temp"]["fortify"] = true
+						a["temp"]["fortify_guard"] = true
+					"channel":
+						a["temp"]["channel_charges"] = op[3]
+						a["temp"]["channel_bonus"] = op[2]
+			"shield_ally":
+				target["shield"] += op[1]
+			"party_buff":
+				if op[1] == "attack":
+					party_attack_buff += op[2]
 
-func _attack(target: Dictionary, amount: int) -> void:
-	if amount <= 0:
+## Damage to an ENEMY (resolution order: base -> +flat -> xMark -> block,hp).
+func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> void:
+	if enemy.is_empty() or not enemy.get("alive", false):
 		return
-	var total: int = amount + target["statuses"].get("mark", 0)   # Mark amps hits on this enemy
-	var dealt: int = _apply_damage(target, total)
-	_flash(target)
-	_impact(target, dealt)
+	var amt: int = base
+	if is_attack:
+		if a["temp"]["channel_charges"] > 0:
+			amt += a["temp"]["channel_bonus"]
+			a["temp"]["channel_charges"] -= 1
+		amt += party_attack_buff
+	if enemy["marked"]:
+		amt = int(round(amt * Db.MARK_MULT))
+	_deal_enemy(enemy, amt)
+	_flash(enemy)
+	_impact(enemy, amt)
 
-func _draw_cards(d: Dictionary, n: int) -> void:
+func _deal_enemy(enemy: Dictionary, amt: int) -> void:
+	if amt <= 0:
+		return
+	var blocked: int = mini(enemy["block"], amt)
+	enemy["block"] -= blocked
+	var rem: int = amt - blocked
+	enemy["hp"] = maxi(0, enemy["hp"] - rem)
+	if enemy["hp"] <= 0:
+		enemy["alive"] = false
+
+## Enemy attacks a party character (shield -> block -> hp), then Retaliate fires.
+func _enemy_attack(e: Dictionary, t: Dictionary) -> void:
+	var dmg: int = maxi(0, e["atk"] - int(t["shield"]))
+	var blocked: int = mini(t["block"], dmg)
+	t["block"] -= blocked
+	var rem: int = dmg - blocked
+	t["hp"] = maxi(0, t["hp"] - rem)
+	if t["hp"] <= 0:
+		t["alive"] = false
+	_flash(t)
+	_impact(t, rem)
+	_log("%s hits %s for %d." % [e["name"], t["name"], rem])
+	# Retaliate triggers on every hit on the holder.
+	var refl: int = int(t["temp"]["retaliate"])
+	if refl > 0:
+		if t["temp"]["fortify"]:
+			refl += 2
+		_deal_enemy(e, refl)
+		_flash(e)
+		if not t["alive"]:
+			_log("%s is downed!" % t["name"])
+
+# ================================================================ Deck
+func _draw_cards(a: Dictionary, n: int) -> void:
 	for i: int in range(n):
-		if d["deck"].is_empty():
-			_reshuffle(d)
-		if d["deck"].is_empty():
+		if a["deck"].is_empty():
+			a["deck"] = a["discard"].duplicate()
+			a["deck"].shuffle()
+			a["discard"].clear()
+		if a["deck"].is_empty():
 			break
-		d["hand"].append(d["deck"].pop_back())
+		a["hand"].append(a["deck"].pop_back())
 
-func _reshuffle(d: Dictionary) -> void:
-	d["deck"] = d["discard"].duplicate()
-	d["deck"].shuffle()
-	d["discard"].clear()
-
-# ================================================================ Combat math
-func _apply_damage(target: Dictionary, amount: int) -> int:
-	var blocked: int = mini(target["block"], amount)
-	target["block"] -= blocked
-	var rem: int = amount - blocked
-	target["hp"] = maxi(0, target["hp"] - rem)
-	if target["hp"] <= 0:
-		target["alive"] = false
-	return rem
-
-func _living_enemies() -> int:
-	var n: int = 0
-	for i: int in range(3, combatants.size()):
-		if combatants[i]["alive"]:
-			n += 1
-	return n
-
-func _living_dwarves() -> int:
-	var n: int = 0
-	for i: int in range(3):
-		if combatants[i]["alive"]:
-			n += 1
-	return n
-
-func _check_end() -> void:
+# ================================================================ Win/Lose
+func _check_end() -> bool:
 	if phase == "win" or phase == "lose":
-		return
-	if _living_enemies() == 0:
+		return true
+	var en_alive := false
+	for e: Dictionary in enemies:
+		if e["alive"]:
+			en_alive = true
+	var pc_alive := false
+	for a: Dictionary in party:
+		if a["alive"]:
+			pc_alive = true
+	if not en_alive:
 		_end(true)
-	elif _living_dwarves() == 0:
+		return true
+	if not pc_alive:
 		_end(false)
+		return true
+	return false
 
 func _end(won: bool) -> void:
 	phase = "win" if won else "lose"
-	selected_card_index = -1
-	end_turn_btn.disabled = true
+	selected_card = -1
 	overlay_label.text = "The dwarves delivered.\nQuarterly demon targets met." if won else "Liquidation.\nThe contract is void."
 	overlay.visible = true
 	_refresh()
@@ -605,20 +578,144 @@ func _end(won: bool) -> void:
 func _on_overlay_btn() -> void:
 	_start_combat()
 
+func _first_living_party() -> int:
+	for i: int in range(party.size()):
+		if party[i]["alive"]:
+			return i
+	return 0
+
+# ================================================================ Render
+func _log(s: String) -> void:
+	log_label.text = s
+
+func _refresh() -> void:
+	if party.is_empty():
+		return
+	_refresh_enemies()
+	_refresh_party()
+	_refresh_threats()
+	_refresh_panel()
+	_rebuild_hand()
+	end_turn_btn.disabled = phase != "playerTurn"
+	end_turn_btn.visible = not overlay.visible
+	_update_cursor()
+
+func _refresh_enemies() -> void:
+	for i: int in range(3):
+		var e: Dictionary = enemies[i]
+		var alive: bool = e["alive"]
+		en_emoji[i].visible = alive
+		en_name[i].visible = alive
+		en_intent[i].visible = alive
+		en_hp[i].visible = alive
+		en_block[i].visible = alive and e["block"] > 0
+		if not alive:
+			continue
+		en_name[i].text = ("🎯 " if e["marked"] else "") + e["name"]
+		en_hp[i].text = "%d/%d" % [e["hp"], e["max_hp"]]
+		en_block[i].text = "🛡️%d" % e["block"]
+		var tname: String = ""
+		var t: Dictionary = _enemy_target(e)
+		if not t.is_empty():
+			tname = t["name"].substr(0, 3)
+		en_intent[i].text = "⚔%d→%s" % [e["atk"], tname]
+		# Highlight valid enemy targets while an enemy-target card is armed.
+		var arm: Dictionary = _armed_def()
+		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
+		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_card >= 0) else Color.WHITE
+
+func _refresh_party() -> void:
+	var arm: Dictionary = _armed_def()
+	var ally_arm: bool = selected_card >= 0 and arm.get("target", "") in ["ally", "ally_or_enemy"]
+	for i: int in range(3):
+		var a: Dictionary = party[i]
+		var alive: bool = a["alive"]
+		pc_outline[i].visible = alive and i == active_idx and phase == "playerTurn"
+		pc_emoji[i].scale = Vector2(1.12, 1.12) if (alive and i == active_idx) else Vector2.ONE
+		pc_name[i].text = a["name"]
+		if alive:
+			pc_emoji[i].modulate = Color(0.5, 1.0, 0.6) if ally_arm else Color.WHITE
+			pc_hp[i].text = "%d/%d" % [a["hp"], a["max_hp"]]
+			var st := ""
+			if a["block"] > 0:
+				st += "🛡️%d " % a["block"]
+			if a["shield"] > 0:
+				st += "🔰%d " % a["shield"]
+			if int(a["temp"]["channel_charges"]) > 0:
+				st += "🌀%d " % a["temp"]["channel_charges"]
+			if a["temp"]["fortify_guard"] or a["temp"]["fortify"]:
+				st += "🔧 "
+			if int(a["temp"]["retaliate"]) > 0:
+				st += "🔁%d" % a["temp"]["retaliate"]
+			pc_block[i].text = st
+			pc_energy[i].text = "⚡%d/%d" % [a["energy"], a["max_energy"]]
+		else:
+			pc_emoji[i].modulate = Color(0.35, 0.35, 0.38)
+			pc_hp[i].text = "DOWNED"
+			pc_block[i].text = ""
+			pc_energy[i].text = ""
+
+func _refresh_threats() -> void:
+	var pairs: Array = []
+	if phase == "playerTurn":
+		for e: Dictionary in enemies:
+			if not e["alive"]:
+				continue
+			var t: Dictionary = _enemy_target(e)
+			if t.is_empty():
+				continue
+			pairs.append({
+				"from": EN_POS[e["slot"]] + Vector2(0, 42),
+				"to": PC_POS[t["slot"]] + Vector2(0, -42),
+			})
+	threat.set_threats(pairs)
+
+func _refresh_panel() -> void:
+	if phase == "playerTurn":
+		var a: Dictionary = party[active_idx]
+		var aura: String = "   📣+%d atk" % party_attack_buff if party_attack_buff > 0 else ""
+		active_label.text = "%s  %s   ⚡%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], aura]
+		hint_label.text = "Tap a dwarf to switch • tap a card to inspect, again to play"
+	elif phase == "enemyTurn":
+		active_label.text = "Enemy turn…"
+		hint_label.text = ""
+	else:
+		active_label.text = ""
+		hint_label.text = ""
+
+func _rebuild_hand() -> void:
+	for c in hand_box.get_children():
+		c.queue_free()
+	if phase != "playerTurn":
+		return
+	var a: Dictionary = party[active_idx]
+	var hand: Array = a["hand"]
+	var n: int = hand.size()
+	var spacing: float = minf(116.0, 624.0 / float(maxi(1, n)))
+	for i: int in range(n):
+		var cid: String = hand[i]
+		var def: Dictionary = Db.CARDS[cid]
+		var card := Card.new()
+		hand_box.add_child(card)
+		card.index = i
+		var face: Dictionary = Db.describe(def, a, party_attack_buff, attacks_this_turn)
+		var cooldown: bool = cid == "taunt" and turn - taunt_last_turn < 2
+		var playable: bool = def["cost"] <= a["energy"] and not cooldown
+		card.setup(def, face, playable, i == selected_card, def.get("tip", ""), cooldown)
+		card.clicked.connect(_on_card_clicked)
+		var t: float = float(i) - float(n - 1) / 2.0
+		var rot: float = deg_to_rad(t * 5.0)
+		var bc := Vector2(360.0 + t * spacing, 196.0 + absf(t) * 9.0)
+		card.set_slot(bc - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y), rot)
+
 # ================================================================ Targeting cursor
-## Swap the OS cursor to a red reticle whenever an enemy-target card is armed,
-## restoring the default arrow otherwise (Hearthstone-style "now pick a target").
 func _update_cursor() -> void:
-	var targeting: bool = phase == "playerTurn" and selected_card_index >= 0
+	var targeting: bool = phase == "playerTurn" and selected_card >= 0
 	if targeting == _cursor_on:
 		return
 	_cursor_on = targeting
-	if targeting:
-		Input.set_custom_mouse_cursor(reticle_tex, Input.CURSOR_ARROW, Vector2(24, 24))
-	else:
-		Input.set_custom_mouse_cursor(null)
+	Input.set_custom_mouse_cursor(reticle_tex if targeting else null, Input.CURSOR_ARROW, Vector2(24, 24))
 
-## Reticle drawn procedurally (two rings + gapped crosshair + center dot).
 func _make_reticle() -> ImageTexture:
 	var s: int = 48
 	var img: Image = Image.create(s, s, false, Image.FORMAT_RGBA8)
@@ -634,8 +731,7 @@ func _make_reticle() -> ImageTexture:
 		_plot(img, c + Vector2(-d, 0), col)
 		_plot(img, c + Vector2(0, d), col)
 		_plot(img, c + Vector2(0, -d), col)
-	for o: Vector2 in [Vector2.ZERO, Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
-		_plot(img, c + o, col)
+	_plot(img, c, col)
 	return ImageTexture.create_from_image(img)
 
 func _plot(img: Image, p: Vector2, col: Color) -> void:
@@ -652,140 +748,18 @@ func _flash(c: Dictionary) -> void:
 	n.pivot_offset = n.size * 0.5
 	n.scale = Vector2.ONE
 	var t: Tween = create_tween()
-	t.tween_property(n, "scale", Vector2(1.35, 1.35), 0.09)
+	t.tween_property(n, "scale", Vector2(1.32, 1.32), 0.09)
 	t.tween_property(n, "scale", Vector2.ONE, 0.09)
 	var t2: Tween = create_tween()
-	t2.tween_property(n, "modulate", Color(1, 1, 1, 1), 0.18).from(Color(1.6, 1.6, 1.6, 1))
+	t2.tween_property(n, "modulate", Color.WHITE, 0.18).from(Color(1.6, 1.6, 1.6, 1))
 
 func _impact(c: Dictionary, mag: int) -> void:
 	var n: Label = c.get("node")
-	if n == null:
+	if n == null or mag <= 0:
 		return
-	var pos: Vector2 = n.global_position + n.size * 0.5
 	var fx: Node2D = MOMENTUM_HIT.instantiate()
 	add_child(fx)
-	fx.position = pos
+	fx.position = n.global_position + n.size * 0.5
 	fx.set_momentum(clampi(int(round(mag / 2.0)), 1, 10))
 	fx.burst()
 	get_tree().create_timer(1.2).timeout.connect(fx.queue_free)
-
-# ================================================================ Render
-func _log(s: String) -> void:
-	log_label.text = s
-
-func _refresh() -> void:
-	if combatants.is_empty():
-		return
-	_refresh_track()
-	_refresh_enemies()
-	_refresh_dwarves()
-	_refresh_active_panel()
-	_rebuild_hand()
-	end_turn_btn.disabled = phase != "playerTurn"
-	end_turn_btn.visible = not overlay.visible
-	_update_cursor()
-
-func _refresh_track() -> void:
-	for child in init_box.get_children():
-		child.queue_free()
-	for slot: int in range(order.size()):
-		var c: Dictionary = combatants[order[slot]]
-		var l := Label.new()
-		l.add_theme_font_size_override("font_size", 14)
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		l.custom_minimum_size = Vector2(76, 44)
-		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		if c["kind"] == "dwarf":
-			l.text = "%s\nP%d" % [c["emoji"], c["slot"] + 1]
-		else:
-			l.text = c["emoji"]
-		if not c["alive"]:
-			l.modulate = Color(0.4, 0.4, 0.4, 0.7)
-		elif slot == turn_ptr:
-			l.modulate = Color(1.0, 0.95, 0.35, 1.0)
-		else:
-			l.modulate = Color(1, 1, 1, 1)
-		init_box.add_child(l)
-
-func _refresh_enemies() -> void:
-	for slot: int in range(enemy_emoji.size()):
-		var c: Dictionary = combatants[3 + slot]
-		var emo: Label = enemy_emoji[slot]
-		var alive: bool = c["alive"]
-		emo.visible = alive
-		enemy_hp[slot].visible = alive
-		enemy_intent[slot].visible = alive
-		enemy_name[slot].visible = alive and enemy_name[slot].text != "" and slot == 0
-		enemy_block[slot].visible = false   # set from block + mark below (alive only)
-		if not alive:
-			continue
-		enemy_hp[slot].text = "%d/%d" % [c["hp"], c["max_hp"]]
-		var marks: int = int(c["statuses"].get("mark", 0))
-		var status_txt: String = ""
-		if c["block"] > 0:
-			status_txt += "🛡️%d " % c["block"]
-		if marks > 0:
-			status_txt += "🎯%d" % marks
-		enemy_block[slot].text = status_txt
-		enemy_block[slot].visible = status_txt != ""
-		var it: Dictionary = c["intent"]
-		var v: int = it["dmg"] if it["dmg"] > 0 else it["blk"]
-		enemy_intent[slot].text = "%s%d" % [it["emoji"], v]
-		# Pulse-highlight living enemies while a target is being chosen.
-		var targeting: bool = selected_card_index >= 0
-		emo.modulate = Color(1.25, 1.05, 0.6, 1.0) if targeting else Color(1, 1, 1, 1)
-
-func _refresh_dwarves() -> void:
-	for slot: int in range(dwarf_emoji.size()):
-		var c: Dictionary = combatants[slot]
-		var emo: Label = dwarf_emoji[slot]
-		var alive: bool = c["alive"]
-		var is_active: bool = alive and is_same(c, active_dwarf) and phase == "playerTurn"
-		dwarf_outline[slot].visible = is_active
-		emo.scale = Vector2(1.15, 1.15) if is_active else Vector2.ONE
-		if alive:
-			emo.modulate = Color(1, 1, 1, 1)
-			dwarf_hp[slot].text = "%d/%d" % [c["hp"], c["max_hp"]]
-			dwarf_block[slot].text = ("🛡️%d" % c["block"]) if c["block"] > 0 else ""
-			dwarf_res[slot].text = "%s: %d" % [c["resource_name"], c["resource"]]
-		else:
-			emo.modulate = Color(0.35, 0.35, 0.35, 0.8)
-			dwarf_hp[slot].text = "DOWNED"
-			dwarf_block[slot].text = ""
-			dwarf_res[slot].text = ""
-
-func _refresh_active_panel() -> void:
-	if active_dwarf != null and phase == "playerTurn":
-		active_name_label.text = "%s  %s" % [active_dwarf["emoji"], active_dwarf["name"]]
-		active_energy_label.text = "Energy %d/%d" % [active_dwarf["energy"], START_ENERGY]
-		active_res_label.text = "%s: %d" % [active_dwarf["resource_name"], active_dwarf["resource"]]
-	else:
-		active_name_label.text = "Round %d" % round_num
-		active_energy_label.text = "Resolving…"
-		active_res_label.text = ""
-
-func _rebuild_hand() -> void:
-	for child in hand_box.get_children():
-		child.queue_free()
-	if phase != "playerTurn" or active_dwarf == null:
-		return
-	var hand: Array = active_dwarf["hand"]
-	var n: int = hand.size()
-	var cx: float = 360.0
-	var spacing: float = minf(116.0, 624.0 / float(maxi(1, n)))
-	var base_y: float = 196.0                 # bottom-center y within hand_box
-	for i: int in range(n):
-		var cid: String = hand[i]
-		var def: Dictionary = Db.CARDS[cid]
-		var card := Card.new()
-		hand_box.add_child(card)
-		card.index = i
-		var face: Dictionary = Db.describe(def, active_dwarf)
-		var armed: bool = (i == selected_card_index)
-		card.setup(def, face, def["cost"] <= active_dwarf["energy"], armed)
-		card.clicked.connect(_on_card_clicked)
-		var t: float = float(i) - float(n - 1) / 2.0
-		var rot: float = deg_to_rad(t * 5.0)
-		var bottom_center := Vector2(cx + t * spacing, base_y + absf(t) * 9.0)
-		card.set_slot(bottom_center - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y), rot)
