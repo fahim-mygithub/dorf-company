@@ -47,6 +47,7 @@ const OUTLINE_OFF := Vector2(-54, -54)
 
 const TILE_DEFAULT := Color(0.15, 0.15, 0.19)
 const TILE_MOVE := Color(0.20, 0.40, 0.62)
+const TILE_RANGE := Color(0.46, 0.30, 0.16)   # armed-card reach indicator (warm orange)
 
 # ---------------------------------------------------------------- State
 var party: Array = []          # 3 char dicts: 0 warrior, 1 cleric, 2 sorcerer
@@ -55,7 +56,8 @@ var phase := ""                # playerTurn / enemyTurn / win / lose
 var turn := 0
 var active_idx := 0            # selected character
 var selected_card := -1        # armed card index in active char's hand
-var party_attack_buff := 0     # Aura of Valor (this player phase)
+# Aura of Valor is now a radius buff: each ally carries its own attack_buff
+# (party[i]["attack_buff"], set when an in-range Aura is cast, reset each player phase).
 var taunt_last_turn := -99
 var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
 var combat_epoch := 0
@@ -109,6 +111,15 @@ func tile_to_screen(tile: Vector2i) -> Vector2:
 
 func grid_distance(a: Vector2i, b: Vector2i) -> int:
 	return abs(a.x - b.x) + abs(a.y - b.y)
+
+## A card's EFFECTIVE reach for a given caster: its base `range` plus the Sorcerer's
+## per-class +1 (only on cards that already reach, so pure-self range-0 cards stay self).
+## This is the single source of truth for every range check + the reach indicator.
+func _card_range(def: Dictionary, caster: Dictionary) -> int:
+	var base: int = int(def.get("range", 0))
+	if base > 0 and caster.get("role", "") == "sorcerer":
+		base += 1
+	return base
 
 func _initial_enemy_tile(i: int) -> Vector2i:
 	return Vector2i(i + 1, 0)
@@ -394,7 +405,7 @@ func _start_combat() -> void:
 			"hp": cls["max_hp"], "max_hp": cls["max_hp"], "block": 0,
 			"energy": cls["energy"], "max_energy": cls["energy"], "alive": true,
 			"deck": deck, "hand": [], "discard": [],
-			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
+			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0, "attack_buff": 0,
 			"node": pc_emoji[i], "slot": i,
 			"pos": _initial_party_tile(i), "move": move, "move_left": move,
 		})
@@ -445,12 +456,12 @@ func _start_player_phase() -> void:
 		a["temp"] = _fresh_temp()
 		a["shield"] = 0
 		a["attacks_this_turn"] = 0
+		a["attack_buff"] = 0
 		a["move_left"] = a["move"]
 		_draw_cards(a, HAND_SIZE)
 	for e: Dictionary in enemies:
 		e["marked"] = false
 		e["forced"] = false
-	party_attack_buff = 0
 	attacks_this_turn = 0
 	selected_card = -1
 	move_targets = {}
@@ -624,12 +635,29 @@ func _on_card_clicked(card) -> void:
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	var tgt: String = def["target"]
+	# Area self-cast cards (Taunt / Aura of Valor): no single target to tap, but the
+	# radius matters — first tap arms + previews the reach indicator, second tap casts.
+	if def.get("area", false):
+		if selected_card != idx:
+			selected_card = idx
+			move_targets = {}
+			var side: String = "enemies" if def.get("area_affects", "") == "enemy" else "allies"
+			_log("%s — tap again to cast (%s in range)" % [def["name"], side])
+			_refresh()
+		else:
+			if not _can_play(a, cid, def):
+				return
+			_spend(a, idx)
+			_resolve(def, a, {})   # radius handled inside the resolve ops
+			_finish_play(a, def, cid)
+		return
+	# Pure-self and Cleave: single tap plays right away (Cleave is range-gated per enemy).
 	if tgt == "self" or tgt == "all_enemies":
 		if not _can_play(a, cid, def):
 			return
 		var in_range: Array = []
 		if tgt == "all_enemies":
-			var rng: int = int(def.get("range", 0))
+			var rng: int = _card_range(def, a)
 			for e: Dictionary in enemies:
 				if e["alive"] and grid_distance(a["pos"], e["pos"]) <= rng:
 					in_range.append(e)
@@ -674,7 +702,7 @@ func _play_on_enemy(e_idx: int) -> void:
 	var idx: int = selected_card
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
-	var rng: int = int(def.get("range", 0))
+	var rng: int = _card_range(def, a)
 	if grid_distance(a["pos"], enemies[e_idx]["pos"]) > rng:
 		_log("Out of range — move closer.")
 		return
@@ -689,7 +717,7 @@ func _play_on_ally(c_idx: int) -> void:
 	var idx: int = selected_card
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
-	var rng: int = int(def.get("range", 0))
+	var rng: int = _card_range(def, a)
 	if grid_distance(a["pos"], party[c_idx]["pos"]) > rng:
 		_log("Out of range — move closer.")
 		return
@@ -745,8 +773,11 @@ func _resolve(def: Dictionary, a: Dictionary, target: Dictionary) -> void:
 				if op[1] == "marked":
 					target["marked"] = true
 			"force_target_all":
+				# Taunt now only grips enemies within the card's radius of the caster.
+				var taunt_rng: int = _card_range(def, a)
 				for e: Dictionary in enemies:
-					e["forced"] = true
+					if e["alive"] and grid_distance(a["pos"], e["pos"]) <= taunt_rng:
+						e["forced"] = true
 				taunt_last_turn = turn
 			"temp":
 				match op[1]:
@@ -761,8 +792,12 @@ func _resolve(def: Dictionary, a: Dictionary, target: Dictionary) -> void:
 			"shield_ally":
 				target["shield"] += op[1]
 			"party_buff":
+				# Aura now blesses only allies within the card's radius of the caster.
 				if op[1] == "attack":
-					party_attack_buff += op[2]
+					var aura_rng: int = _card_range(def, a)
+					for ally: Dictionary in party:
+						if ally["alive"] and grid_distance(a["pos"], ally["pos"]) <= aura_rng:
+							ally["attack_buff"] += op[2]
 
 ## Damage to an ENEMY (resolution order: base -> +flat -> xMark -> block,hp).
 func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> void:
@@ -773,7 +808,7 @@ func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> vo
 		if a["temp"]["channel_charges"] > 0:
 			amt += a["temp"]["channel_bonus"]
 			a["temp"]["channel_charges"] -= 1
-		amt += party_attack_buff
+		amt += int(a["attack_buff"])
 	if enemy["marked"]:
 		amt = int(round(amt * Db.MARK_MULT))
 	_deal_enemy(enemy, amt)
@@ -878,13 +913,41 @@ func _refresh() -> void:
 	_update_cursor()
 
 func _refresh_tiles() -> void:
+	var rng_tiles: Dictionary = _range_tiles()
 	for i: int in range(tile_cells.size()):
-		tile_cells[i].color = TILE_MOVE if move_targets.has(tile_coords[i]) else TILE_DEFAULT
+		var coord: Vector2i = tile_coords[i]
+		if move_targets.has(coord):
+			tile_cells[i].color = TILE_MOVE
+		elif rng_tiles.has(coord):
+			tile_cells[i].color = TILE_RANGE
+		else:
+			tile_cells[i].color = TILE_DEFAULT
+
+## Tiles within the armed card's effective reach of the active dwarf (Manhattan
+## radius, NOT path-constrained). Empty when nothing is armed or the armed card is
+## pure-self (range 0). Drives the orange reach indicator + makes range readable.
+func _range_tiles() -> Dictionary:
+	if phase != "playerTurn" or selected_card < 0:
+		return {}
+	var rng: int = _card_range(_armed_def(), party[active_idx])
+	if rng <= 0:
+		return {}
+	var center: Vector2i = party[active_idx]["pos"]
+	var tiles: Dictionary = {}
+	for y: int in range(GRID_H):
+		for x: int in range(GRID_W):
+			var c := Vector2i(x, y)
+			if grid_distance(center, c) <= rng:
+				tiles[c] = true
+	return tiles
 
 func _refresh_enemies(preview: Dictionary) -> void:
 	var arm: Dictionary = _armed_def()
-	var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
-	var rng: int = int(arm.get("range", 0))
+	# Enemy-target cards OR an area card whose radius grips enemies (Taunt) light up
+	# the enemies within reach.
+	var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"] \
+		or (arm.get("area", false) and arm.get("area_affects", "") == "enemy")
+	var rng: int = _card_range(arm, party[active_idx])
 	var a_pos: Vector2i = party[active_idx]["pos"]
 	for i: int in range(3):
 		var e: Dictionary = enemies[i]
@@ -912,8 +975,11 @@ func _refresh_enemies(preview: Dictionary) -> void:
 
 func _refresh_party() -> void:
 	var arm: Dictionary = _armed_def()
-	var ally_arm: bool = selected_card >= 0 and arm.get("target", "") in ["ally", "ally_or_enemy"]
-	var rng: int = int(arm.get("range", 0))
+	# Ally-target cards OR an area card whose radius blesses allies (Aura) light up
+	# the allies within reach.
+	var ally_arm: bool = selected_card >= 0 and (arm.get("target", "") in ["ally", "ally_or_enemy"] \
+		or (arm.get("area", false) and arm.get("area_affects", "") == "ally"))
+	var rng: int = _card_range(arm, party[active_idx])
 	var a_pos: Vector2i = party[active_idx]["pos"]
 	for i: int in range(3):
 		var a: Dictionary = party[i]
@@ -965,7 +1031,8 @@ func _refresh_threats(preview: Dictionary) -> void:
 func _refresh_panel() -> void:
 	if phase == "playerTurn":
 		var a: Dictionary = party[active_idx]
-		var aura: String = "   📣+%d atk" % party_attack_buff if party_attack_buff > 0 else ""
+		var ab: int = int(a["attack_buff"])
+		var aura: String = "   📣+%d atk" % ab if ab > 0 else ""
 		active_label.text = "%s  %s   ⚡%d/%d 🏃%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], a["move_left"], a["move"], aura]
 		if not move_targets.is_empty():
 			hint_label.text = "Tap a highlighted tile to move"
@@ -993,7 +1060,14 @@ func _rebuild_hand() -> void:
 		var card := Card.new()
 		hand_box.add_child(card)
 		card.index = i
-		var face: Dictionary = Db.describe(def, a, party_attack_buff, attacks_this_turn)
+		var face: Dictionary = Db.describe(def, a, int(a["attack_buff"]), attacks_this_turn)
+		# Grid-only: surface the card's effective reach on its face (radius for area cards,
+		# range for targeted cards; pure-self range-0 cards show nothing).
+		var eff_rng: int = _card_range(def, a)
+		if def.get("area", false):
+			face = {"text": face["text"] + "\n📣 radius %d" % eff_rng, "buffed": face["buffed"]}
+		elif eff_rng > 0:
+			face = {"text": face["text"] + "\n🎯 range %d" % eff_rng, "buffed": face["buffed"]}
 		var cooldown: bool = cid == "taunt" and turn - taunt_last_turn < 2
 		var playable: bool = def["cost"] <= a["energy"] and not cooldown
 		card.setup(def, face, playable, i == selected_card, def.get("tip", ""), cooldown)

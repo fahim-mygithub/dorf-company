@@ -24,29 +24,37 @@ extends RefCounted
 ## `target`: "self" | "enemy" | "all_enemies" | "ally" | "ally_or_enemy"
 ## `type`: "attack" | "skill" | "power"  (frame tint)
 ## `is_attack`: true -> gets Channel/Aura bonuses, counts for Finisher, consumes a Channel charge.
+##
+## GRID-MODE ONLY (grid_combat.gd reads these; the non-grid combat.gd ignores them):
+## `range`: Manhattan tiles the card can reach from the caster's tile. 0 = self (no reach).
+##          grid_combat applies a per-class +1 for the Sorcerer on cards whose base range > 0.
+## `area`: true -> a self-cast card that affects an AREA (radius = `range`) around the caster
+##          rather than a single tapped target. Armed-to-preview, tap-again-to-cast.
+## `area_affects`: "ally" | "enemy" -> which side the area card's radius touches (drives the
+##          target-highlight tint while previewing).
 
 const CARDS := {
 	# --- shared chassis ---
 	"strike":  {"name":"Strike",  "cost":1, "emoji":"🗡️", "target":"enemy",       "type":"attack", "is_attack":true, "range":1,
 				"effect":[["damage",6]],
 				"tip":"Your bread-and-butter swing — the unit everything else is read against."},
-	"guard":   {"name":"Guard",   "cost":1, "emoji":"🛡️", "target":"self",        "type":"skill", "fortifiable":true,
+	"guard":   {"name":"Guard",   "cost":1, "emoji":"🛡️", "target":"self",        "type":"skill", "fortifiable":true, "range":0,
 				"effect":[["block",5]],
 				"tip":"Raise your shield. Block soaks the next hits this turn, then it's gone."},
 	"cleave":  {"name":"Cleave",  "cost":2, "emoji":"🪓", "target":"all_enemies", "type":"attack", "is_attack":true, "range":1,
 				"effect":[["damage",11]],
 				"tip":"A heavy swing that catches every enemy at once."},
-	"wall":    {"name":"Wall",    "cost":2, "emoji":"🧱", "target":"self",        "type":"skill",
+	"wall":    {"name":"Wall",    "cost":2, "emoji":"🧱", "target":"self",        "type":"skill", "range":0,
 				"effect":[["block",12]],
 				"tip":"Brace hard — a wall of block to weather a big incoming turn."},
 	# --- Warrior signatures ---
-	"taunt":   {"name":"Taunt",   "cost":1, "emoji":"😡", "target":"self",        "type":"skill", "limiter":"no_repeat",
+	"taunt":   {"name":"Taunt",   "cost":1, "emoji":"😡", "target":"self",        "type":"skill", "limiter":"no_repeat", "range":2, "area":true, "area_affects":"enemy",
 				"effect":[["force_target_all","warrior"],["block",8]],
-				"tip":"Force EVERY enemy to swing at you next turn, and gain 8 block to survive it. Can't be played two turns in a row."},
-	"retaliate":{"name":"Retaliate","cost":1,"emoji":"⚡", "target":"self",        "type":"skill",
+				"tip":"Force enemies within range to swing at you next turn, and gain 8 block to survive it. Can't be played two turns in a row."},
+	"retaliate":{"name":"Retaliate","cost":1,"emoji":"⚡", "target":"self",        "type":"skill", "range":0,
 				"effect":[["temp","retaliate",4]],
 				"tip":"Punish them for taking the bait — every hit you eat this turn hits back for 4."},
-	"fortify": {"name":"Fortify", "cost":1, "emoji":"🔧", "target":"self",        "type":"skill",
+	"fortify": {"name":"Fortify", "cost":1, "emoji":"🔧", "target":"self",        "type":"skill", "range":0,
 				"effect":[["temp","fortify"]],
 				"tip":"Reinforce — your NEXT Guard this turn grants +5 block, and Retaliate deals +2 while active."},
 	# --- Cleric signatures ---
@@ -56,14 +64,14 @@ const CARDS := {
 	"mend_or_smite":{"name":"Mend or Smite","cost":1,"emoji":"⚖️","target":"ally_or_enemy","type":"skill", "range":2,
 				"effect":[["heal_or_damage",5]],
 				"tip":"Mercy or judgment — tap an ally to heal 5, or an enemy to deal 5."},
-	"aura_of_valor":{"name":"Aura of Valor","cost":2,"emoji":"📣","target":"self","type":"power",
+	"aura_of_valor":{"name":"Aura of Valor","cost":2,"emoji":"📣","target":"self","type":"power", "range":2, "area":true, "area_affects":"ally",
 				"effect":[["party_buff","attack",2]],
-				"tip":"Inspire the company — every ally's attack deals +2 this turn. A real commitment (2 energy)."},
+				"tip":"Inspire the company — allies within range deal +2 attack this turn. A real commitment (2 energy)."},
 	# --- Sorcerer signatures ---
 	"mark":    {"name":"Mark",    "cost":1, "emoji":"🎯", "target":"enemy",       "type":"skill", "range":2,
 				"effect":[["apply_status","marked"]],
 				"tip":"Paint the target — it takes +25% from ALL sources this turn. Your whole party benefits."},
-	"channel": {"name":"Channel", "cost":1, "emoji":"🌀", "target":"self",        "type":"power",
+	"channel": {"name":"Channel", "cost":1, "emoji":"🌀", "target":"self",        "type":"power", "range":0,
 				"effect":[["temp","channel",3,2]],
 				"tip":"Gather power — your next 2 attack cards this turn deal +3 each."},
 	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack","is_attack":true, "range":2,

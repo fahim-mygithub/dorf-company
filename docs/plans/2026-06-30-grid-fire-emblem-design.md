@@ -131,3 +131,38 @@ Result:
 - `https://fahim-mygithub.github.io/dorf-company/grid/` — new grid experiment
 
 Deployed together on every push, per the standing "deploy every iteration" preference.
+
+## Range update (2026-06-30, iteration 2)
+
+Follow-up so every card carries a range and the Sorcerer reads as the long-range
+class. Decisions (confirmed with the user):
+
+- **Every card has a `range`.** Targeted attacks/skills keep their Manhattan range;
+  pure-self buffs (Guard, Wall, Retaliate, Fortify, Channel) are `range 0` (self).
+  All additive in the shared `card_db.gd`; the non-grid `combat.gd` ignores them.
+- **Sorcerer = most range, via a per-class +1.** `grid_combat._card_range(def, caster)`
+  adds +1 to any card whose base range > 0 when the caster is the Sorcerer. So its
+  Strike is 2 (vs Warrior 1), Mark/Arcane Finisher 3. One rule, applies across its
+  whole kit; pure-self range-0 cards stay 0.
+- **Auras and Taunt get a radius.** Aura of Valor and Taunt were "self" cards that
+  hit *all* allies / *all* enemies regardless of position. They now carry
+  `area: true`, `area_affects: "ally" | "enemy"`, and `range: 2`, and only touch
+  units within that radius of the caster:
+  - Aura of Valor blesses only allies within range. The old global
+    `party_attack_buff` became a **per-ally** `attack_buff` (set at cast for in-range
+    allies, reset each player phase, read by `_attack` for the acting char). The
+    non-grid game keeps its global behavior.
+  - Taunt grips only enemies within range (still gives the Warrior +8 block and keeps
+    its no-two-turns-in-a-row cooldown).
+- **Reach indicator on arming.** Arming any card with range > 0 paints the in-range
+  tiles orange (Manhattan radius, not path-constrained; mutually exclusive with the
+  blue move highlight) and tints the affected units (gold enemies / green allies).
+  Card faces show `🎯 range N` (targeted) or `📣 radius N` (area).
+- **Area cards arm-to-preview, tap-again-to-cast.** Since the radius matters (you may
+  want to move first to catch more units), area cards no longer single-tap-play: the
+  first tap arms + previews, the second tap on the same card casts. Pure-self cards
+  (Guard etc.) still play on a single tap.
+
+Verified live in the editor: per-class range values, reach-tile counts, Aura buffing
+only in-range allies, Taunt gripping only in-range enemies, the two-tap area cast
+spending energy exactly once, and single-tap self cards unchanged.
