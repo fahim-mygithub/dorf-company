@@ -332,7 +332,6 @@ func _init_sort(a: int, b: int) -> bool:
 # ================================================================ Turn flow
 func _advance_turn() -> void:
 	var epoch: int = combat_epoch
-	print("[DBG] adv enter epoch=", epoch, " ptr=", turn_ptr)
 	var guard: int = 0
 	var limit: int = order.size() * 2 + 4
 	while true:
@@ -349,15 +348,11 @@ func _advance_turn() -> void:
 		if not c["alive"]:
 			continue
 		if c["kind"] == "dwarf":
-			print("[DBG] adv dwarf ", c["name"])
 			_begin_dwarf_turn(c)
 			_refresh()
-			print("[DBG] adv dwarf refresh done")
 			return
 		else:
-			print("[DBG] adv -> enemy ", c["name"])
 			await _enemy_turn(c)
-			print("[DBG] adv <- enemy done match=", epoch == combat_epoch)
 			if epoch != combat_epoch:
 				return        # combat was restarted (Play Again) during the await
 			_refresh()
@@ -393,10 +388,8 @@ func _on_end_turn() -> void:
 
 func _enemy_turn(e: Dictionary) -> void:
 	var epoch: int = combat_epoch
-	print("[DBG] enemy enter ", e["name"])
 	phase = "enemyTurn"
 	await get_tree().create_timer(0.4).timeout
-	print("[DBG] enemy after await1 ", e["name"])
 	if epoch != combat_epoch:
 		return
 	e["block"] = 0
@@ -421,12 +414,9 @@ func _enemy_turn(e: Dictionary) -> void:
 	var intents: Array = Db.ENEMIES[e["enemy_id"]]["intents"]
 	e["intent_index"] = (e["intent_index"] + 1) % intents.size()
 	e["intent"] = intents[e["intent_index"]]
-	print("[DBG] enemy pre-refresh ", e["name"])
 	_refresh()
-	print("[DBG] enemy post-refresh ", e["name"])
 	_check_end()
 	await get_tree().create_timer(0.2).timeout
-	print("[DBG] enemy end ", e["name"])
 
 func _random_living_dwarf():
 	var living: Array = []
@@ -686,17 +676,11 @@ func _log(s: String) -> void:
 func _refresh() -> void:
 	if combatants.is_empty():
 		return
-	print("[DBG] refresh track")
 	_refresh_track()
-	print("[DBG] refresh enemies")
 	_refresh_enemies()
-	print("[DBG] refresh dwarves")
 	_refresh_dwarves()
-	print("[DBG] refresh panel")
 	_refresh_active_panel()
-	print("[DBG] refresh hand")
 	_rebuild_hand()
-	print("[DBG] refresh tail")
 	end_turn_btn.disabled = phase != "playerTurn"
 	end_turn_btn.visible = not overlay.visible
 	_update_cursor()
