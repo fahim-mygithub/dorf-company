@@ -27,13 +27,13 @@ extends RefCounted
 
 const CARDS := {
 	# --- shared chassis ---
-	"strike":  {"name":"Strike",  "cost":1, "emoji":"🗡️", "target":"enemy",       "type":"attack", "is_attack":true,
+	"strike":  {"name":"Strike",  "cost":1, "emoji":"🗡️", "target":"enemy",       "type":"attack", "is_attack":true, "range":1,
 				"effect":[["damage",6]],
 				"tip":"Your bread-and-butter swing — the unit everything else is read against."},
 	"guard":   {"name":"Guard",   "cost":1, "emoji":"🛡️", "target":"self",        "type":"skill", "fortifiable":true,
 				"effect":[["block",5]],
 				"tip":"Raise your shield. Block soaks the next hits this turn, then it's gone."},
-	"cleave":  {"name":"Cleave",  "cost":2, "emoji":"🪓", "target":"all_enemies", "type":"attack", "is_attack":true,
+	"cleave":  {"name":"Cleave",  "cost":2, "emoji":"🪓", "target":"all_enemies", "type":"attack", "is_attack":true, "range":1,
 				"effect":[["damage",11]],
 				"tip":"A heavy swing that catches every enemy at once."},
 	"wall":    {"name":"Wall",    "cost":2, "emoji":"🧱", "target":"self",        "type":"skill",
@@ -50,34 +50,34 @@ const CARDS := {
 				"effect":[["temp","fortify"]],
 				"tip":"Reinforce — your NEXT Guard this turn grants +5 block, and Retaliate deals +2 while active."},
 	# --- Cleric signatures ---
-	"channel_shield":{"name":"Channel Shield","cost":1,"emoji":"🔰","target":"ally","type":"skill",
+	"channel_shield":{"name":"Channel Shield","cost":1,"emoji":"🔰","target":"ally","type":"skill", "range":2,
 				"effect":[["shield_ally",3]],
 				"tip":"Wrap an ally in protection — every blow against them this turn is softened by 3."},
-	"mend_or_smite":{"name":"Mend or Smite","cost":1,"emoji":"⚖️","target":"ally_or_enemy","type":"skill",
+	"mend_or_smite":{"name":"Mend or Smite","cost":1,"emoji":"⚖️","target":"ally_or_enemy","type":"skill", "range":2,
 				"effect":[["heal_or_damage",5]],
 				"tip":"Mercy or judgment — tap an ally to heal 5, or an enemy to deal 5."},
 	"aura_of_valor":{"name":"Aura of Valor","cost":2,"emoji":"📣","target":"self","type":"power",
 				"effect":[["party_buff","attack",2]],
 				"tip":"Inspire the company — every ally's attack deals +2 this turn. A real commitment (2 energy)."},
 	# --- Sorcerer signatures ---
-	"mark":    {"name":"Mark",    "cost":1, "emoji":"🎯", "target":"enemy",       "type":"skill",
+	"mark":    {"name":"Mark",    "cost":1, "emoji":"🎯", "target":"enemy",       "type":"skill", "range":2,
 				"effect":[["apply_status","marked"]],
 				"tip":"Paint the target — it takes +25% from ALL sources this turn. Your whole party benefits."},
 	"channel": {"name":"Channel", "cost":1, "emoji":"🌀", "target":"self",        "type":"power",
 				"effect":[["temp","channel",3,2]],
 				"tip":"Gather power — your next 2 attack cards this turn deal +3 each."},
-	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack","is_attack":true,
+	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack","is_attack":true, "range":2,
 				"effect":[["damage_scaling","attacks_this_turn",5,3]],
 				"tip":"Unleash everything — deal 5 +3 per attack already played this turn. Play it LAST."},
 }
 
 ## Role-skewed decks (~10-12 cards each); the strike/guard split encodes the role.
 const CLASSES := {
-	"warrior": {"name":"Warrior", "emoji":"🛡️", "role":"warrior", "max_hp":36, "energy":3,
+	"warrior": {"name":"Warrior", "emoji":"🛡️", "role":"warrior", "max_hp":36, "energy":3, "move":1,
 		"deck":["strike","strike","strike","strike","guard","guard","guard","guard","guard","taunt","retaliate","fortify"]},
-	"cleric":  {"name":"Cleric",  "emoji":"⛑️", "role":"cleric",  "max_hp":28, "energy":3,
+	"cleric":  {"name":"Cleric",  "emoji":"⛑️", "role":"cleric",  "max_hp":28, "energy":3, "move":2,
 		"deck":["strike","strike","strike","guard","guard","guard","guard","channel_shield","mend_or_smite","aura_of_valor"]},
-	"sorcerer":{"name":"Sorcerer","emoji":"🧙", "role":"sorcerer","max_hp":22, "energy":3,
+	"sorcerer":{"name":"Sorcerer","emoji":"🧙", "role":"sorcerer","max_hp":22, "energy":3, "move":3,
 		"deck":["strike","strike","strike","strike","strike","guard","guard","guard","mark","channel","arcane_finisher"]},
 }
 const PARTY_ORDER := ["warrior", "cleric", "sorcerer"]
@@ -85,11 +85,11 @@ const PARTY_ORDER := ["warrior", "cleric", "sorcerer"]
 ## Enemies: each picks its highest-priority valid target and telegraphs it.
 ## pref: "tankiest" | "healer_dps" | "lowest_hp".
 const ENEMIES := {
-	"brute":    {"name":"Brute",    "emoji":"👹", "max_hp":45, "atk":9, "pref":"tankiest",
+	"brute":    {"name":"Brute",    "emoji":"👹", "max_hp":45, "atk":9, "pref":"tankiest", "range":1, "move":1,
 				"tip":"Wants a worthy fight — hits your tankiest (block, then max HP). Easy to bait with Taunt."},
-	"assassin": {"name":"Assassin", "emoji":"🥷", "max_hp":30, "atk":6, "pref":"healer_dps",
+	"assassin": {"name":"Assassin", "emoji":"🥷", "max_hp":30, "atk":6, "pref":"healer_dps", "range":1, "move":3,
 				"tip":"Dives the backline — Healer first, then DPS. Skips the tank unless forced."},
-	"caster":   {"name":"Caster",   "emoji":"🔮", "max_hp":28, "atk":5, "pref":"lowest_hp",
+	"caster":   {"name":"Caster",   "emoji":"🔮", "max_hp":28, "atk":5, "pref":"lowest_hp", "range":2, "move":2,
 				"tip":"Snipes the weakest — targets whoever has the lowest current HP."},
 }
 const ENCOUNTER := ["brute", "assassin", "caster"]
