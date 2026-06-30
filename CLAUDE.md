@@ -65,7 +65,7 @@ addons/godot_mcp/             # MCP Pro plugin (committed) — provides the live
   references/effect-recipes.md # per-effect MCP Pro call sequences (load on demand)
   references/shaders.md        # shader sources to create via create_shader (canvas_item)
 scenes/{combat,vfx}/          # combat scenes; reusable VFX scenes
-scripts/{classes,combat}/     # class logic; combat systems
+scripts/{combat,ui,vfx}/     # combat systems; reusable UI (card.gd, target_arrow.gd); VFX scripts
 assets/{shaders,sprites}/     # shader sources; sprite art
 resources/cards/              # card .tres resources
 godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + instructions); not part of the game
@@ -79,15 +79,15 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-06-29)
+## Current state (2026-06-30)
 
-- Setup is complete and verified: addon enabled (green dot), server built, `.mcp.json` configured, MCP bridge confirmed live via `get_project_info`.
-- **Slice 1 + Slice 2 are built and verified**: `scenes/combat/combat.tscn` + `scripts/combat/combat.gd` (greybox UI built in code) + `scripts/combat/card_db.gd` (data-driven cards). Flow: class select → one fight (one dwarf, one enemy) → win/lose → restart. `application/run/main_scene` points here.
-  - **Cards are data** (`card_db.gd`): `CARDS` (effect = list of `[op, ...args]`) + `CLASSES` (deck lists + resource name + tint). `combat.gd::_resolve()` is the only place ops are interpreted — adding a card is a new row, no combat-code change. Ops: damage, block, self_damage, draw, resource, damage_per_resource, resource_if_bloodied, status, status_per_resource, power.
-  - **Three classes** (13 cards = 5 def + 5 atk + 3 class): Warrior/Momentum, Sorcerer/Surge, Paladin/Devotion. Signature resource is generic (`player.resource` + `resource_name`); only the active class's is used. Persistent powers (Aura of Resolve → `resource_per_turn`) resolve at `_start_player_turn`.
-  - **Silhouettes**: dwarf + enemy are `Polygon2D` (points from spec §11), dwarf tinted per class.
-  - **VFX is wired into combat**: `_player_attack` flashes the enemy poly white + spawns a `momentum_hit` spark burst scaled by damage; enemy attacks flash the dwarf. (Note: transient VFX won't show in a single `get_game_screenshot` due to the ~1–2s capture lag — it fires live.)
-- **§15 watch-item status**: Aura of Resolve (turn-start power) and Elemental Mark (status stacks) both work cleanly with one dwarf / one enemy — no awkwardness yet. That awkwardness is the signal to resolve the **party-combat model** (shared vs per-dwarf deck, single vs multi-target) before building further. Mark currently has a placeholder effect (+1 damage per stack); redefine when the model is decided.
-- Still unbuilt: `resources/cards/` .tres (cards are inline dicts for now), party/multi-target model, numeric balance tuning (enemy 40 HP may be low vs scaling class cards — a playtest knob).
-- **GodotPrompter is not installed** in this checkout, despite being source #1 of the authority split. Until it is, be extra careful with generic Godot idioms — there's no skill backstopping them.
-- The dorf-vfx skill references `scripts/validate_tscn.py` as an offline `.tscn` linter; that file does not exist yet (it's a fallback only — MCP Pro driving scene writes is the main path).
+- Setup verified: addon enabled, server built, `.mcp.json` live (`get_project_info` OK). Renderer gl_compatibility, **portrait 720×1280**.
+- **Mobile party prototype is built, verified, and DEPLOYED to the web.** `scenes/combat/combat.tscn` + `scripts/combat/combat.gd` (all UI built in code) + `scripts/combat/card_db.gd` (data). Flow: 3 dwarves (Warrior/Sorcerer/Paladin), **each its own 13-card deck**, vs **1 boss + 4 minions**, on a **unified initiative** track (one d20 roll per combatant → single interleaved order). Win/lose → Play Again. `application/run/main_scene` = combat.tscn.
+- **Everything is emoji**, no authored art: dwarves 🪓🧙😇, enemies 👹👺👻💀🦇, cards carry an emoji "art". Web emoji rendering is solved (vector fonts only — see memory `publish-web-builds-to-pages`).
+- **Cards are data** (`card_db.gd`): `CARDS` (effect = `[op, ...args]`), `CLASSES` (per-class deck + signature resource), `ENEMIES`/`ENCOUNTER` (telegraphed intents). `combat.gd::_resolve()` + `_attack()` are the ONLY place ops execute — a new card is a new row. Ops: damage, block, self_damage, draw, resource, damage_per_resource, resource_if_bloodied, status, status_per_resource, power.
+- **Card-engine clarity layer (Slay-the-Spire / Hearthstone study, 2026-06-30):**
+  - `card_db.gd` gained a DISPLAY layer: `card_type()` + `type_tint()` (frame colour: red=attack, blue=skill/defense, violet=power) and `describe(def, dwarf)` which GENERATES the card body text from its ops with **live, recolored numbers** (e.g. Smite shows "Deal 4 (+3/Devotion)", green when buffed). Single source of truth → the card face can't desync from `_resolve()`.
+  - `scripts/ui/card.gd` — reusable hand-card Control: tinted frame + cost orb + emoji + generated body; **hover-lift + fanned base rotation**, instanced per hand card by `combat.gd::_rebuild_hand` on a manual arc (NOT a container).
+  - **Targeting**: clicking an enemy-target card arms it → OS cursor swaps to a procedural **reticle** (`_make_reticle`/`_update_cursor`) + all enemies highlight gold + a **Hearthstone bezier targeting arrow** (`scripts/ui/target_arrow.gd`, driven each frame by `combat.gd::_process` from the active dwarf to the cursor, snapping green onto a hovered enemy).
+- **Web/GitHub Pages pipeline is live** (manual `workflow_dispatch`) — repo + Pages URLs and the deploy/font gotchas are in memory `publish-web-builds-to-pages`.
+- **Still open / watch:** Mark is still a placeholder amp — in `_attack` the target's Mark adds to damage but is NOT shown on the card face (a known clarity gap; resolve when Mark is redefined). No `resources/cards/` .tres yet (cards are inline dicts). No numeric balance pass. **GodotPrompter (authority source #1) is still not installed** — be careful with generic Godot idioms. `scripts/validate_tscn.py` (referenced by dorf-vfx) does not exist (fallback only).

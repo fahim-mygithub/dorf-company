@@ -10,6 +10,7 @@ extends Control
 const Db := preload("res://scripts/combat/card_db.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 const Card := preload("res://scripts/ui/card.gd")
+const TargetArrow := preload("res://scripts/ui/target_arrow.gd")
 
 const DWARF_CLASSES := ["warrior", "sorcerer", "paladin"]
 const DWARF_HP := 30
@@ -54,13 +55,48 @@ var overlay: ColorRect
 var overlay_label: Label
 var overlay_btn: Button
 var reticle_tex: ImageTexture
+var target_arrow: Node2D
+var _is_touch: bool = false
+var combat_epoch: int = 0
+var _cursor_on: bool = false
 
 # ================================================================ Lifecycle
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	reticle_tex = _make_reticle()
+	_is_touch = DisplayServer.is_touchscreen_available()
 	_build_ui()
 	_start_combat()
+
+func _process(_delta: float) -> void:
+	if combatants.is_empty() or target_arrow == null:
+		return
+	# Touch devices have no hover; the emulated mouse freezes at the last tap (on the
+	# hand card), which would draw a stale arrow. Rely on the enemy gold pulse instead.
+	if _is_touch:
+		if target_arrow.enabled:
+			target_arrow.set_arrow(false, Vector2.ZERO, Vector2.ZERO, false)
+		return
+	var targeting: bool = phase == "playerTurn" and selected_card_index >= 0 and active_dwarf != null and active_dwarf["alive"]
+	if not targeting:
+		if target_arrow.enabled:
+			target_arrow.set_arrow(false, Vector2.ZERO, Vector2.ZERO, false)
+		return
+	var src: Label = active_dwarf["node"]
+	var from_pt: Vector2 = src.global_position + src.size * 0.5
+	var mouse: Vector2 = get_global_mouse_position()
+	var to_pt: Vector2 = mouse
+	var locked: bool = false
+	for slot: int in range(enemy_emoji.size()):
+		var en: Dictionary = combatants[3 + slot]
+		if not en["alive"]:
+			continue
+		var node: Label = enemy_emoji[slot]
+		if Rect2(node.global_position, node.size).has_point(mouse):
+			to_pt = node.global_position + node.size * 0.5
+			locked = true
+			break
+	target_arrow.set_arrow(true, from_pt, to_pt, locked)
 
 # ================================================================ UI helpers
 func _label2(text: String, pos: Vector2, sz: Vector2, font: int = 14, center: bool = false) -> Label:
@@ -140,6 +176,11 @@ func _build_ui() -> void:
 	# --- Log ---
 	log_label = _label2("", Vector2(16, 1232), Vector2(688, 36), 15)
 
+	# --- Targeting arrow (Hearthstone-style), above the board ---
+	target_arrow = TargetArrow.new()
+	target_arrow.z_index = 90
+	add_child(target_arrow)
+
 	# --- Win/lose overlay ---
 	overlay = ColorRect.new()
 	overlay.color = Color(0, 0, 0, 0.8)
@@ -203,6 +244,7 @@ func _build_dwarf_slot(pos: Vector2, font: int) -> void:
 
 # ================================================================ Combat start
 func _start_combat() -> void:
+	combat_epoch += 1   # invalidate any in-flight turn coroutine from a prior combat
 	combatants = []
 
 	# Dwarves (one per class), fixed to slots 0..2.
@@ -289,6 +331,7 @@ func _init_sort(a: int, b: int) -> bool:
 
 # ================================================================ Turn flow
 func _advance_turn() -> void:
+	var epoch: int = combat_epoch
 	var guard: int = 0
 	var limit: int = order.size() * 2 + 4
 	while true:
@@ -310,6 +353,8 @@ func _advance_turn() -> void:
 			return
 		else:
 			await _enemy_turn(c)
+			if epoch != combat_epoch:
+				return        # combat was restarted (Play Again) during the await
 			_refresh()
 			if phase == "win" or phase == "lose":
 				return
@@ -342,8 +387,11 @@ func _on_end_turn() -> void:
 	_advance_turn()
 
 func _enemy_turn(e: Dictionary) -> void:
+	var epoch: int = combat_epoch
 	phase = "enemyTurn"
 	await get_tree().create_timer(0.4).timeout
+	if epoch != combat_epoch:
+		return
 	e["block"] = 0
 	var it: Dictionary = e["intent"]
 	if it["blk"] > 0:
@@ -351,6 +399,8 @@ func _enemy_turn(e: Dictionary) -> void:
 		_log("%s braces (+%d block)." % [e["name"], it["blk"]])
 		_refresh()
 		await get_tree().create_timer(0.4).timeout
+		if epoch != combat_epoch:
+			return
 	if it["dmg"] > 0:
 		var target = _random_living_dwarf()
 		if target != null:
@@ -560,6 +610,9 @@ func _on_overlay_btn() -> void:
 ## restoring the default arrow otherwise (Hearthstone-style "now pick a target").
 func _update_cursor() -> void:
 	var targeting: bool = phase == "playerTurn" and selected_card_index >= 0
+	if targeting == _cursor_on:
+		return
+	_cursor_on = targeting
 	if targeting:
 		Input.set_custom_mouse_cursor(reticle_tex, Input.CURSOR_ARROW, Vector2(24, 24))
 	else:
@@ -601,9 +654,8 @@ func _flash(c: Dictionary) -> void:
 	var t: Tween = create_tween()
 	t.tween_property(n, "scale", Vector2(1.35, 1.35), 0.09)
 	t.tween_property(n, "scale", Vector2.ONE, 0.09)
-	n.modulate = Color(1.6, 1.6, 1.6, 1)
 	var t2: Tween = create_tween()
-	t2.tween_property(n, "modulate", Color(1, 1, 1, 1), 0.18)
+	t2.tween_property(n, "modulate", Color(1, 1, 1, 1), 0.18).from(Color(1.6, 1.6, 1.6, 1))
 
 func _impact(c: Dictionary, mag: int) -> void:
 	var n: Label = c.get("node")
@@ -665,11 +717,18 @@ func _refresh_enemies() -> void:
 		enemy_hp[slot].visible = alive
 		enemy_intent[slot].visible = alive
 		enemy_name[slot].visible = alive and enemy_name[slot].text != "" and slot == 0
-		enemy_block[slot].visible = alive and c["block"] > 0
+		enemy_block[slot].visible = false   # set from block + mark below (alive only)
 		if not alive:
 			continue
 		enemy_hp[slot].text = "%d/%d" % [c["hp"], c["max_hp"]]
-		enemy_block[slot].text = "🛡️%d" % c["block"]
+		var marks: int = int(c["statuses"].get("mark", 0))
+		var status_txt: String = ""
+		if c["block"] > 0:
+			status_txt += "🛡️%d " % c["block"]
+		if marks > 0:
+			status_txt += "🎯%d" % marks
+		enemy_block[slot].text = status_txt
+		enemy_block[slot].visible = status_txt != ""
 		var it: Dictionary = c["intent"]
 		var v: int = it["dmg"] if it["dmg"] > 0 else it["blk"]
 		enemy_intent[slot].text = "%s%d" % [it["emoji"], v]

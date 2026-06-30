@@ -162,6 +162,7 @@ static func describe(def: Dictionary, dwarf) -> Dictionary:
 				if res > 0:
 					buffed = true
 				lines.append("Deal %d  (+%d/%s)" % [live, op[2], rname])
+				lines.append("Spend all %s" % rname)
 			"resource_if_bloodied":
 				lines.append("If bloodied: +%d %s" % [op[1], rname])
 			"status":
@@ -171,6 +172,7 @@ static func describe(def: Dictionary, dwarf) -> Dictionary:
 				if res > 0:
 					buffed = true
 				lines.append("+%d %s  (+%d/%s)" % [st, _status_name(op[1]), op[3], rname])
+				lines.append("Spend all %s" % rname)
 			"power":
 				if op[1] == "resource_per_turn":
 					lines.append("Each turn: +%d %s" % [op[2], rname])
