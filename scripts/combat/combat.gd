@@ -618,7 +618,7 @@ func _refresh_enemies() -> void:
 		var t: Dictionary = _enemy_target(e)
 		if not t.is_empty():
 			tname = t["name"].substr(0, 3)
-		en_intent[i].text = "⚔%d→%s" % [e["atk"], tname]
+		en_intent[i].text = "🗡️%d>%s" % [e["atk"], tname]
 		# Highlight valid enemy targets while an enemy-target card is armed.
 		var arm: Dictionary = _armed_def()
 		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
@@ -710,7 +710,9 @@ func _rebuild_hand() -> void:
 
 # ================================================================ Targeting cursor
 func _update_cursor() -> void:
-	var targeting: bool = phase == "playerTurn" and selected_card >= 0
+	var arm: Dictionary = _armed_def()
+	var needs_target: bool = arm.get("target", "") in ["enemy", "ally", "ally_or_enemy"]
+	var targeting: bool = phase == "playerTurn" and selected_card >= 0 and needs_target
 	if targeting == _cursor_on:
 		return
 	_cursor_on = targeting
