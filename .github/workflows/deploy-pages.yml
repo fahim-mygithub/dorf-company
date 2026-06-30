@@ -1,0 +1,84 @@
+name: Deploy Web Build to GitHub Pages
+
+# Manual trigger: run this when a milestone is ready for external testers.
+# (Add `push: { branches: [main] }` here later if you want auto-deploy on every push.)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time.
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7"
+  EXPORT_DIR: "build/web"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot + export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q templates.tpz
+          mv templates/* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+          godot --version
+
+      - name: Strip editor-only MCP plugin (paid; not needed in the build)
+        run: |
+          # Remove godot-mcp-pro autoloads + plugin-enable so the web build is clean.
+          sed -i '/addons\/godot_mcp/d' project.godot
+
+      - name: Import project (generate .godot)
+        run: |
+          godot --headless --import 2>&1 || true
+          godot --headless --import 2>&1 || true
+
+      - name: Export Web build
+        run: |
+          set -euo pipefail
+          mkdir -p "${EXPORT_DIR}"
+          godot --headless --export-release "Web" "${EXPORT_DIR}/index.html"
+          ls -la "${EXPORT_DIR}"
+          test -f "${EXPORT_DIR}/index.html"
+
+      - name: Add cross-origin-isolation shim + .nojekyll
+        run: |
+          curl -fL -o "${EXPORT_DIR}/coi-serviceworker.min.js" \
+            https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.min.js
+          # Inject the shim as the first <head> script (enables SharedArrayBuffer on Pages).
+          sed -i 's#<head>#<head><script src="coi-serviceworker.min.js"></script>#' "${EXPORT_DIR}/index.html"
+          # Pages would otherwise strip files Jekyll dislikes.
+          touch "${EXPORT_DIR}/.nojekyll"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.EXPORT_DIR }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

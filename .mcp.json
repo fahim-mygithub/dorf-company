@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "godot-mcp-pro": {
+      "command": "node",
+      "args": ["C:/Users/fahim/Desktop/Pojects/Dorf Company/godot-mcp-pro-v1.15.0/server/build/index.js"]
+    }
+  }
+}
