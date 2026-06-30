@@ -354,8 +354,9 @@ func _armed_def() -> Dictionary:
 		return {}
 	return Db.CARDS[a["hand"][selected_card]]
 
-## Two-stage: first tap SELECTS (shows tooltip; arms target cards) — works on touch and
-## desktop; second tap on a self/all card PLAYS it; target cards play by tapping a target.
+## Self/all-enemies cards have no target to pick, so a single tap plays them right away
+## (hover already previews the tooltip on desktop). Target cards still arm on the first
+## tap (shows tooltip + reticle) and play on a second tap of the target.
 func _on_card_clicked(card) -> void:
 	if phase != "playerTurn":
 		return
@@ -365,11 +366,6 @@ func _on_card_clicked(card) -> void:
 		return
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
-	if selected_card != idx:
-		selected_card = idx                      # inspect (+ arm if it targets)
-		_log("%s — %s" % [def["name"], _select_hint(def)])
-		_refresh()
-		return
 	var tgt: String = def["target"]
 	if tgt == "self" or tgt == "all_enemies":
 		if not _can_play(a, cid, def):
@@ -382,6 +378,11 @@ func _on_card_clicked(card) -> void:
 		else:
 			_resolve(def, a, {})
 		_finish_play(a, def, cid)
+		return
+	if selected_card != idx:
+		selected_card = idx                      # inspect + arm target card
+		_log("%s — %s" % [def["name"], _select_hint(def)])
+		_refresh()
 	else:
 		selected_card = -1                       # deselect a target card
 		_refresh()
@@ -391,8 +392,7 @@ func _select_hint(def: Dictionary) -> String:
 		"enemy": return "tap an enemy to strike"
 		"ally": return "tap an ally"
 		"ally_or_enemy": return "tap an ally to heal, or an enemy to strike"
-		"all_enemies": return "tap again to hit ALL enemies"
-		_: return "tap again to play"
+		_: return ""
 
 func _can_play(a: Dictionary, cid: String, def: Dictionary) -> bool:
 	if def["cost"] > a["energy"]:
@@ -675,7 +675,7 @@ func _refresh_panel() -> void:
 		var a: Dictionary = party[active_idx]
 		var aura: String = "   📣+%d atk" % party_attack_buff if party_attack_buff > 0 else ""
 		active_label.text = "%s  %s   ⚡%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], aura]
-		hint_label.text = "Tap a dwarf to switch • tap a card to inspect, again to play"
+		hint_label.text = "Tap a dwarf to switch • tap a card to play (target cards: tap a target)"
 	elif phase == "enemyTurn":
 		active_label.text = "Enemy turn…"
 		hint_label.text = ""
