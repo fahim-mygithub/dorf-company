@@ -1,7 +1,7 @@
 [gd_resource type="FontVariation" format=3 uid="uid://clrvw8ve8jtlt"]
 
-[ext_resource type="FontFile" uid="uid://cx535jb0ealm5" path="res://assets/fonts/roboto-latin-400.woff2" id="1_nh0cv"]
-[ext_resource type="FontFile" uid="uid://rty8nkycmt5h" path="res://assets/fonts/NotoColorEmoji.ttf" id="2_ydfug"]
+[ext_resource type="FontFile" uid="uid://dkwhhfi0gpon8" path="res://assets/fonts/NotoSans.ttf" id="1_nh0cv"]
+[ext_resource type="FontFile" uid="uid://c7cj6ctb1yspu" path="res://assets/fonts/TwemojiMozilla.ttf" id="2_ydfug"]
 
 [resource]
 fallbacks = Array[Font]([ExtResource("2_ydfug")])
