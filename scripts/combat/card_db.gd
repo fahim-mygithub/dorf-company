@@ -147,22 +147,83 @@ const PARTY_ORDER := ["warrior", "cleric", "sorcerer"]
 
 ## Enemies: each picks its highest-priority valid target and telegraphs it.
 ## pref: "tankiest" | "healer_dps" | "lowest_hp".
+## `moves` (2026-07-01): a fixed ROTATION of telegraphed intents, started at a random offset per
+## instance (duplicates desync). Move kinds (executed by combat.gd::_do_enemy_move):
+##   attack {dmg} · multi {dmg,hits} · attack_all {dmg} · block {amt} (self, clears at its next
+##   action) · guard_all {amt, ally_amt} · rage_all {amt} (permanent +atk, all enemies) ·
+##   expose {amt} (Vulnerable 💥 on its preferred target: takes x1.5 from enemy hits, decays 1/turn).
+## `atk` stays as the fallback for an entry without moves (old flat-attack behavior).
 const ENEMIES := {
 	"brute":    {"name":"Brute",    "emoji":"👹", "max_hp":45, "atk":9, "pref":"tankiest", "range":1, "move":1,
-				"tip":"Wants a worthy fight — hits your tankiest (block, then max HP). Easy to bait with Taunt."},
+				"tip":"Wants a worthy fight — hits your tankiest (block, then max HP). Easy to bait with Taunt.",
+				"moves": [
+					{"name":"Smash", "emoji":"🗡️", "kind":"attack", "dmg":9,  "tip":"A heavy swing at its chosen target."},
+					{"name":"Smash", "emoji":"🗡️", "kind":"attack", "dmg":9,  "tip":"A heavy swing at its chosen target."},
+					{"name":"CRUSH", "emoji":"💢", "kind":"attack", "dmg":14, "tip":"An overhead blow — block it or eat it."},
+				]},
 	"assassin": {"name":"Assassin", "emoji":"🥷", "max_hp":30, "atk":6, "pref":"healer_dps", "range":1, "move":3,
-				"tip":"Dives the backline — Healer first, then DPS. Skips the tank unless forced."},
+				"tip":"Dives the backline — Healer first, then DPS. Skips the tank unless forced.",
+				"moves": [
+					{"name":"Stab",   "emoji":"🗡️", "kind":"attack", "dmg":6,          "tip":"A quick blade to the back."},
+					{"name":"Expose", "emoji":"💥", "kind":"expose", "amt":2,          "tip":"Marks a weak point: the victim takes x1.5 from enemies for a turn."},
+					{"name":"Flurry", "emoji":"🗡️", "kind":"multi",  "dmg":3, "hits":3, "tip":"Three fast cuts — each one triggers Retaliate."},
+				]},
 	"caster":   {"name":"Caster",   "emoji":"🔮", "max_hp":28, "atk":5, "pref":"lowest_hp", "range":2, "move":2,
-				"tip":"Snipes the weakest — targets whoever has the lowest current HP."},
+				"tip":"Snipes the weakest — targets whoever has the lowest current HP.",
+				"moves": [
+					{"name":"Zap",  "emoji":"🗡️", "kind":"attack", "dmg":5,  "tip":"A crackle of hostile magic."},
+					{"name":"Ward", "emoji":"🛡️", "kind":"block",  "amt":6,  "tip":"Shields itself — the ward soaks your next hits."},
+					{"name":"Bolt", "emoji":"💢", "kind":"attack", "dmg":10, "tip":"A charged bolt at the weakest dwarf."},
+				]},
+	"wolf":     {"name":"Wolf",     "emoji":"🐺", "max_hp":22, "atk":5, "pref":"lowest_hp", "range":1, "move":3,
+				"tip":"Pack hunter — worries the weakest, and its Howl whips the whole pack into a frenzy.",
+				"moves": [
+					{"name":"Bite", "emoji":"🗡️", "kind":"attack",   "dmg":5, "tip":"Teeth find the weakest dwarf."},
+					{"name":"Howl", "emoji":"📣", "kind":"rage_all", "amt":2, "tip":"Every enemy gains +2 attack. Permanently."},
+					{"name":"Bite", "emoji":"🗡️", "kind":"attack",   "dmg":5, "tip":"Teeth find the weakest dwarf."},
+				]},
+	"warden":   {"name":"Warden",   "emoji":"🗿", "max_hp":40, "atk":7, "pref":"tankiest", "range":1, "move":1,
+				"tip":"A stone guardian — walls its allies behind it, then trades blows with your tank.",
+				"moves": [
+					{"name":"Bulwark", "emoji":"🛡️", "kind":"guard_all", "amt":8, "ally_amt":4, "tip":"Walls itself behind stone and shields its allies."},
+					{"name":"Slam",    "emoji":"🗡️", "kind":"attack",    "dmg":7,               "tip":"A slab of stone to the face."},
+					{"name":"Slam",    "emoji":"🗡️", "kind":"attack",    "dmg":7,               "tip":"A slab of stone to the face."},
+				]},
+	"witch":    {"name":"Witch",    "emoji":"🧿", "max_hp":26, "atk":6, "pref":"lowest_hp", "range":2, "move":2,
+				"tip":"Hexes and screams — curses the weakest, and her Shriek hits every dwarf at once.",
+				"moves": [
+					{"name":"Shriek", "emoji":"🌀", "kind":"attack_all", "dmg":3, "tip":"A piercing scream — hits EVERY dwarf."},
+					{"name":"Hex",    "emoji":"💥", "kind":"expose",     "amt":2, "tip":"A curse: the victim takes x1.5 from enemies for a turn."},
+					{"name":"Blast",  "emoji":"💢", "kind":"attack",     "dmg":7, "tip":"A bolt of spite at the weakest dwarf."},
+				]},
+	"ogre":     {"name":"Ogre",     "emoji":"👺", "max_hp":55, "atk":10, "pref":"tankiest", "range":1, "move":1,
+				"tip":"Slow and colossal — braces itself, then delivers a crushing two-beat blow. Time your blocks.",
+				"moves": [
+					{"name":"Brace", "emoji":"🛡️", "kind":"block",  "amt":5,  "tip":"Plants its feet and guards while it winds up."},
+					{"name":"CRUSH", "emoji":"💢", "kind":"attack", "dmg":16, "tip":"The wind-up lands. Block or bleed."},
+				]},
 }
 const ENCOUNTER := ["brute", "assassin", "caster"]
 
 ## OVERWORLD Phase 2 (overworld.gd reads this to build the combat `request`; combat.gd ignores
 ## it). Per danger tier: which enemies to field (max 3 — combat has 3 slots) and a scale multiplier
-## on enemy hp/atk. "med" = the canonical balanced trio; "high" = a heavier comp (two Brutes) + scale.
+## on enemy hp/atk. "med" = the canonical balanced trio; "high" = a heavier frontline comp + scale.
 const ENCOUNTERS_BY_TIER := {
 	"med":  {"enemies": ["brute", "assassin", "caster"], "scale": 1.0},
-	"high": {"enemies": ["brute", "brute", "caster"],    "scale": 1.2},
+	"high": {"enemies": ["brute", "witch", "caster"],    "scale": 1.2},
+}
+
+## Encounter variety (2026-07-01): per tier, comps rolled at fight time (overworld picks one at
+## random; scale still comes from ENCOUNTERS_BY_TIER). Each comp = exactly 3 ids (hard slot rule).
+## Missing tier -> overworld falls back to ENCOUNTERS_BY_TIER.enemies.
+const ENCOUNTER_POOLS := {
+	"med":  [["brute", "assassin", "caster"], ["wolf", "wolf", "witch"],
+			["warden", "caster", "wolf"],    ["assassin", "witch", "wolf"]],
+	# brute+brute+caster was an 85pp outlier (two tankiest heavies stack the one warrior); the
+	# brute+warden replacement was the OPPOSITE outlier (double-tank wall, 0% at the top cell).
+	# Witch spreads the pressure instead (scaling audit v2).
+	"high": [["brute", "witch", "caster"],   ["ogre", "warden", "witch"],
+			["brute", "witch", "assassin"], ["ogre", "wolf", "wolf"]],
 }
 
 const MARK_MULT := 1.25

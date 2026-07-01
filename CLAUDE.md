@@ -81,6 +81,28 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
 
 ## Current state (2026-07-01) — TWO modes: combat / overworld hex-crawl
 
+- **Enemy variety + telegraphed intent (2026-07-01):** enemies now run MOVE ROTATIONS
+  (`Db.ENEMIES[*].moves`, random start offset per instance; kinds attack/multi/attack_all/block/
+  guard_all/rage_all/expose — expose = player-side Vulnerable 💥 ×1.5, decays 1/player-phase).
+  Roster 3→7 (+Wolf 🐺 Howl-rage · Warden 🗿 Bulwark · Witch 🧿 AoE+Hex · Ogre 👺 2-beat CRUSH);
+  `Db.ENCOUNTER_POOLS` rolls one of 4 comps per tier (`_roll_encounter`, falls back to
+  ENCOUNTERS_BY_TIER). Intent UI: per-enemy latched move label with LIVE numbers (rage + target
+  Vulnerable), kind-colored; threat arrows only for directed moves; hover/tap an enemy opens an
+  intent panel (y≈40-132 band, x-clamped) with headline/move tip/Next/targeting tip. Enemy block
+  clears phase-wide at enemy-phase start (Bulwark shields allies regardless of act order).
+  Design doc: `docs/plans/2026-07-01-enemy-intent-variety-design.md`.
+- **Scaling audit (2026-07-01) — "hard but not impossible":** the old tier×mod×danger MULTIPLIED
+  composite (worst 2.688) was 0% winnable in a 96-cell Monte Carlo. Now: threat composes
+  ADDITIVELY (`overworld.gd` `_hex_combat`/`_embark_fight`), enemy HP scales at full
+  `enemy_scale` but damage/block at `dscale = 1+(escale-1)*ATK_SCALE_K(0.65)` (`combat.gd`
+  `_start_combat`), Howl rage capped (`RAGE_CAP 8`, telegraphs show real gain / "max"), elite
+  mod 1.40→1.50. V2 (sim re-run showed a 0%-win wall at the d3 band + double-tank comp):
+  `DANGER_STEP` 0.30→0.225, high comp → brute+witch+caster (brute+brute was one outlier,
+  brute+warden the opposite one), and `HEX_POST_FIGHT_HEAL 5` — living crew patch up after
+  each WON combat hex (expeditions were pure attrition; long routes uncompletable). Worst
+  reachable cell: escale 2.15. Sim: scratchpad `dorf_sim.py` (+full_results_v2/whatif/probe).
+  Sim's bot policy is near-optimal — treat its 100% floor readings as bot ceiling, not
+  "too easy for humans"; the trustworthy signals are the 0% cells.
 - **Hex map visual overhaul (2026-07-01):** the expedition board now draws TRUE pointy-top hexes via
   `scripts/ui/hex_tile.gd` (a `_draw()` Control: beveled board-piece look, terrain-tinted fills per
   kind, hexagon-precise `_has_point` picking, pulsing amber/gold rings replacing the old rect frames,

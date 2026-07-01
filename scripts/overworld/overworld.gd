@@ -38,7 +38,7 @@ const CLASS_REWARDS := {
 # Phase 5: contract modifiers — one data tag reshapes BOTH the job offer (payout) and the fight
 # (enemy scale), so "which job" carries more variety from the same 3 enemies. Cheapest recomb axis.
 const MODIFIERS := [
-	{"key": "elite",     "name": "Elite",     "emoji": "👑", "scale": 1.40, "pay": 1.3, "tip": "A champion leads them — much tougher, pays more."},
+	{"key": "elite",     "name": "Elite",     "emoji": "👑", "scale": 1.50, "pay": 1.3, "tip": "A champion leads them — much tougher, pays more."},
 	{"key": "lucrative", "name": "Lucrative", "emoji": "💰", "scale": 1.10, "pay": 1.7, "tip": "A rich contract — big payout, only a touch harder."},
 	{"key": "grim",      "name": "Grim",      "emoji": "💀", "scale": 1.25, "pay": 1.15, "tip": "Something worse waits below — harder, a little more coin."},
 ]
@@ -67,7 +67,9 @@ const EXPEDITIONS := true          # Med/High fight contracts open an expedition
 const HEX_COLS := 6                # offset-hex grid width  (border cols are wall)
 const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
 const HEX_R := 50.0                # pointy-top hex radius (px): width = R*sqrt(3), row pitch = R*1.5
-const DANGER_STEP := 0.30          # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.3/1.6)
+const DANGER_STEP := 0.225        # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.225/1.45)
+                                  # 0.30->0.225 (scaling audit v2): the d3 band at 0.30 was a 0%-win wall
+const HEX_POST_FIGHT_HEAL := 5    # living crew patch up after a WON combat hex — chains were pure attrition
 const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
 const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)
 const DS_SUCCESS_CHANCE := 0.55    # tuned toward survival; dorfs cheap-not-free
@@ -816,8 +818,8 @@ func _embark_fight(c: Dictionary) -> void:
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition
 	var mscale: float = float(c["mod"]["scale"]) if c.has("mod") else 1.0   # Phase 5: modifier scales the fight
 	if not comp.is_empty():
-		req["enemies"] = comp["enemies"]
-		req["enemy_scale"] = float(comp["scale"]) * mscale
+		req["enemies"] = _roll_encounter(c["tier"], comp)
+		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0)   # additive (see _hex_combat)
 	fight.request = req   # set BEFORE add_child (_ready runs on entry)
 	screen_root.visible = false
 	hud.visible = false
@@ -1208,6 +1210,14 @@ func _content_bag(n: int) -> Array:
 func _danger_scale(danger: int) -> float:
 	return 1.0 + float(maxi(0, danger - 1)) * DANGER_STEP
 
+## Encounter variety (2026-07-01): roll a comp from the tier's pool; scale still comes from
+## ENCOUNTERS_BY_TIER. Missing/empty pool falls back to the fixed comp (old behavior).
+func _roll_encounter(tier: String, comp: Dictionary) -> Array:
+	var pool: Array = Db.ENCOUNTER_POOLS.get(tier, [])
+	if pool.is_empty():
+		return comp["enemies"]
+	return pool[randi() % pool.size()]
+
 func _living_up() -> Array:
 	var up: Array = []
 	for d in exp_crew:
@@ -1442,8 +1452,10 @@ func _hex_combat(danger: int, e: int) -> void:
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})
 	var mscale: float = float(exp_contract["mod"]["scale"]) if exp_contract.has("mod") else 1.0
 	if not comp.is_empty():
-		req["enemies"] = comp["enemies"]
-		req["enemy_scale"] = float(comp["scale"]) * mscale * _danger_scale(danger)
+		req["enemies"] = _roll_encounter(exp_contract["tier"], comp)
+		# Scaling audit (2026-07-01): threat factors compose ADDITIVELY — multiplying tier x mod x
+		# danger grew ~quadratically (worst 2.688 was 0% winnable in sim). Single-factor cells unchanged.
+		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + (_danger_scale(danger) - 1.0)
 	fight.request = req                  # BEFORE add_child
 	screen_root.visible = false
 	hud.visible = false
@@ -1463,7 +1475,13 @@ func _hex_combat(danger: int, e: int) -> void:
 		d["hp"] = maxi(0, int(cr["hp_end"]))
 		if not cr["survived"] and not bool(d["downed"]) and d["status"] != "lost":
 			d["downed"] = true          # newly downed -> starts rolling death saves next tile
-	_msg("The ambush is broken." if result["success"] else "The crew is overrun…")
+	if result["success"]:
+		# Patch up after a won fight — without this, expeditions were pure attrition and long
+		# routes were mathematically uncompletable (scaling audit v2).
+		for d in exp_crew:
+			if d["status"] != "lost" and not bool(d["downed"]) and int(d["hp"]) > 0:
+				d["hp"] = mini(int(d["max_hp"]), int(d["hp"]) + HEX_POST_FIGHT_HEAL)
+	_msg("The ambush is broken — the crew patches up." if result["success"] else "The crew is overrun…")
 
 # ---------------------------------------------------------- Reward tile (loot -> loot bag / a card)
 func _open_hex_reward(e: int) -> void:

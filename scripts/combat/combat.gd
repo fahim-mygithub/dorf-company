@@ -14,6 +14,10 @@ const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 
 const HAND_SIZE := 5
 const VULN_MULT := 1.5   # Vulnerable enemies take +50% (stacks multiplicatively with Mark's +25%)
+# Scaling audit (2026-07-01): HP scales at full enemy_scale (fights get longer/costlier), but
+# damage+block scale at this damped rate — pure damage scaling is what makes cells impossible.
+const ATK_SCALE_K := 0.65
+const RAGE_CAP := 8      # Howl ramp is an enrage clock, not a divergence
 
 ## Overworld mesh (Phase 1): a non-empty `request` makes this scene run as a CHILD of the
 ## overworld — party/enemies come from `request`, and `_end` emits `combat_finished` instead of
@@ -52,6 +56,12 @@ var pc_energy: Array = []
 var pc_outline: Array = []
 
 var threat: Node2D
+var intent_panel: Control       # hover/tap explainer for an enemy's telegraphed move
+var ip_title: Label
+var ip_body: Label
+var ip_next: Label
+var ip_pref: Label
+var intent_open := -1           # enemy index the intent panel is showing, -1 = hidden
 var active_label: Label
 var hint_label: Label
 var hand_box: Control
@@ -116,6 +126,35 @@ func _build_ui() -> void:
 	threat.z_index = 40
 	add_child(threat)
 
+	# enemy-intent explainer panel (hover/tap an enemy) — lives in the free band above the enemy row
+	intent_panel = Control.new()
+	intent_panel.visible = false
+	intent_panel.z_index = 60
+	intent_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(intent_panel)
+	var ipbg := ColorRect.new()
+	ipbg.color = Color(0.07, 0.07, 0.10, 0.97)
+	ipbg.size = Vector2(480, 92)
+	ipbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intent_panel.add_child(ipbg)
+	var ipedge := ColorRect.new()
+	ipedge.color = Color(1, 1, 1, 0.14)
+	ipedge.size = Vector2(480, 1)
+	ipedge.position = Vector2(0, 91)
+	ipedge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intent_panel.add_child(ipedge)
+	ip_title = _label("", Vector2(10, 4), Vector2(460, 20), 15, false)
+	ip_title.reparent(intent_panel, false)
+	ip_body = _label("", Vector2(10, 27), Vector2(460, 18), 12, false)
+	ip_body.add_theme_color_override("font_color", Color(0.78, 0.78, 0.82))
+	ip_body.reparent(intent_panel, false)
+	ip_next = _label("", Vector2(10, 47), Vector2(460, 18), 12, false)
+	ip_next.add_theme_color_override("font_color", Color(0.95, 0.80, 0.45))
+	ip_next.reparent(intent_panel, false)
+	ip_pref = _label("", Vector2(10, 68), Vector2(460, 18), 11, false)
+	ip_pref.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
+	ip_pref.reparent(intent_panel, false)
+
 	for i: int in range(3):
 		_build_party_slot(i)
 
@@ -163,6 +202,10 @@ func _build_enemy_slot(i: int) -> void:
 	var pos: Vector2 = EN_POS[i]
 	var e := _emoji(pos, Vector2(96, 76), 50)
 	e.gui_input.connect(_on_enemy_input.bind(i))
+	# Intent explainer: hover on desktop; on touch the emulated cursor "enters" on tap and
+	# "exits" on the next tap elsewhere, so the same signals give tap-to-inspect for free.
+	e.mouse_entered.connect(_open_intent.bind(i))
+	e.mouse_exited.connect(_close_intent.bind(i))
 	en_emoji.append(e)
 	en_name.append(_label("", Vector2(pos.x - 80, pos.y - 74), Vector2(160, 20), 14))
 	en_intent.append(_label("", Vector2(pos.x - 80, pos.y - 52), Vector2(160, 22), 18))
@@ -209,6 +252,7 @@ func _start_combat() -> void:
 			# Standalone/mesh crews always have hp > 0, so this stays byte-identical for those paths.
 			"alive": int(spec.get("hp", cls["max_hp"])) > 0,
 			"deck": deck, "hand": [], "discard": [],
+			"vulnerable": 0,   # enemy Expose/Hex: takes x1.5 from enemy hits, decays 1/player-phase
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
 			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
 			"node": pc_emoji[i], "slot": i,
@@ -220,13 +264,28 @@ func _start_combat() -> void:
 	for i: int in range(enc.size()):
 		var eid: String = enc[i]
 		var ed: Dictionary = Db.ENEMIES[eid]
+		# HP scales at full escale; damage/block at the damped dscale (hard, not impossible).
+		var dscale: float = 1.0 + (escale - 1.0) * ATK_SCALE_K
 		var ehp: int = int(round(float(ed["max_hp"]) * escale))
-		var eatk: int = int(round(float(ed["atk"]) * escale))
+		var eatk: int = int(round(float(ed["atk"]) * dscale))
+		# Move rotation: damage/block amounts pre-scaled by dscale; rage stays flat (small permanent +).
+		var mvs: Array = []
+		for m: Dictionary in ed.get("moves", []):
+			var mv: Dictionary = m.duplicate()
+			if mv.has("dmg"):
+				mv["dmg"] = int(round(float(mv["dmg"]) * dscale))
+			if mv.has("amt") and mv["kind"] in ["block", "guard_all"]:
+				mv["amt"] = int(round(float(mv["amt"]) * dscale))
+			if mv.has("ally_amt"):
+				mv["ally_amt"] = int(round(float(mv["ally_amt"]) * dscale))
+			mvs.append(mv)
 		enemies.append({
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
 			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
 			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
 			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
+			"moves": mvs, "move_i": (randi() % mvs.size()) if not mvs.is_empty() else 0,   # random offset desyncs duplicates
+			"rage": 0,                    # permanent +atk from Howl (rage_all)
 			"intent_target": -1, "node": en_emoji[i], "slot": i,
 		})
 
@@ -234,6 +293,8 @@ func _start_combat() -> void:
 	taunt_last_turn = -99
 	phase = ""
 	overlay.visible = false
+	intent_open = -1
+	intent_panel.visible = false
 	for i: int in range(3):
 		en_emoji[i].text = enemies[i]["emoji"]
 		en_emoji[i].modulate = Color.WHITE
@@ -265,6 +326,7 @@ func _start_player_phase() -> void:
 		a["momentum"] = 0
 		a["devotion"] = 0
 		a["attacks_this_turn"] = 0
+		a["vulnerable"] = maxi(0, int(a.get("vulnerable", 0)) - 1)   # Expose/Hex wears off
 		_draw_cards(a, HAND_SIZE)
 	for e: Dictionary in enemies:
 		e["marked"] = false
@@ -291,6 +353,10 @@ func _on_end_turn() -> void:
 
 func _enemy_phase() -> void:
 	var epoch: int = combat_epoch
+	# Last turn's enemy stances (Ward/Brace/Bulwark) drop as the new enemy turn opens — cleared
+	# phase-wide, NOT per action, so a mid-phase Bulwark also shields allies acting after the Warden.
+	for e: Dictionary in enemies:
+		e["block"] = 0
 	# Burn ticks at the start of the enemy turn (status damage — ignores block, then decays by 1).
 	var any_burn := false
 	for e: Dictionary in enemies:
@@ -316,10 +382,8 @@ func _enemy_phase() -> void:
 		await get_tree().create_timer(0.45).timeout
 		if epoch != combat_epoch:
 			return
-		var t: Dictionary = _enemy_target(e)
-		if t.is_empty():
-			continue
-		_enemy_attack(e, t)
+		_do_enemy_move(e, _enemy_move(e))
+		e["move_i"] = int(e["move_i"]) + 1   # rotation advances; the intent label now telegraphs next turn
 		_refresh()
 		if _check_end():
 			return
@@ -327,6 +391,69 @@ func _enemy_phase() -> void:
 	if epoch != combat_epoch:
 		return
 	_start_player_phase()
+
+## The move this enemy is committed to (latched by construction: move_i only advances after acting).
+## An entry without a rotation falls back to the classic flat attack.
+func _enemy_move(e: Dictionary) -> Dictionary:
+	var mvs: Array = e.get("moves", [])
+	if mvs.is_empty():
+		return {"name": "Attack", "emoji": "🗡️", "kind": "attack", "dmg": int(e["atk"]), "tip": "A plain attack."}
+	return mvs[int(e["move_i"]) % mvs.size()]
+
+## Per-hit damage of an attack-kind move: move damage + accumulated rage (Howl).
+func _move_dmg(e: Dictionary, mv: Dictionary) -> int:
+	return int(mv.get("dmg", e["atk"])) + int(e.get("rage", 0))
+
+## What a Howl would actually add (telegraphs stay truthful once rage hits the cap).
+func _rage_gain(e: Dictionary, mv: Dictionary) -> int:
+	return mini(int(mv["amt"]), RAGE_CAP - int(e.get("rage", 0)))
+
+func _do_enemy_move(e: Dictionary, mv: Dictionary) -> void:
+	match mv["kind"]:
+		"attack":
+			var t: Dictionary = _enemy_target(e)
+			if not t.is_empty():
+				_enemy_attack(e, t, _move_dmg(e, mv))
+		"multi":
+			var t: Dictionary = _enemy_target(e)
+			for h: int in range(int(mv.get("hits", 1))):
+				# Retaliate can kill the attacker mid-flurry — the dead don't finish their swings.
+				if t.is_empty() or not t.get("alive", false) or not e.get("alive", false):
+					break
+				_enemy_attack(e, t, _move_dmg(e, mv))
+		"attack_all":
+			for a: Dictionary in party:
+				if not e.get("alive", false):
+					break
+				if a["alive"]:
+					_enemy_attack(e, a, _move_dmg(e, mv))
+			_log("%s's %s rakes the whole party!" % [e["name"], mv["name"]])
+		"block":
+			e["block"] += int(mv["amt"])
+			_flash(e)
+			_log("%s braces — %d block." % [e["name"], int(mv["amt"])])
+		"guard_all":
+			for o: Dictionary in enemies:
+				if o["alive"]:
+					o["block"] += int(mv["amt"]) if o == e else int(mv.get("ally_amt", 0))
+					_flash(o)
+			_log("%s walls the enemy line!" % e["name"])
+		"rage_all":
+			var gain: int = _rage_gain(e, mv)
+			for o: Dictionary in enemies:
+				if o["alive"]:
+					o["rage"] = mini(int(o.get("rage", 0)) + int(mv["amt"]), RAGE_CAP)
+					_flash(o)
+			if gain > 0:
+				_log("%s howls — the pack rages (+%d attack)!" % [e["name"], gain])
+			else:
+				_log("%s howls, but the pack's fury is already at its peak." % e["name"])
+		"expose":
+			var t: Dictionary = _enemy_target(e)
+			if not t.is_empty():
+				t["vulnerable"] = int(t.get("vulnerable", 0)) + int(mv["amt"])
+				_flash(t)
+				_log("%s exposes %s — x1.5 from enemy hits!" % [e["name"], t["name"]])
 
 # ================================================================ Targeting (enemy preference)
 ## Role-based (NOT slot-indexed) so a non-canonical crew (e.g. {W,W,S} with no Cleric) targets
@@ -643,9 +770,12 @@ func _deal_enemy(enemy: Dictionary, amt: int) -> void:
 	if enemy["hp"] <= 0:
 		enemy["alive"] = false
 
-## Enemy attacks a party character (shield -> block -> hp), then Retaliate fires.
-func _enemy_attack(e: Dictionary, t: Dictionary) -> void:
-	var dmg: int = maxi(0, e["atk"] - int(t["shield"]))
+## Enemy attacks a party character (xVulnerable -> shield -> block -> hp), then Retaliate fires.
+func _enemy_attack(e: Dictionary, t: Dictionary, base: int = -1) -> void:
+	var raw: int = base if base >= 0 else int(e["atk"])
+	if int(t.get("vulnerable", 0)) > 0:
+		raw = int(round(raw * VULN_MULT))
+	var dmg: int = maxi(0, raw - int(t["shield"]))
 	var blocked: int = mini(t["block"], dmg)
 	t["block"] -= blocked
 	var rem: int = dmg - blocked
@@ -733,6 +863,7 @@ func _refresh() -> void:
 	end_turn_btn.disabled = phase != "playerTurn"
 	end_turn_btn.visible = not overlay.visible
 	_update_cursor()
+	_refresh_intent_panel()
 
 func _refresh_enemies() -> void:
 	for i: int in range(3):
@@ -756,11 +887,8 @@ func _refresh_enemies() -> void:
 		if int(e.get("vulnerable", 0)) > 0:
 			estat += "💥 "
 		en_block[i].text = estat
-		var tname: String = ""
-		var t: Dictionary = _enemy_target(e)
-		if not t.is_empty():
-			tname = t["name"].substr(0, 3)
-		en_intent[i].text = "🗡️%d>%s" % [e["atk"], tname]
+		en_intent[i].text = _intent_text(e)
+		en_intent[i].add_theme_color_override("font_color", _intent_color(_enemy_move(e)["kind"]))
 		# Highlight valid enemy targets while an enemy-target card is armed.
 		var arm: Dictionary = _armed_def()
 		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
@@ -783,6 +911,8 @@ func _refresh_party() -> void:
 				st += "🛡️%d " % a["block"]
 			if a["shield"] > 0:
 				st += "🔰%d " % a["shield"]
+			if int(a.get("vulnerable", 0)) > 0:
+				st += "💥%d " % a["vulnerable"]
 			if int(a["temp"]["channel_charges"]) > 0:
 				st += "🌀%d " % a["temp"]["channel_charges"]
 			if a["temp"]["fortify_guard"] or a["temp"]["fortify"]:
@@ -805,11 +935,131 @@ func _refresh_party() -> void:
 			pc_block[i].text = ""
 			pc_energy[i].text = ""
 
+# ---------------------------------------------------------------- Intent telegraph
+## Compact always-on readout of the latched move, with LIVE numbers (rage + target Vulnerable).
+func _intent_text(e: Dictionary) -> String:
+	var mv: Dictionary = _enemy_move(e)
+	match mv["kind"]:
+		"attack":
+			return "%s%d→%s" % [mv["emoji"], _intent_hit(e, mv), _intent_tname(e)]
+		"multi":
+			return "%s%d×%d→%s" % [mv["emoji"], _intent_hit(e, mv), int(mv.get("hits", 1)), _intent_tname(e)]
+		"attack_all":
+			return "%s%d×all" % [mv["emoji"], _move_dmg(e, mv)]
+		"block", "guard_all":
+			return "%s%d" % [mv["emoji"], int(mv["amt"])]
+		"rage_all":
+			var g: int = _rage_gain(e, mv)
+			return ("%s+%d" % [mv["emoji"], g]) if g > 0 else "%smax" % mv["emoji"]
+		"expose":
+			return "%s→%s" % [mv["emoji"], _intent_tname(e)]
+	return str(mv["emoji"])
+
+func _intent_hit(e: Dictionary, mv: Dictionary) -> int:
+	var dmg: int = _move_dmg(e, mv)
+	var t: Dictionary = _enemy_target(e)
+	if not t.is_empty() and int(t.get("vulnerable", 0)) > 0:
+		dmg = int(round(dmg * VULN_MULT))
+	return dmg
+
+func _intent_tname(e: Dictionary) -> String:
+	var t: Dictionary = _enemy_target(e)
+	return str(t["name"]).substr(0, 3) if not t.is_empty() else ""
+
+func _intent_color(kind: String) -> Color:
+	match kind:
+		"attack", "multi", "attack_all":
+			return Color(1.0, 0.55, 0.50)
+		"block", "guard_all":
+			return Color(0.62, 0.85, 1.0)
+		"rage_all":
+			return Color(0.98, 0.78, 0.35)
+		"expose":
+			return Color(0.85, 0.62, 1.0)
+	return Color.WHITE
+
+func _open_intent(i: int) -> void:
+	if not enemies[i].get("alive", false) or overlay.visible:
+		return
+	intent_open = i
+	_refresh_intent_panel()
+
+func _close_intent(i: int) -> void:
+	if intent_open == i:
+		intent_open = -1
+		intent_panel.visible = false
+
+func _refresh_intent_panel() -> void:
+	if intent_open < 0:
+		return
+	var e: Dictionary = enemies[intent_open]
+	if not e["alive"] or overlay.visible:
+		intent_open = -1
+		intent_panel.visible = false
+		return
+	var mv: Dictionary = _enemy_move(e)
+	var mvs: Array = e.get("moves", [])
+	ip_title.text = "%s %s — %s" % [e["emoji"], e["name"], _intent_headline(e, mv)]
+	ip_body.text = str(mv.get("tip", ""))
+	if mvs.size() > 1:
+		var nm: Dictionary = mvs[(int(e["move_i"]) + 1) % mvs.size()]
+		ip_next.text = "Next: %s %s" % [nm["name"], _intent_brief(e, nm)]
+	else:
+		ip_next.text = ""
+	ip_pref.text = str(Db.ENEMIES[e["archetype"]].get("tip", ""))
+	intent_panel.position = Vector2(clampf(EN_POS[intent_open].x - 240.0, 8.0, 720.0 - 8.0 - 480.0), 40.0)
+	intent_panel.visible = true
+
+func _intent_headline(e: Dictionary, mv: Dictionary) -> String:
+	var t: Dictionary = _enemy_target(e)
+	var tn: String = str(t["name"]) if not t.is_empty() else "?"
+	match mv["kind"]:
+		"attack":
+			return "%s: hits %s for %d" % [mv["name"], tn, _intent_hit(e, mv)]
+		"multi":
+			return "%s: %d hits of %d on %s" % [mv["name"], int(mv.get("hits", 1)), _intent_hit(e, mv), tn]
+		"attack_all":
+			return "%s: %d to EVERY dwarf" % [mv["name"], _move_dmg(e, mv)]
+		"block":
+			return "%s: blocks %d" % [mv["name"], int(mv["amt"])]
+		"guard_all":
+			return "%s: blocks %d, allies +%d" % [mv["name"], int(mv["amt"]), int(mv.get("ally_amt", 0))]
+		"rage_all":
+			var g: int = _rage_gain(e, mv)
+			if g > 0:
+				return "%s: ALL enemies +%d attack" % [mv["name"], g]
+			return "%s: the pack's fury is at its peak" % mv["name"]
+		"expose":
+			return "%s: curses %s — x1.5 for a turn" % [mv["name"], tn]
+	return str(mv["name"])
+
+func _intent_brief(e: Dictionary, mv: Dictionary) -> String:
+	match mv["kind"]:
+		"attack":
+			return str(_move_dmg(e, mv))
+		"multi":
+			return "%d×%d" % [_move_dmg(e, mv), int(mv.get("hits", 1))]
+		"attack_all":
+			return "%d to all" % _move_dmg(e, mv)
+		"block":
+			return "block %d" % int(mv["amt"])
+		"guard_all":
+			return "block %d/+%d" % [int(mv["amt"]), int(mv.get("ally_amt", 0))]
+		"rage_all":
+			var g: int = _rage_gain(e, mv)
+			return ("+%d atk to all" % g) if g > 0 else "fury peaked"
+		"expose":
+			return "curse ×1.5"
+	return ""
+
 func _refresh_threats() -> void:
 	var pairs: Array = []
 	if phase == "playerTurn":
 		for e: Dictionary in enemies:
 			if not e["alive"]:
+				continue
+			# Only target-directed intents draw an arrow; block/buff/AoE turns threaten nobody in particular.
+			if not _enemy_move(e)["kind"] in ["attack", "multi", "expose"]:
 				continue
 			var t: Dictionary = _enemy_target(e)
 			if t.is_empty():
