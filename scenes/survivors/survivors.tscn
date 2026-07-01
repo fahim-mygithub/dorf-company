@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://cd6alhilrschj"]
+
+[ext_resource type="Script" uid="uid://dahpkj1y3t114" path="res://scripts/survivors/survivors.gd" id="1_abw7c"]
+
+[node name="Survivors" type="Control" unique_id=803167090]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_abw7c")
