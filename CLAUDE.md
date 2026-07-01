@@ -97,10 +97,12 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `enemy_scale` but damage/block at `dscale = 1+(escale-1)*ATK_SCALE_K(0.65)` (`combat.gd`
   `_start_combat`), Howl rage capped (`RAGE_CAP 8`, telegraphs show real gain / "max"), elite
   mod 1.40→1.50. V2 (sim re-run showed a 0%-win wall at the d3 band + double-tank comp):
-  `DANGER_STEP` 0.30→0.225, high comp → brute+witch+caster (brute+brute was one outlier,
+  `DANGER_STEP` 0.30→0.21, high comp → brute+witch+caster (brute+brute was one outlier,
   brute+warden the opposite one), and `HEX_POST_FIGHT_HEAL 5` — living crew patch up after
   each WON combat hex (expeditions were pure attrition; long routes uncompletable). Worst
-  reachable cell: escale 2.15. Sim: scratchpad `dorf_sim.py` (+full_results_v2/whatif/probe).
+  reachable cell: escale 2.12; every worst-corner comp ≥2%. High·elite FULL-clears stay a
+  prestige wall (structural, sim-proven untunable — accepted; the routable board + Extract
+  keep the contract playable). Sim: scratchpad `dorf_sim.py` (+full_results/v2/v3/probes).
   Sim's bot policy is near-optimal — treat its 100% floor readings as bot ceiling, not
   "too easy for humans"; the trustworthy signals are the 0% cells.
 - **Hex map visual overhaul (2026-07-01):** the expedition board now draws TRUE pointy-top hexes via

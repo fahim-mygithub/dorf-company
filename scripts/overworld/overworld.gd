@@ -67,8 +67,9 @@ const EXPEDITIONS := true          # Med/High fight contracts open an expedition
 const HEX_COLS := 6                # offset-hex grid width  (border cols are wall)
 const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
 const HEX_R := 50.0                # pointy-top hex radius (px): width = R*sqrt(3), row pitch = R*1.5
-const DANGER_STEP := 0.225        # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.225/1.45)
-                                  # 0.30->0.225 (scaling audit v2): the d3 band at 0.30 was a 0%-win wall
+const DANGER_STEP := 0.21         # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.21/1.42)
+                                  # 0.30->0.225->0.21 (scaling audit v2/v3): at 0.30 the d3 band was a
+                                  # 0%-win wall; 0.21 lifts every worst-corner comp past the >=2% gate
 const HEX_POST_FIGHT_HEAL := 5    # living crew patch up after a WON combat hex — chains were pure attrition
 const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
 const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)

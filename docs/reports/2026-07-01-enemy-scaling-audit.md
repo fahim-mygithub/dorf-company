@@ -20,14 +20,14 @@ were pure attrition. Meanwhile `brute+brute+caster` was an 85-point outlier vs s
 |---|---|---|---|
 | Threat composition | tier × mod × danger | **additive**: 1+(t−1)+(m−1)+(d−1) | `overworld.gd` `_hex_combat`/`_embark_fight` |
 | Damage/block scaling | full escale | **damped**: `1+(escale−1)·0.65` (HP stays full) | `combat.gd` `_start_combat` (`ATK_SCALE_K`) |
-| Danger step | 0.30 (d3=1.6) | **0.225** (d3=1.45) | `overworld.gd` `DANGER_STEP` |
+| Danger step | 0.30 (d3=1.6) | **0.21** (d3=1.42; 0.225 was still 1.7–1.9% at the worst corner — 0.21 validated ≥2.3% everywhere with no side effects) | `overworld.gd` `DANGER_STEP` |
 | Elite modifier | 1.40 | **1.50** (keeps its bite under additive) | `overworld.gd` `MODIFIERS` |
 | Howl rage | unbounded | **cap 8**, telegraphs show real gain/"max" | `combat.gd` `RAGE_CAP` |
 | High comp | brute+brute+caster | **brute+witch+caster** (brute+warden was the opposite outlier: double-tank 0% wall) | `card_db.gd` |
 | Expedition attrition | none | **+5 HP** to living crew after each WON combat hex | `overworld.gd` `HEX_POST_FIGHT_HEAL` |
 
-Worst reachable composite is now **2.15** → damage ×1.75 (Ogre CRUSH 28, +rage ≤36; blockable
-by a braced warrior), HP ×2.15 (fights long and costly).
+Worst reachable composite is now **2.12** → damage ×1.73 (Ogre CRUSH ~28, +rage ≤36; blockable
+by a braced warrior), HP ×2.12 (fights long and costly).
 
 ## Post-tune landscape (Monte Carlo v3)
 
@@ -44,6 +44,12 @@ by a braced warrior), HP ×2.15 (fights long and costly).
 
 - The sim's bot is near-optimal: its 100% floor / 96.6% med-chain readings are a bot ceiling,
   not proof of "too easy" — human numbers land lower. Trust the 0% direction, not the 100%.
+- **High·elite FULL-clears are structurally ~0% and accepted as a prestige wall** (two
+  independent sims agree; even a full heal between fights doesn't rescue a forced-d3-finisher
+  route — it's attrition + finisher bound, not a scale knob). Real play softens it: the board
+  is visible and routable around ☠☠☠, the objective never spawns a fight, Extract always
+  pays. If playtests want it literally completable, the validated minimum is a DESIGN change:
+  cap elite expedition routes at d2 + `HEX_POST_FIGHT_HEAL 5→15` (→ ~0.7% forced-route).
 - If playtests still find the top corner hopeless: `elite 1.50→1.40` or `ATK_SCALE_K
   0.65→0.60` (one line each). If med feels too comfy: `HEX_POST_FIGHT_HEAL 5→3`.
 - Known residual (accepted): a warrior-less crew has no Taunt answer to converged lowest-hp
