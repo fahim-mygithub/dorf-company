@@ -79,7 +79,31 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-06-30) — Slice 2 party puzzle
+## Current state (2026-07-01) — hex-crawl expedition + shop + card expansion
+
+- **NEW (2026-07-01, shipped & deployed):** the overworld's Med/High fight contracts now open a
+  **hex-crawl EXPEDITION** instead of a single fight (spec+notes: `docs/plans/2026-07-01-hex-crawl-shop-spec.md`).
+  Radius-2 fogged axial hex map, hidden objective at depth ≥ 2, push-or-extract after every tile;
+  content = combat/reward/event/empty/objective. **Each combat hex reuses the SAME seam** (crew=party,
+  `enemy_scale = tier × mod × (1+depth·0.20)`, HP carried in/out, `run_epoch`-guarded across every await).
+  The fixed 3 crew ride every fight; a downed dwarf enters at 0 HP as a benched slot (combat's 3-slot
+  rule — `alive = hp>0`, standalone stays byte-identical). **Death saves** (`LOSS_ENABLED = true` now):
+  0-HP dwarf rolls each tile, 3 succ = stable, 3 fail = dead; extract saves them; **Recruit** (shop)
+  refills the roster so loss is fair. Resolution maps to the UNCHANGED `{success,payout,pending}` shape
+  (objective = `depth_pay + OBJECTIVE_BONUS`, extract = `depth_pay(deepest)`, wipe = 0). One expedition =
+  one campaign (doesn't tick the clock). **Shop** on the contract board (monthly re-roll): Card /
+  Field Medic / Recruit — every buy trades against rent. Low stays the dice lifeline (economy gate intact).
+- **NEW combat cards/ops (2026-07-01):** 18 additive cards (`card_db.gd`) + a `_run_ops` dispatcher
+  (`combat.gd`) with new systems — **Burn** 🔥 (enemy status, ticks at enemy-turn start, decays −1),
+  **Vulnerable** 💥 (×1.5, stacks multiplicatively with Mark ×1.25), **Momentum** ⚔️ (per-char attacks →
+  Momentum Strike), **Devotion** 🙏 (per-char skills → Divine Smite spend), Empower `next_card_double` ✨,
+  Whetstone `buff_next_attack` 🪨, `retain_block`, conditionals `if_bloodied`/`if_target_marked`/
+  `spend_devotion`/`on_kill`, `dmg_all`, `party_block`, `heal_self`/`heal_ally`, `gain_energy`.
+  9 generic cards joined `REWARD_POOL`; class cards are role-locked (offered on hex reward tiles via
+  `CLASS_REWARDS`). `describe()` renders every new card's live body. New op alias: `dmg`==`damage`,
+  `self_dmg`==`self_damage`. All verified via `execute_game_script` state dumps.
+
+## Prior state (2026-06-30) — Slice 2 party puzzle
 
 - **Three deployed modes / three Pages URLs** (root `main_scene` stays combat; CI seds per-export):
   `/` = combat (Slice 2, below) · `/grid/` = the Fire-Emblem grid fork (`scenes/combat/grid_combat.gd`) ·
