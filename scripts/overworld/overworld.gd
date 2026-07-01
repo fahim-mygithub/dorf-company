@@ -24,7 +24,16 @@ const WOUND_RECOVERY := 2     # months a downed dwarf is benched; returns at ful
 const HP_REGEN_PER_MONTH := 6 # Phase 2: a ready-but-hurt dwarf mends this much HP per month
 # Phase 4: post-win reward pool — universal chassis cards any dwarf can learn (signatures stay in
 # starting decks, role-locked). Adding one to a dwarf's deck is how runs recombine (StS deckbuilding).
-const REWARD_POOL := ["strike", "guard", "cleave", "wall"]
+const REWARD_POOL := ["strike", "guard", "cleave", "wall",
+	# 2026-07-01 expansion: the 9 GENERIC cards join the universal pool (class cards stay role-locked).
+	"power_through", "precise_jab", "whetstone", "guard_break", "field_dressing",
+	"bracing_stance", "opportunist", "rally", "trophy_hunter"]
+# Class-gated reward cards, offered on hex reward tiles when a crew member of that class is present.
+const CLASS_REWARDS := {
+	"warrior":  ["reckless_swing", "second_wind", "momentum_strike"],
+	"cleric":   ["lay_on_hands", "consecrate", "divine_smite"],
+	"sorcerer": ["arc_lightning", "empower", "kindle"],
+}
 # Phase 5: contract modifiers — one data tag reshapes BOTH the job offer (payout) and the fight
 # (enemy scale), so "which job" carries more variety from the same 3 enemies. Cheapest recomb axis.
 const MODIFIERS := [
@@ -44,9 +53,29 @@ const LOSS_CHANCE := {"low": 0.0, "med": 0.04, "high": 0.12}
 const FAILURE_PAYOUT_MULT := 0.5
 const FAILURE_ATTRITION_MULT := 2.0
 
-const LOSS_ENABLED := false   # STEP 1: wounds only (A5). Step 2 flips true.
 const CREW_SELECT := true     # Phase 3: player picks WHICH dwarves crew each fight.
 const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract launches a REAL fight.
+
+# ============================================================ Hex-crawl expedition (2026-07-01 spec)
+const EXPEDITIONS := true          # Med/High fight contracts open a multi-hex expedition (not one fight).
+const HEX_RADIUS := 2              # axial radius -> ~19 hexes
+const OBJECTIVE_MIN_DEPTH := 2     # the civilian is never in a trivially-close hex
+const HEX_DEPTH_SCALE := 0.20      # enemy_scale grows this much per depth step
+const DEPTH_PAY := 15              # gold banked per deepest-depth-reached step
+const OBJECTIVE_BONUS := 60        # full-success bonus on top of depth pay
+const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
+const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)
+const DS_SUCCESS_CHANCE := 0.55    # tuned toward survival; dorfs cheap-not-free
+const EVENT_RISK_GOLD := 24        # risky event: gold on the good outcome
+const EVENT_SAFE_GOLD := 8         # safe event: a little coin
+const HEX_REWARD_GOLD := 18        # a gold reward tile
+# Shop (H5) — money's second job: uplift for bad dorfs, competing with rent.
+const SHOP_CARD_COST := 35
+const SHOP_HEAL_COST := 25
+const SHOP_RECRUIT_COST := 50
+const RECRUIT_NAMES := ["Durn", "Kael", "Brom", "Hilda", "Nael", "Torvi", "Grund", "Sif"]
+
+const LOSS_ENABLED := true    # Now SAFE: death only via failed death saves, and the shop's Recruit refills the roster.
 
 const STARTERS := [
 	{"name": "Thrain", "cls": "warrior"},
@@ -99,6 +128,18 @@ var state := ""
 var run_epoch := 0
 var busy := false
 var _tre_shown := 0
+# Expedition (hex-crawl) state
+var exp_contract: Dictionary = {}   # the contract being run as an expedition
+var exp_crew: Array = []            # the fixed 3 crew dwarves for this expedition
+var hexes: Dictionary = {}          # "q,r" -> hex dict
+var hex_cur := ""                   # current hex key
+var hex_deepest := 0                # deepest depth reached (drives banked payout)
+var hex_loot: Array = []            # card ids offered on a reward tile
+var hex_loot_pick := -1
+var hex_event: Dictionary = {}      # the active event tile
+# Shop state (per month)
+var shop_stock: Array = []          # [{kind,...}] 3 slots, re-rolled each month
+var shop_sel := -1                  # selected shop slot awaiting a dwarf target
 
 # ============================================================ UI refs
 var screen_root: Control
@@ -271,10 +312,16 @@ func _new_run() -> void:
 	selected_contract = -1
 	roster = []
 	for s in STARTERS:
-		var mh: int = int(Db.CLASSES[s["cls"]]["max_hp"])
-		roster.append({"name": s["name"], "cls": s["cls"], "status": "ready", "recover": 0, "hp": mh, "max_hp": mh,
-			"deck": (Db.CLASSES[s["cls"]]["deck"] as Array).duplicate()})   # Phase 4: persistent, growable deck
+		roster.append(_make_dwarf(s["name"], s["cls"]))
+	_reroll_shop()
 	_regen_contracts()
+
+# One roster dwarf. downed/stable/ds_* are per-EXPEDITION death-save state (reset each expedition start).
+func _make_dwarf(dname: String, cls: String) -> Dictionary:
+	var mh: int = int(Db.CLASSES[cls]["max_hp"])
+	return {"name": dname, "cls": cls, "status": "ready", "recover": 0, "hp": mh, "max_hp": mh,
+		"deck": (Db.CLASSES[cls]["deck"] as Array).duplicate(),
+		"downed": false, "stable": false, "ds_success": 0, "ds_fail": 0}
 	overlay.visible = false
 	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
 	_enter_dashboard()
@@ -411,6 +458,7 @@ func _build_contracts() -> void:
 	var xs := [12, 252, 492]
 	for i in range(contracts.size()):
 		_build_contract_card(i, xs[i])
+	_build_shop_panel()
 	var back := Button.new()
 	back.text = "◀ Back"
 	back.add_theme_font_size_override("font_size", 18)
@@ -488,6 +536,9 @@ func _embark() -> void:
 	if USE_REAL_COMBAT and c.get("fight", false):
 		if CREW_SELECT:
 			_open_crew_select(c)          # player picks the crew, then launches
+		elif EXPEDITIONS:
+			current["crew"] = _canonical_trio()
+			_open_expedition(c)
 		else:
 			current["crew"] = _canonical_trio()
 			await _embark_fight(c)
@@ -636,7 +687,10 @@ func _launch_fight() -> void:
 	if busy or crew_pick.size() != int(current["crew_size"]):
 		return
 	current["crew"] = crew_pick.duplicate()
-	await _embark_fight(current)
+	if EXPEDITIONS:
+		_open_expedition(current)   # multi-hex expedition (uses the same seam per combat hex)
+	else:
+		await _embark_fight(current)
 
 # ============================================================ Card rewards (Phase 4)
 func _roll_rewards() -> Array:
@@ -979,6 +1033,7 @@ func _end_month() -> void:
 		return
 	campaigns_left = CAMPAIGNS_PER_MONTH
 	busy = false
+	_reroll_shop()   # shop stock refreshes each month
 	_regen_contracts()
 	_enter_dashboard()
 
@@ -1022,3 +1077,685 @@ func _game_over(kind: String) -> void:
 	overlay_btn.text = "New Company"
 	overlay.visible = true
 	_refresh_hud()
+
+# ============================================================ Hex-crawl expedition (2026-07-01 spec)
+## An expedition = a small run-within-a-contract: a fogged hex map, per-hex combat via the SAME seam,
+## push-or-extract after each tile, death saves for the downed. It resolves into the SAME
+## {success,payout,pending} shape the dice/single-fight paths produce, so rent/spoils stay unchanged.
+## Re-entrancy: capture e := run_epoch at each entry and re-check after EVERY await (report §9.3).
+
+func _open_expedition(c: Dictionary) -> void:
+	exp_contract = c
+	exp_crew = c["crew"].duplicate()   # shallow: elements are the roster dicts (carried HP/status persists)
+	for d in exp_crew:                 # reset per-expedition death-save state; carried HP stays as-is
+		d["downed"] = false
+		d["stable"] = false
+		d["ds_success"] = 0
+		d["ds_fail"] = 0
+	_gen_hex_map(c)
+	state = "HEX"
+	busy = false
+	_msg("Into %s — reach the captive, or bank what you take and leave." % c["title"])
+	_clear_screen()
+	_build_hexcrawl()
+	_refresh_hud()
+
+func _hex_key(q: int, r: int) -> String:
+	return "%d,%d" % [q, r]
+
+func _hex_depth(q: int, r: int) -> int:
+	return int((abs(q) + abs(r) + abs(q + r)) / 2)
+
+func _hex_neighbors(key: String) -> Array:
+	var h: Dictionary = hexes[key]
+	var q: int = int(h["q"])
+	var r: int = int(h["r"])
+	var out: Array = []
+	for d in [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]:
+		var k := _hex_key(q + d[0], r + d[1])
+		if hexes.has(k):
+			out.append(k)
+	return out
+
+func _gen_hex_map(c: Dictionary) -> void:
+	hexes = {}
+	for q in range(-HEX_RADIUS, HEX_RADIUS + 1):
+		for r in range(-HEX_RADIUS, HEX_RADIUS + 1):
+			if abs(q + r) > HEX_RADIUS:
+				continue
+			hexes[_hex_key(q, r)] = {"q": q, "r": r, "depth": _hex_depth(q, r),
+				"content": "empty", "revealed": false, "resolved": false, "objective": false}
+	var entry: Dictionary = hexes["0,0"]
+	entry["revealed"] = true
+	entry["resolved"] = true
+	for nk in _hex_neighbors("0,0"):
+		hexes[nk]["revealed"] = true
+	var far: Array = []                        # hide the objective on a random far tile
+	for k in hexes:
+		if int(hexes[k]["depth"]) >= OBJECTIVE_MIN_DEPTH:
+			far.append(k)
+	far.shuffle()
+	hexes[far[0]]["objective"] = true
+	hexes[far[0]]["content"] = "objective"
+	for k in hexes:                            # roll the rest (depth-weighted)
+		var h: Dictionary = hexes[k]
+		if bool(h["resolved"]) or bool(h["objective"]):
+			continue
+		h["content"] = _roll_hex_content(int(h["depth"]))
+	hex_cur = "0,0"
+	hex_deepest = 0
+
+func _roll_hex_content(depth: int) -> String:
+	var roll := randf()
+	if depth >= 2:
+		if roll < 0.50: return "combat"
+		elif roll < 0.80: return "reward"
+		elif roll < 0.95: return "event"
+		else: return "empty"
+	if roll < 0.35: return "combat"
+	elif roll < 0.60: return "reward"
+	elif roll < 0.75: return "event"
+	return "empty"
+
+func _depth_pay(depth: int) -> int:
+	return depth * DEPTH_PAY
+
+func _living_up() -> Array:
+	var up: Array = []
+	for d in exp_crew:
+		if d["status"] != "lost" and not bool(d["downed"]):
+			up.append(d)
+	return up
+
+# ---------------------------------------------------------- Hex map render
+func _hex_px(q: int, r: int) -> Vector2:
+	var size := 50.0
+	return Vector2(360.0 + size * sqrt(3.0) * (float(q) + float(r) / 2.0), 500.0 + size * 1.5 * float(r))
+
+func _build_hexcrawl() -> void:
+	_mklabel("— EXPEDITION —", Vector2(0, 172), Vector2(720, 26), 20, screen_root)
+	var c := exp_contract
+	var modtxt: String = ("  ·  %s %s" % [c["mod"]["emoji"], c["mod"]["name"]]) if c.has("mod") else ""
+	_mklabel("%s  ·  %s%s" % [c["title"], c["loc_name"], modtxt], Vector2(0, 200), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	_mklabel("Tap a lit neighbour to push on. Deeper = richer & deadlier.", Vector2(0, 224), Vector2(720, 18), 12, screen_root, true, Color(0.7, 0.7, 0.75))
+	for k in hexes:
+		_build_hex_tile(k)
+	_build_exp_crew_strip()
+	_mklabel("deepest %d  ·  🧍 captive worth +%dg" % [hex_deepest, OBJECTIVE_BONUS], Vector2(24, 1112), Vector2(420, 18), 12, screen_root, false, Color(0.8, 0.78, 0.6))
+	var ex := Button.new()
+	ex.text = "🏳️ Extract (+%dg)" % _depth_pay(hex_deepest)
+	ex.add_theme_font_size_override("font_size", 18)
+	ex.position = Vector2(430, 1146)
+	ex.size = Vector2(266, 70)
+	ex.disabled = busy
+	ex.pressed.connect(_on_extract)
+	screen_root.add_child(ex)
+
+func _build_hex_tile(key: String) -> void:
+	var h: Dictionary = hexes[key]
+	var px := _hex_px(int(h["q"]), int(h["r"]))
+	var sz := Vector2(74, 66)
+	var cur := key == hex_cur
+	var revealed := bool(h["revealed"])
+	var neighbor := _hex_neighbors(hex_cur).has(key)
+	var can_move := revealed and neighbor and not cur
+	var tile := Control.new()
+	tile.position = px - sz * 0.5
+	tile.size = sz
+	tile.mouse_filter = Control.MOUSE_FILTER_STOP if can_move else Control.MOUSE_FILTER_IGNORE
+	if can_move:
+		tile.gui_input.connect(_on_hex_input.bind(key))
+	screen_root.add_child(tile)
+	var col: Color
+	if not revealed:
+		col = Color(0.13, 0.13, 0.16)
+	elif cur:
+		col = Color(0.28, 0.42, 0.55)
+	elif bool(h["resolved"]):
+		col = Color(0.18, 0.24, 0.19)
+	else:
+		col = Color(0.26, 0.26, 0.32)
+	_rect(Vector2.ZERO, sz, col, tile)
+	if can_move:
+		_rect(Vector2(0, 0), Vector2(sz.x, 4), C_AMBER, tile)
+	var glyph := ""
+	if not revealed:
+		glyph = ""
+	elif cur:
+		glyph = "🚩"
+	elif not bool(h["resolved"]):
+		glyph = "❓"
+	elif h["content"] == "empty":
+		glyph = "·"
+	else:
+		glyph = "✔️"
+	if glyph != "":
+		_mkemoji(sz * 0.5, sz, 28, tile).text = glyph
+
+func _build_exp_crew_strip() -> void:
+	_mklabel("crew", Vector2(0, 716), Vector2(720, 18), 12, screen_root, true, Color(0.8, 0.8, 0.85))
+	var n := exp_crew.size()
+	var startx := 360 - (n - 1) * 120
+	for i in range(n):
+		_build_exp_crew_token(exp_crew[i], startx + i * 240, 800)
+
+func _build_exp_crew_token(d: Dictionary, cx: int, cy: int) -> void:
+	var col: Color = CLASS_COL[d["cls"]]
+	_rect(Vector2(cx - 66, cy - 66), Vector2(132, 168), Color(col.r, col.g, col.b, 0.16), screen_root)
+	var emo := _mkemoji(Vector2(cx, cy - 28), Vector2(96, 70), 44, screen_root)
+	emo.text = Db.CLASSES[d["cls"]]["emoji"]
+	var dead: bool = d["status"] == "lost"
+	var down := bool(d["downed"])
+	if dead:
+		emo.modulate = MOD_LOST
+	elif down:
+		emo.modulate = MOD_WOUNDED
+	_mklabel(d["name"], Vector2(cx - 66, cy + 16), Vector2(132, 20), 14, screen_root)
+	if dead:
+		_mklabel("💀 dead", Vector2(cx - 66, cy + 38), Vector2(132, 18), 12, screen_root, true, C_RED)
+	elif bool(d["stable"]):
+		_mklabel("🩹 stable", Vector2(cx - 66, cy + 38), Vector2(132, 18), 12, screen_root, true, C_AMBER)
+	elif down:
+		_mklabel("DOWNED — save:", Vector2(cx - 66, cy + 38), Vector2(132, 18), 11, screen_root, true, C_RED)
+		var sx := cx - 40
+		for j in range(DS_SUCCESS_NEEDED):
+			_rect(Vector2(sx + j * 16, cy + 58), Vector2(12, 12), C_GREEN if j < int(d["ds_success"]) else Color(0.22, 0.3, 0.22), screen_root)
+		for j in range(DS_FAIL_NEEDED):
+			_rect(Vector2(sx + j * 16, cy + 74), Vector2(12, 12), C_RED if j < int(d["ds_fail"]) else Color(0.3, 0.22, 0.22), screen_root)
+	else:
+		var frac := clampf(float(d["hp"]) / float(d["max_hp"]), 0.0, 1.0)
+		var hpcol: Color = C_GREEN if frac > 0.6 else (C_AMBER if frac > 0.3 else C_RED)
+		_rect(Vector2(cx - 42, cy + 44), Vector2(84, 9), Color(0.25, 0.25, 0.3), screen_root)
+		_rect(Vector2(cx - 42, cy + 44), Vector2(84 * frac, 9), hpcol, screen_root)
+		_mklabel("%d/%d" % [int(d["hp"]), int(d["max_hp"])], Vector2(cx - 66, cy + 56), Vector2(132, 16), 11, screen_root, true, hpcol)
+
+# ---------------------------------------------------------- Hex movement + resolution
+func _on_hex_input(event: InputEvent, key: String) -> void:
+	if busy or state != "HEX":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if _hex_neighbors(hex_cur).has(key) and bool(hexes[key]["revealed"]):
+			await _enter_hex(key)
+
+func _enter_hex(key: String) -> void:
+	busy = true
+	var e := run_epoch
+	hex_cur = key
+	var h: Dictionary = hexes[key]
+	hex_deepest = maxi(hex_deepest, int(h["depth"]))
+	for nk in _hex_neighbors(key):
+		hexes[nk]["revealed"] = true
+	_roll_death_saves()                    # each new tile = time passing for the downed
+	if not bool(h["resolved"]):
+		h["resolved"] = true
+		match h["content"]:
+			"objective":
+				await _finish_expedition("objective", e)
+				return
+			"combat":
+				_msg("An ambush in the dark!")
+				await _hex_combat(int(h["depth"]), e)
+				if e != run_epoch:
+					return
+			"reward":
+				_open_hex_reward(int(h["depth"]), e)
+				return
+			"event":
+				_open_hex_event(e)
+				return
+			_:
+				_msg("An empty passage. The fog clears ahead.")
+	await _resume_hex(e)
+
+## Return to the map after a tile resolves; a wipe (nobody up) ends the expedition here.
+func _resume_hex(e: int) -> void:
+	if e != run_epoch:
+		return
+	if _living_up().is_empty():
+		await _finish_expedition("wipe", e)
+		return
+	busy = false
+	state = "HEX"
+	_clear_screen()
+	_build_hexcrawl()
+	_refresh_hud()
+
+func _roll_death_saves() -> void:
+	for d in exp_crew:
+		if d["status"] == "lost" or bool(d["stable"]) or not bool(d["downed"]):
+			continue
+		if randf() < DS_SUCCESS_CHANCE:
+			d["ds_success"] = int(d["ds_success"]) + 1
+		else:
+			d["ds_fail"] = int(d["ds_fail"]) + 1
+		if int(d["ds_success"]) >= DS_SUCCESS_NEEDED:
+			d["stable"] = true
+			_msg("%s clings on — stable, but out of the fight." % d["name"])
+		elif int(d["ds_fail"]) >= DS_FAIL_NEEDED:
+			d["status"] = "lost"
+			d["downed"] = false
+			_msg("%s bleeds out. Gone." % d["name"])
+
+func _hex_combat(depth: int, e: int) -> void:
+	var fight = COMBAT_SCENE.instantiate()
+	var req: Dictionary = {"crew": _build_crew_specs(exp_crew)}   # downed dwarves ride in at 0 HP (benched slot)
+	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})
+	var mscale: float = float(exp_contract["mod"]["scale"]) if exp_contract.has("mod") else 1.0
+	var dscale: float = 1.0 + float(depth) * HEX_DEPTH_SCALE
+	if not comp.is_empty():
+		req["enemies"] = comp["enemies"]
+		req["enemy_scale"] = float(comp["scale"]) * mscale * dscale
+	fight.request = req                  # BEFORE add_child
+	screen_root.visible = false
+	hud.visible = false
+	add_child(fight)
+	var result: Dictionary = await fight.combat_finished
+	if e != run_epoch:
+		if is_instance_valid(fight):
+			fight.queue_free()
+		return
+	fight.queue_free()
+	screen_root.visible = true
+	hud.visible = true
+	var crew_results: Array = result["crew_results"]
+	for i in range(crew_results.size()):
+		var cr: Dictionary = crew_results[i]
+		var d: Dictionary = exp_crew[i]
+		d["hp"] = maxi(0, int(cr["hp_end"]))
+		if not cr["survived"] and not bool(d["downed"]) and d["status"] != "lost":
+			d["downed"] = true          # newly downed -> starts rolling death saves next tile
+	_msg("The ambush is broken." if result["success"] else "The crew is overrun…")
+
+# ---------------------------------------------------------- Reward tile
+func _open_hex_reward(depth: int, e: int) -> void:
+	if randf() < 0.30:                    # a coin cache instead of a card
+		var g := HEX_REWARD_GOLD + depth * 6
+		treasury += g
+		_tween_treasury_to(treasury)
+		_msg("A cache of coin: +%dg." % g)
+		await _resume_hex(e)
+		return
+	hex_loot = _roll_hex_loot()
+	hex_loot_pick = -1
+	state = "HEXREWARD"
+	_clear_screen()
+	_build_hex_reward()
+	_refresh_hud()
+
+func _roll_hex_loot() -> Array:
+	var pool: Array = REWARD_POOL.duplicate()
+	var seen := {}
+	for d in exp_crew:
+		if d["status"] != "lost":
+			seen[d["cls"]] = true
+	for cls in seen:
+		for cid in CLASS_REWARDS.get(cls, []):
+			pool.append(cid)
+	pool.shuffle()
+	var out: Array = []
+	for cid in pool:
+		if not out.has(cid):
+			out.append(cid)
+		if out.size() >= 3:
+			break
+	return out
+
+func _build_hex_reward() -> void:
+	_mklabel("— SPOILS —", Vector2(0, 200), Vector2(720, 28), 22, screen_root)
+	_mklabel("Take a card for the company — then the dwarf who learns it.", Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var xs := [40, 268, 496]
+	for i in range(hex_loot.size()):
+		_build_hex_loot_card(i, xs[i])
+	_mklabel("give to:", Vector2(0, 720), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var targets: Array = []
+	for d in exp_crew:
+		if d["status"] != "lost":
+			targets.append(d)
+	var n := targets.size()
+	var startx := 360 - (n - 1) * 100
+	for j in range(n):
+		_build_hex_loot_target(targets[j], startx + j * 200, 820)
+	var skip := Button.new()
+	skip.text = "Leave it"
+	skip.add_theme_font_size_override("font_size", 18)
+	skip.position = Vector2(285, 1150)
+	skip.size = Vector2(150, 62)
+	skip.pressed.connect(_on_hexloot_skip)
+	screen_root.add_child(skip)
+
+func _build_hex_loot_card(i: int, x: int) -> void:
+	var cid: String = hex_loot[i]
+	var def: Dictionary = Db.CARDS[cid]
+	var sel: bool = i == hex_loot_pick
+	var card := Control.new()
+	card.position = Vector2(x, 300 if not sel else 288)
+	card.size = Vector2(184, 300)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.gui_input.connect(_on_hexloot_card_input.bind(i))
+	screen_root.add_child(card)
+	if sel:
+		_rect(Vector2(-3, -3), Vector2(190, 306), C_GREEN, card)
+	_rect(Vector2.ZERO, Vector2(184, 300), Db.type_tint(def.get("type", "skill")), card)
+	_rect(Vector2(8, 8), Vector2(40, 40), C_COIN, card)
+	_mklabel(str(int(def["cost"])), Vector2(8, 14), Vector2(40, 28), 22, card, true, Color(0.1, 0.1, 0.1))
+	_mkemoji(Vector2(92, 84), Vector2(100, 76), 46, card).text = def.get("emoji", "🃏")
+	_mklabel(def["name"], Vector2(4, 138), Vector2(176, 26), 18, card)
+	var body: Dictionary = Db.describe(def, null, 0, 0)
+	_mklabel(body["text"], Vector2(8, 178), Vector2(168, 114), 13, card, true, Color(0.9, 0.9, 0.92))
+
+func _build_hex_loot_target(d: Dictionary, cx: int, cy: int) -> void:
+	var col: Color = CLASS_COL[d["cls"]]
+	var tok := Control.new()
+	tok.position = Vector2(cx - 70, cy - 60)
+	tok.size = Vector2(140, 190)
+	tok.mouse_filter = Control.MOUSE_FILTER_STOP
+	tok.gui_input.connect(_on_hexloot_target_input.bind(d))
+	screen_root.add_child(tok)
+	_rect(Vector2.ZERO, Vector2(140, 190), Color(col.r, col.g, col.b, 0.18), tok)
+	_mkemoji(Vector2(70, 50), Vector2(110, 80), 50, tok).text = Db.CLASSES[d["cls"]]["emoji"]
+	_mklabel(d["name"], Vector2(0, 100), Vector2(140, 22), 15, tok)
+	_mklabel("🃏 %d cards" % int(d["deck"].size()), Vector2(0, 126), Vector2(140, 16), 11, tok, true, Color(0.82, 0.78, 0.55))
+	if bool(d["downed"]) or bool(d["stable"]):
+		_mklabel("(down)", Vector2(0, 148), Vector2(140, 16), 11, tok, true, C_AMBER)
+
+func _on_hexloot_card_input(event: InputEvent, i: int) -> void:
+	if state != "HEXREWARD":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		hex_loot_pick = i
+		_msg("%s — now tap the dwarf who learns it." % Db.CARDS[hex_loot[i]]["name"])
+		_clear_screen()
+		_build_hex_reward()
+
+func _on_hexloot_target_input(event: InputEvent, d: Dictionary) -> void:
+	if state != "HEXREWARD":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if hex_loot_pick < 0:
+			_msg("Pick a card first.")
+			return
+		var cid: String = hex_loot[hex_loot_pick]
+		d["deck"].append(cid)
+		_msg("%s learned %s." % [d["name"], Db.CARDS[cid]["name"]])
+		hex_loot = []
+		hex_loot_pick = -1
+		await _resume_hex(run_epoch)
+
+func _on_hexloot_skip() -> void:
+	hex_loot = []
+	hex_loot_pick = -1
+	_msg("Left the spoils behind.")
+	await _resume_hex(run_epoch)
+
+# ---------------------------------------------------------- Event tile
+func _open_hex_event(_e: int) -> void:
+	state = "HEXEVENT"   # choices re-capture run_epoch on click
+	_clear_screen()
+	_build_hex_event()
+	_refresh_hud()
+
+func _build_hex_event() -> void:
+	_mklabel("— A CHOICE —", Vector2(0, 300), Vector2(720, 28), 22, screen_root)
+	_mklabel("A sealed door, and a faint cry beyond it.", Vector2(0, 344), Vector2(720, 22), 15, screen_root, true, Color(0.85, 0.85, 0.9))
+	var safe := Button.new()
+	safe.text = "🚪 Play it safe\n(+%dg)" % EVENT_SAFE_GOLD
+	safe.add_theme_font_size_override("font_size", 18)
+	safe.position = Vector2(90, 560)
+	safe.size = Vector2(240, 120)
+	safe.pressed.connect(_on_event_choice.bind(false))
+	screen_root.add_child(safe)
+	var risk := Button.new()
+	risk.text = "🗝️ Force it open\n(risk)"
+	risk.add_theme_font_size_override("font_size", 18)
+	risk.position = Vector2(390, 560)
+	risk.size = Vector2(240, 120)
+	risk.pressed.connect(_on_event_choice.bind(true))
+	screen_root.add_child(risk)
+
+func _on_event_choice(risky: bool) -> void:
+	if state != "HEXEVENT":
+		return
+	var e := run_epoch
+	state = "HEX"   # lock out double taps
+	if not risky:
+		treasury += EVENT_SAFE_GOLD
+		_tween_treasury_to(treasury)
+		_msg("You take the cautious path. +%dg." % EVENT_SAFE_GOLD)
+		await _resume_hex(e)
+		return
+	if randf() < 0.55:
+		treasury += EVENT_RISK_GOLD
+		_tween_treasury_to(treasury)
+		_msg("Fortune favours the bold: +%dg — and loot within." % EVENT_RISK_GOLD)
+		_open_hex_reward(int(hexes[hex_cur]["depth"]), e)
+		return
+	var up := _living_up()
+	if up.is_empty():
+		await _resume_hex(e)
+		return
+	var d: Dictionary = up[randi() % up.size()]
+	var dmg := int(d["max_hp"] * 0.4)
+	d["hp"] = maxi(0, int(d["hp"]) - dmg)
+	if int(d["hp"]) <= 0:
+		d["downed"] = true
+	_msg("A trap! %s takes %d." % [d["name"], dmg])
+	await _resume_hex(e)
+
+# ---------------------------------------------------------- Extract / resolve
+func _on_extract() -> void:
+	if busy or state != "HEX":
+		return
+	await _finish_expedition("extract", run_epoch)
+
+## mode: "objective" (full) | "extract" (partial, all living home) | "wipe" (nothing, worst saves resolve).
+func _finish_expedition(mode: String, e: int) -> void:
+	busy = true
+	if mode == "wipe":                      # the downed who never stabilised finish their saves on the way out
+		for d in exp_crew:
+			while d["status"] != "lost" and bool(d["downed"]) and not bool(d["stable"]) \
+					and int(d["ds_success"]) < DS_SUCCESS_NEEDED and int(d["ds_fail"]) < DS_FAIL_NEEDED:
+				if randf() < DS_SUCCESS_CHANCE:
+					d["ds_success"] = int(d["ds_success"]) + 1
+					if int(d["ds_success"]) >= DS_SUCCESS_NEEDED:
+						d["stable"] = true
+				else:
+					d["ds_fail"] = int(d["ds_fail"]) + 1
+					if int(d["ds_fail"]) >= DS_FAIL_NEEDED:
+						d["status"] = "lost"
+						d["downed"] = false
+	var success := mode == "objective"
+	var payout := _depth_pay(hex_deepest)
+	if success:
+		payout += OBJECTIVE_BONUS
+	if mode == "wipe":
+		payout = 0
+	var mpay: float = float(exp_contract["mod"]["pay"]) if exp_contract.has("mod") else 1.0
+	payout = int(round(float(payout) * mpay))
+	var pending: Array = []
+	for d in exp_crew:
+		if d["status"] == "lost":
+			pending.append([d, "lost"])
+		elif bool(d["downed"]) or bool(d["stable"]):
+			pending.append([d, "wounded"])   # extract/objective bring the fallen home wounded
+		d["downed"] = false                  # clear per-expedition state
+		d["stable"] = false
+		d["ds_success"] = 0
+		d["ds_fail"] = 0
+	var shaped: Dictionary = {"success": success, "payout": payout, "pending": pending, "roll": 0, "strength": 0}
+	current = exp_contract
+	state = "OUTCOME"
+	busy = false
+	_clear_screen()
+	_build_expedition_outcome(exp_contract, shaped, mode)
+	_refresh_hud()
+	await _outcome_beats(exp_contract, shaped, e)
+
+func _build_expedition_outcome(c: Dictionary, result: Dictionary, mode: String) -> void:
+	_mklabel("— OUTCOME —", Vector2(0, 210), Vector2(720, 28), 22, screen_root)
+	var big := ""
+	var col := C_GREEN
+	match mode:
+		"objective":
+			big = "✅  CAPTIVE RESCUED"
+			col = C_GREEN
+		"extract":
+			big = "🏳️  EXTRACTED"
+			col = C_AMBER
+		_:
+			big = "☠️  WIPED OUT"
+			col = C_RED
+	_mklabel(big, Vector2(0, 300), Vector2(720, 44), 30, screen_root, true, col)
+	_mklabel("%s — reached depth %d" % [c["title"], hex_deepest], Vector2(0, 360), Vector2(720, 24), 16, screen_root, true, Color(0.85, 0.85, 0.9))
+	_mklabel("+%dg" % int(result["payout"]), Vector2(0, 430), Vector2(720, 52), 40, screen_root, true, C_COIN)
+	continue_btn = Button.new()
+	continue_btn.text = "Continue ▶"
+	continue_btn.add_theme_font_size_override("font_size", 22)
+	continue_btn.position = Vector2(240, 1150)
+	continue_btn.size = Vector2(240, 70)
+	continue_btn.disabled = true
+	continue_btn.pressed.connect(_on_continue)
+	screen_root.add_child(continue_btn)
+
+# ============================================================ Shop (contract board, H5)
+func _reroll_shop() -> void:
+	shop_stock = []
+	shop_sel = -1
+	var pool: Array = REWARD_POOL.duplicate()
+	pool.shuffle()
+	shop_stock.append({"kind": "card", "cid": pool[0], "cost": SHOP_CARD_COST})
+	shop_stock.append({"kind": "heal", "cost": SHOP_HEAL_COST})
+	var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
+	var rc: String = Db.PARTY_ORDER[randi() % Db.PARTY_ORDER.size()]
+	shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
+
+func _build_shop_panel() -> void:
+	_mklabel("— SHOP —  buying trades against the rent clock", Vector2(0, 866), Vector2(720, 20), 14, screen_root, true, C_COIN)
+	var xs := [24, 264, 504]
+	for i in range(shop_stock.size()):
+		_build_shop_slot(i, xs[i])
+	if shop_sel >= 0 and shop_stock[shop_sel]["kind"] != "recruit":
+		_build_shop_targets()
+
+func _build_shop_slot(i: int, x: int) -> void:
+	var s: Dictionary = shop_stock[i]
+	var cost := int(s["cost"])
+	var sold := bool(s.get("sold", false))
+	var afford := treasury >= cost and not sold
+	var slot := Control.new()
+	slot.position = Vector2(x, 896)
+	slot.size = Vector2(192, 108)
+	slot.mouse_filter = Control.MOUSE_FILTER_STOP
+	slot.gui_input.connect(_on_shop_input.bind(i))
+	screen_root.add_child(slot)
+	var bgc := Color(0.22, 0.28, 0.22) if i == shop_sel else Color(0.16, 0.16, 0.2)
+	_rect(Vector2.ZERO, Vector2(192, 108), bgc, slot)
+	if sold:
+		slot.modulate = Color(0.4, 0.4, 0.42)
+	var emoji := ""
+	var title := ""
+	var desc := ""
+	match s["kind"]:
+		"card":
+			emoji = Db.CARDS[s["cid"]].get("emoji", "🃏")
+			title = "Card"
+			desc = Db.CARDS[s["cid"]]["name"]
+		"heal":
+			emoji = "🩹"
+			title = "Field Medic"
+			desc = "a dwarf → full HP"
+		"recruit":
+			emoji = Db.CLASSES[s["cls"]]["emoji"]
+			title = "Recruit"
+			desc = "%s · %s" % [s["name"], Db.CLASSES[s["cls"]]["name"]]
+	_mkemoji(Vector2(96, 30), Vector2(80, 48), 28, slot).text = emoji
+	_mklabel(title, Vector2(0, 54), Vector2(192, 18), 13, slot, true, Color(0.85, 0.85, 0.9))
+	_mklabel(desc, Vector2(4, 72), Vector2(184, 16), 11, slot, true, Color(0.75, 0.75, 0.8))
+	_mklabel(("SOLD" if sold else "%dg" % cost), Vector2(0, 88), Vector2(192, 18), 14, slot, true, (Color(0.6, 0.6, 0.6) if sold else (C_COIN if afford else C_RED)))
+
+func _on_shop_input(event: InputEvent, i: int) -> void:
+	if busy or state != "CONTRACTS":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var s: Dictionary = shop_stock[i]
+		if bool(s.get("sold", false)):
+			return
+		if treasury < int(s["cost"]):
+			_msg("Not enough gold — the rent comes first.")
+			return
+		if s["kind"] == "recruit":
+			_buy_recruit(i)
+			return
+		shop_sel = -1 if shop_sel == i else i
+		_msg("Tap a dwarf below to receive it." if shop_sel >= 0 else "")
+		_clear_screen()
+		_build_contracts()
+
+func _buy_recruit(i: int) -> void:
+	var s: Dictionary = shop_stock[i]
+	treasury -= int(s["cost"])
+	_tween_treasury_to(treasury)
+	roster.append(_make_dwarf(s["name"], s["cls"]))
+	s["sold"] = true
+	shop_sel = -1
+	_msg("%s joins the company." % s["name"])
+	_clear_screen()
+	_build_contracts()
+	_refresh_hud()
+
+func _build_shop_targets() -> void:
+	var s: Dictionary = shop_stock[shop_sel]
+	_mklabel("give to:", Vector2(0, 1016), Vector2(720, 16), 12, screen_root, true, Color(0.85, 0.85, 0.9))
+	var elig: Array = []
+	for d in roster:
+		if s["kind"] == "heal":
+			if d["status"] == "wounded" or (d["status"] == "ready" and int(d["hp"]) < int(d["max_hp"])):
+				elig.append(d)
+		elif d["status"] != "lost":
+			elig.append(d)
+	if elig.is_empty():
+		_mklabel("(no valid dwarf)", Vector2(0, 1040), Vector2(720, 16), 12, screen_root, true, C_AMBER)
+		return
+	var n := elig.size()
+	var startx := 360 - (n - 1) * 48
+	for i in range(n):
+		_build_shop_target_token(elig[i], startx + i * 96, 1058)
+
+func _build_shop_target_token(d: Dictionary, cx: int, cy: int) -> void:
+	var col: Color = CLASS_COL[d["cls"]]
+	var tok := Control.new()
+	tok.position = Vector2(cx - 40, cy - 34)
+	tok.size = Vector2(80, 74)
+	tok.mouse_filter = Control.MOUSE_FILTER_STOP
+	tok.gui_input.connect(_on_shop_target_input.bind(d))
+	screen_root.add_child(tok)
+	_rect(Vector2.ZERO, Vector2(80, 74), Color(col.r, col.g, col.b, 0.20), tok)
+	_mkemoji(Vector2(40, 26), Vector2(70, 48), 28, tok).text = Db.CLASSES[d["cls"]]["emoji"]
+	_mklabel(d["name"], Vector2(0, 54), Vector2(80, 16), 10, tok, true, Color(0.9, 0.9, 0.92))
+
+func _on_shop_target_input(event: InputEvent, d: Dictionary) -> void:
+	if busy or state != "CONTRACTS" or shop_sel < 0:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var s: Dictionary = shop_stock[shop_sel]
+		if treasury < int(s["cost"]):
+			return
+		if s["kind"] == "card":
+			d["deck"].append(s["cid"])
+			treasury -= int(s["cost"])
+			_tween_treasury_to(treasury)
+			s["sold"] = true
+			shop_sel = -1
+			_msg("%s learned %s." % [d["name"], Db.CARDS[s["cid"]]["name"]])
+		elif s["kind"] == "heal":
+			if d["status"] == "wounded":
+				d["status"] = "ready"
+				d["recover"] = 0
+			d["hp"] = int(d["max_hp"])
+			treasury -= int(s["cost"])
+			_tween_treasury_to(treasury)
+			s["sold"] = true
+			shop_sel = -1
+			_msg("%s is patched up to full." % d["name"])
+		_clear_screen()
+		_build_contracts()
+		_refresh_hud()
