@@ -65,7 +65,7 @@ addons/godot_mcp/             # MCP Pro plugin (committed) — provides the live
   references/effect-recipes.md # per-effect MCP Pro call sequences (load on demand)
   references/shaders.md        # shader sources to create via create_shader (canvas_item)
 scenes/{combat,vfx}/          # combat scenes; reusable VFX scenes
-scripts/{combat,ui,vfx}/     # combat systems; reusable UI (card.gd, target_arrow.gd); VFX scripts
+scripts/{combat,ui,vfx}/     # combat systems; reusable UI (card.gd, threat_arrows.gd); VFX scripts
 assets/{shaders,sprites}/     # shader sources; sprite art
 resources/cards/              # card .tres resources
 godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + instructions); not part of the game
@@ -79,21 +79,30 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-07-01) — FOUR modes: combat / grid / overworld hex-crawl / survivors
+## Current state (2026-07-01) — TWO modes: combat / overworld hex-crawl
 
-- **FOUR deployed modes / four Pages URLs** now: `/` combat · `/grid/` grid fork · `/overworld/`
-  hex-crawl expedition + shop · **`/survivors/` NEW** StS-node zombie survival. CI sed-patches
-  `run/main_scene` per export (4 export presets + 4 export steps in `deploy-pages.yml`).
-- **NEW — Survivors mode (`/survivors/`, shipped & deployed):** a fourth peer scene that reuses combat.gd
-  + the seam wholesale, swapping the rent clock for a **food/water survival clock**. StS branching map
-  (connected DAG, whole lap visible, telegraphed node types), run-scoped party assembled by rescuing
-  survivors (Brute/Medic/Engineer → warrior/cleric/sorcerer roles), endless boss-lap (boss → big stash →
-  harder lap). `scripts/survivors/survivors.gd` + `scenes/survivors/survivors.tscn`. Additive combat:
-  17 survivor cards, 3 classes, 3 zombie enemies (walker/lurker/spitter), a new **Cripple** status + ops
-  (heal_lowest/ally_gain_energy/dmg_per_bloodied_ally/apply_all/cripple). Fully SEPARATE state from the
-  overworld (no months/roster/treasury). Spec: `docs/plans/2026-07-01-survivors-mode-spec.md`. Passed a
-  5-dimension adversarial review (4 findings fixed). Crew is padded to combat's fixed 3 slots with benched
-  hp:0 pads (same trick as the expedition).
+- **Hex map visual overhaul (2026-07-01):** the expedition board now draws TRUE pointy-top hexes via
+  `scripts/ui/hex_tile.gd` (a `_draw()` Control: beveled board-piece look, terrain-tinted fills per
+  kind, hexagon-precise `_has_point` picking, pulsing amber/gold rings replacing the old rect frames,
+  hover lift) on a framed war-table backdrop; the 🚩 tweens between hexes before a tile resolves
+  (`run_epoch`-guarded). Geometry: `HEX_R=50`, board centered via `_hex_px`. Design doc:
+  `docs/plans/2026-07-01-hexmap-civ-visual-design.md`. Zero logic changes.
+
+- **Cleanup (2026-07-01):** the **survivors** mode and the **Fire-Emblem grid** fork were REMOVED —
+  direction consolidated onto the overworld/contract system. Deleted: `scripts/survivors/` +
+  `scenes/survivors/`, `scripts/combat/grid_combat.gd` + `scenes/combat/grid_combat.tscn`, and dead
+  scaffolding (`scripts/combat/test_arena.*`, `scenes/_emoji_test.tscn`, the superseded
+  `scripts/ui/target_arrow.gd`), plus their two `export_presets.cfg` presets and `deploy-pages.yml`
+  export steps. The survivor-only combat content — **Cripple** status, walker/lurker/spitter zombies,
+  Brute/Medic/Engineer classes, and the `heal_lowest`/`ally_gain_energy`/`dmg_per_bloodied_ally`/
+  `apply_all`/`cripple` ops — was stripped from the shared `card_db.gd` + `combat.gd`; both still
+  compile and base combat + the overworld are unaffected (kept Burn/Vulnerable/Mark/Momentum/Devotion
+  intact). Grid-only inline card fields (`range`/`area`/`area_affects`/`move`) were left as inert data
+  since nothing reads them now (safe to strip later if grid is never revived). The survivors + grid
+  design docs under `docs/plans/` are kept as historical record.
+- **TWO deployed modes / two Pages URLs:** `/` combat (Slice 2 base combat) · `/overworld/` hex-crawl
+  expedition + shop. CI sed-patches `run/main_scene` per export (2 export presets + 2 export steps in
+  `deploy-pages.yml`).
 - **The hex-crawl was REDESIGNED (2026-07-01) from a fogged crawl into a VISIBLE-BOARD route-planner:**
   the whole 6×5 offset-hex map is shown, perimeter = impassable wall, the objective location is MARKED,
   tiles telegraph KIND + ☠ danger; enemy scale comes from a tile's danger (not depth); "objective pays

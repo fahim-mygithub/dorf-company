@@ -11,6 +11,7 @@ extends Control
 
 const Db := preload("res://scripts/combat/card_db.gd")
 const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
+const HexTile := preload("res://scripts/ui/hex_tile.gd")
 
 # ============================================================ Economy (tunable)
 const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
@@ -65,6 +66,7 @@ const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract lau
 const EXPEDITIONS := true          # Med/High fight contracts open an expedition (not one fight).
 const HEX_COLS := 6                # offset-hex grid width  (border cols are wall)
 const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
+const HEX_R := 50.0                # pointy-top hex radius (px): width = R*sqrt(3), row pitch = R*1.5
 const DANGER_STEP := 0.30          # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.3/1.6)
 const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
 const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)
@@ -160,6 +162,7 @@ var hud_next: Label
 var hud_month: Label
 var fee_pips: Array = []
 var continue_btn: Button
+var hex_flag: Label                 # the current-tile 🚩 glyph; hidden while the move token animates
 
 # ============================================================ Lifecycle
 func _ready() -> void:
@@ -1114,9 +1117,9 @@ func _hex_neighbors(key: String) -> Array:
 	var rr: int = int(h["r"])
 	var diffs: Array
 	if rr % 2 == 0:
-		diffs = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]]
-	else:
 		diffs = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]]
+	else:
+		diffs = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]]
 	var out: Array = []
 	for d in diffs:
 		var k := _hex_key(cc + d[0], rr + d[1])
@@ -1214,7 +1217,9 @@ func _living_up() -> Array:
 
 # ---------------------------------------------------------- Hex map render
 func _hex_px(cc: int, rr: int) -> Vector2:
-	return Vector2(160.0 + 74.0 * (float(cc) + 0.5 * float(rr & 1)), 300.0 + 62.0 * float(rr))
+	var w := HEX_R * sqrt(3.0)                                   # pointy-top hex width
+	var x0 := 360.0 - w * (float(HEX_COLS) + 0.5) * 0.5 + w * 0.5  # center the board (odd rows shove right)
+	return Vector2(x0 + w * (float(cc) + 0.5 * float(rr & 1)), 300.0 + HEX_R * 1.5 * float(rr))
 
 func _build_hexcrawl() -> void:
 	_mklabel("— EXPEDITION —", Vector2(0, 168), Vector2(720, 26), 20, screen_root)
@@ -1222,6 +1227,12 @@ func _build_hexcrawl() -> void:
 	var modtxt: String = ("  ·  %s %s" % [c["mod"]["emoji"], c["mod"]["name"]]) if c.has("mod") else ""
 	_mklabel("%s  ·  %s%s" % [c["title"], c["loc_name"], modtxt], Vector2(0, 196), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	_mklabel("Route to 🏁 the captive. Icons hint the tile; ☠ = how tough. Detour for loot if you dare.", Vector2(0, 220), Vector2(720, 18), 12, screen_root, true, Color(0.7, 0.7, 0.75))
+	# war-table backdrop: the board sits on a dark framed panel instead of floating
+	_rect(Vector2(48, 240), Vector2(624, 432), Color(0.05, 0.06, 0.08), screen_root)
+	_rect(Vector2(48, 240), Vector2(624, 2), Color(0.72, 0.58, 0.30, 0.30), screen_root)
+	_rect(Vector2(48, 670), Vector2(624, 2), Color(0.72, 0.58, 0.30, 0.30), screen_root)
+	_rect(Vector2(48, 240), Vector2(2, 432), Color(0.72, 0.58, 0.30, 0.30), screen_root)
+	_rect(Vector2(670, 240), Vector2(2, 432), Color(0.72, 0.58, 0.30, 0.30), screen_root)
 	for k in hexes:
 		_build_hex_tile(k)
 	_build_exp_crew_strip()
@@ -1238,38 +1249,47 @@ func _build_hexcrawl() -> void:
 func _build_hex_tile(key: String) -> void:
 	var h: Dictionary = hexes[key]
 	var px := _hex_px(int(h["q"]), int(h["r"]))
-	var sz := Vector2(72, 62)
+	var sz := Vector2(HEX_R * sqrt(3.0), HEX_R * 2.0)
 	var kind: String = h["kind"]
 	var wall: bool = kind == "wall"
 	var cur: bool = key == hex_cur
 	var resolved: bool = bool(h["resolved"])
 	var can_move: bool = not wall and not cur and _hex_neighbors(hex_cur).has(key)
-	var tile := Control.new()
+	var tile: Control = HexTile.new()
+	tile.radius = HEX_R
+	tile.flat = wall                                        # walls sit IN the board; passable tiles pop
+	tile.hoverable = can_move
 	tile.position = px - sz * 0.5
 	tile.size = sz
 	tile.mouse_filter = Control.MOUSE_FILTER_STOP if can_move else Control.MOUSE_FILTER_IGNORE
 	if can_move:
 		tile.gui_input.connect(_on_hex_input.bind(key))
-	screen_root.add_child(tile)
-	if kind == "objective":
-		_rect(Vector2(-3, -3), sz + Vector2(6, 6), C_COIN, tile)        # gold frame: the goal
-	elif can_move:
-		_rect(Vector2(-2, -2), sz + Vector2(4, 4), C_AMBER, tile)       # amber frame: reachable
-	var col: Color
+	# terrain-tinted fill per kind; resolved desaturates toward the board
 	if wall:
-		col = Color(0.10, 0.10, 0.12)
+		tile.fill = Color(0.11, 0.12, 0.14)
 	elif cur:
-		col = Color(0.28, 0.42, 0.55)
+		tile.fill = Color(0.30, 0.44, 0.58)
 	elif kind == "objective":
-		col = Color(0.40, 0.34, 0.12)
+		tile.fill = Color(0.46, 0.36, 0.13)
 	elif resolved:
-		col = Color(0.17, 0.22, 0.18)
+		tile.fill = Color(0.17, 0.21, 0.18)
+	elif kind == "combat":
+		tile.fill = Color(0.34, 0.21, 0.17)
+	elif kind == "reward":
+		tile.fill = Color(0.20, 0.31, 0.17)
+	elif kind == "event":
+		tile.fill = Color(0.27, 0.21, 0.33)
 	else:
-		col = Color(0.24, 0.24, 0.30)
-	_rect(Vector2.ZERO, sz, col, tile)
+		tile.fill = Color(0.23, 0.26, 0.23)
+	# pulsing highlight ring replaces the old rect frames: gold = the goal, amber = reachable
+	if kind == "objective":
+		tile.ring = Color(C_COIN.r, C_COIN.g, C_COIN.b, 0.95)
+	elif can_move:
+		tile.ring = Color(C_AMBER.r, C_AMBER.g, C_AMBER.b, 0.80)
+	screen_root.add_child(tile)
 	var glyph := ""
 	if wall:
-		glyph = "🪨"
+		glyph = "🏔️"
 	elif cur:
 		glyph = "🚩"
 	elif kind == "objective":
@@ -1284,13 +1304,18 @@ func _build_hex_tile(key: String) -> void:
 		glyph = "❔"
 	else:
 		glyph = "·"
-	var gy: float = -6.0 if (kind == "combat" and not resolved) else 0.0
-	_mkemoji(sz * 0.5 + Vector2(0, gy), sz, 26, tile).text = glyph
+	var gy: float = -8.0 if (kind == "combat" and not resolved) else 0.0
+	var em := _mkemoji(sz * 0.5 + Vector2(0, gy), sz, 26, tile)
+	em.text = glyph
+	if wall:
+		em.modulate = Color(1, 1, 1, 0.55)                  # the ridge recedes; passable content pops
+	if cur:
+		hex_flag = em
 	if kind == "combat" and not resolved:
 		var sk := ""
 		for i in range(int(h["danger"])):
 			sk += "☠"
-		_mklabel(sk, Vector2(0, 42), Vector2(sz.x, 16), 12, tile, true, Color(0.95, 0.5, 0.5))
+		_mklabel(sk, Vector2(0, sz.y * 0.5 + 12), Vector2(sz.x, 16), 12, tile, true, Color(0.95, 0.5, 0.5))
 
 func _build_exp_crew_strip() -> void:
 	_mklabel("crew", Vector2(0, 716), Vector2(720, 18), 12, screen_root, true, Color(0.8, 0.8, 0.85))
@@ -1340,6 +1365,20 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 func _enter_hex(key: String) -> void:
 	busy = true
 	var e := run_epoch
+	# the flag marches to the new hex before it resolves, so movement reads spatially
+	var from := _hex_px(int(hexes[hex_cur]["q"]), int(hexes[hex_cur]["r"]))
+	var to := _hex_px(int(hexes[key]["q"]), int(hexes[key]["r"]))
+	if is_instance_valid(hex_flag):
+		hex_flag.visible = false
+	var tok := _mkemoji(from, Vector2(60, 60), 26, screen_root)
+	tok.text = "🚩"
+	var tw := create_tween()
+	tw.tween_property(tok, "position", to - tok.size * 0.5, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	await tw.finished
+	if is_instance_valid(tok):
+		tok.queue_free()
+	if e != run_epoch:
+		return
 	hex_cur = key
 	var h: Dictionary = hexes[key]
 	_roll_death_saves()                    # each step = time passing for the downed
