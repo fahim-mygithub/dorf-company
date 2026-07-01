@@ -230,6 +230,8 @@ func _new_run() -> void:
 	party = []
 	_next_name = 0
 	overlay.visible = false
+	screen_root.visible = true   # a prior combat may have left the board hidden on an epoch-mismatch return
+	hud.visible = true
 	state = "PICK"
 	_clear_screen()
 	_build_pick_class()
@@ -426,9 +428,8 @@ func _enter_node(idx: int) -> void:
 			return
 		"combat":
 			_msg("The dead close in!")
-			await _node_combat(e, false)
-			if e != run_epoch:
-				return
+			await _node_combat(e, false)   # handles its own reward / resume / game-over — never fall through
+			return
 		"forage":
 			_open_forage(e)
 			return
@@ -443,7 +444,7 @@ func _enter_node(idx: int) -> void:
 			return
 		_:
 			pass
-	await _resume_map(e)
+	_resume_map(e)
 
 func _starve() -> void:
 	var low := _lowest_hp_survivor()
@@ -504,8 +505,8 @@ func _node_combat(e: int, is_boss: bool) -> void:
 			specs.append({"cls": u["cls"], "name": u["name"], "hp": int(u["hp"]), "max_hp": int(u["max_hp"]), "deck": u["deck"]})
 	var fight = COMBAT_SCENE.instantiate()
 	var enc: Array = Db.SURVIVOR_BOSS if is_boss else Db.SURVIVOR_ENCOUNTER
-	var scale: float = 1.0 + float(lap - 1) * LAP_SCALE + (BOSS_BONUS if is_boss else 0.0)
-	fight.request = {"crew": specs, "enemies": enc, "enemy_scale": scale}   # BEFORE add_child
+	var escale: float = 1.0 + float(lap - 1) * LAP_SCALE + (BOSS_BONUS if is_boss else 0.0)
+	fight.request = {"crew": specs, "enemies": enc, "enemy_scale": escale}   # BEFORE add_child
 	screen_root.visible = false
 	hud.visible = false
 	add_child(fight)
@@ -533,7 +534,7 @@ func _node_combat(e: int, is_boss: bool) -> void:
 	if randf() < 0.55:
 		_open_reward(e)
 		return
-	await _resume_map(e)
+	_resume_map(e)
 
 func _revive_downed() -> void:
 	for s in party:
@@ -554,8 +555,8 @@ func _node_combat_boss(e: int) -> void:
 		else:
 			specs.append({"cls": u["cls"], "name": u["name"], "hp": int(u["hp"]), "max_hp": int(u["max_hp"]), "deck": u["deck"]})
 	var fight = COMBAT_SCENE.instantiate()
-	var scale: float = 1.0 + float(lap - 1) * LAP_SCALE + BOSS_BONUS
-	fight.request = {"crew": specs, "enemies": Db.SURVIVOR_BOSS, "enemy_scale": scale}
+	var escale: float = 1.0 + float(lap - 1) * LAP_SCALE + BOSS_BONUS
+	fight.request = {"crew": specs, "enemies": Db.SURVIVOR_BOSS, "enemy_scale": escale}
 	screen_root.visible = false
 	hud.visible = false
 	add_child(fight)
@@ -584,7 +585,7 @@ func _node_combat_boss(e: int) -> void:
 	_open_reward(e)             # guaranteed reward, then the next (harder) lap
 
 # ============================================================ Forage / Camp / Rescue / Event
-func _open_forage(e: int) -> void:
+func _open_forage(_e: int) -> void:
 	state = "FORAGE"
 	_clear_screen()
 	_mklabel("— FORAGE —", Vector2(0, 300), Vector2(720, 28), 24, screen_root)
@@ -604,7 +605,7 @@ func _on_forage(which: String) -> void:
 	else:
 		water += FORAGE_CACHE
 		_msg("Scavenged +%d water." % FORAGE_CACHE)
-	await _resume_map(e)
+	_resume_map(e)
 
 func _node_camp(e: int) -> void:
 	for s in _living_survivors():
@@ -612,7 +613,7 @@ func _node_camp(e: int) -> void:
 	food += CAMP_REFILL
 	water += CAMP_REFILL
 	_msg("A safe camp. Party heals %d; +%d food/water." % [CAMP_HEAL, CAMP_REFILL])
-	await _resume_map(e)
+	_resume_map(e)
 
 func _node_rescue(e: int) -> void:
 	if _living_survivors().size() >= MAX_PARTY:
@@ -620,7 +621,7 @@ func _node_rescue(e: int) -> void:
 		food += 3
 		water += 3
 		_msg("A survivor shares their stash (+3 food/water) — your party is full.")
-		await _resume_map(e)
+		_resume_map(e)
 		return
 	# rescue a survivor of a class you're missing (else random)
 	var have := {}
@@ -636,9 +637,9 @@ func _node_rescue(e: int) -> void:
 	var newbie := _make_survivor(pick)
 	party.append(newbie)
 	_msg("%s the %s joins your party!" % [newbie["name"], Db.CLASSES[pick]["name"]])
-	await _resume_map(e)
+	_resume_map(e)
 
-func _open_event(e: int) -> void:
+func _open_event(_e: int) -> void:
 	state = "EVENT"
 	_clear_screen()
 	_mklabel("— A NOISE —", Vector2(0, 300), Vector2(720, 28), 24, screen_root)
@@ -655,14 +656,14 @@ func _on_event(risky: bool) -> void:
 	if not risky:
 		food += 2
 		_msg("You slip past. +2 food.")
-		await _resume_map(e)
+		_resume_map(e)
 		return
 	var roll := randf()
 	if roll < 0.5:
 		food += 5
 		water += 5
 		_msg("A stocked bunker! +5 food/water.")
-		await _resume_map(e)
+		_resume_map(e)
 	elif roll < 0.8:
 		_open_reward(e)
 	else:
@@ -673,7 +674,7 @@ func _on_event(risky: bool) -> void:
 			if int(low["hp"]) <= 0:
 				low["status"] = "lost"
 			_msg("An ambush! %s takes %d." % [low["name"], dmg])
-		await _resume_map(e)
+		_resume_map(e)
 
 # ============================================================ Card reward
 func _roll_reward() -> Array:
@@ -693,7 +694,7 @@ func _roll_reward() -> Array:
 			break
 	return out
 
-func _open_reward(e: int) -> void:
+func _open_reward(_e: int) -> void:
 	loot = _roll_reward()
 	loot_pick = -1
 	state = "REWARD"
@@ -769,7 +770,7 @@ func _on_reward_target(event: InputEvent, d: Dictionary) -> void:
 		_msg("%s learned %s." % [d["name"], Db.CARDS[cid]["name"]])
 		loot = []
 		loot_pick = -1
-		await _after_reward()
+		_after_reward()
 
 func _on_reward_skip() -> void:
 	if state != "REWARD":
@@ -777,7 +778,7 @@ func _on_reward_skip() -> void:
 	loot = []
 	loot_pick = -1
 	_msg("Left it behind.")
-	await _after_reward()
+	_after_reward()
 
 ## A reward taken at a boss node advances the lap; otherwise back to the map.
 func _after_reward() -> void:
@@ -785,7 +786,7 @@ func _after_reward() -> void:
 	if map[current_node]["type"] == "boss":
 		_start_lap()
 	else:
-		await _resume_map(e)
+		_resume_map(e)
 
 # ============================================================ Score / game over
 func _score_now() -> int:
