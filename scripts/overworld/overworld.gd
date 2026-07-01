@@ -19,7 +19,8 @@ const FEE_BASE := 40
 const FEE_STEP := 10          # fee rises this much per payment
 const FEE_PERIOD := 2         # rent due every N months (even months)
 const WIN_MONTH := 12         # survive the month-WIN_MONTH advance -> victory
-const WOUND_RECOVERY := 2     # months a wound keeps a dwarf unavailable
+const WOUND_RECOVERY := 2     # months a downed dwarf is benched; returns at full HP
+const HP_REGEN_PER_MONTH := 6 # Phase 2: a ready-but-hurt dwarf mends this much HP per month
 const DWARF_STRENGTH := 3     # flat in MVP (class only drives emoji/color)
 
 const DANGER := {"low": 8, "med": 13, "high": 15}     # crew_strength + 2d6 must reach this
@@ -258,7 +259,8 @@ func _new_run() -> void:
 	selected_contract = -1
 	roster = []
 	for s in STARTERS:
-		roster.append({"name": s["name"], "cls": s["cls"], "status": "ready", "recover": 0})
+		var mh: int = int(Db.CLASSES[s["cls"]]["max_hp"])
+		roster.append({"name": s["name"], "cls": s["cls"], "status": "ready", "recover": 0, "hp": mh, "max_hp": mh})
 	_regen_contracts()
 	overlay.visible = false
 	_msg("Rent's due every 2 months, and it only climbs. Take a job.")
@@ -269,7 +271,8 @@ func _regen_contracts() -> void:
 	# Phase 1: the High job is a REAL fight, but only when a canonical W/C/S trio is fieldable
 	# (keeps combat's role-indexed logic valid until Phase 3 de-indexes it).
 	if USE_REAL_COMBAT and _has_canonical_trio():
-		contracts[2]["fight"] = true
+		contracts[1]["fight"] = true   # Med — the standard fight
+		contracts[2]["fight"] = true   # High — heavier comp + scaled (see Db.ENCOUNTERS_BY_TIER)
 
 func _make_contract(tier: String) -> Dictionary:
 	var titles: Array = TITLES[tier]
@@ -373,6 +376,15 @@ func _build_dwarf_token(d: Dictionary, cx: int, cy: int) -> void:
 	elif status == "lost":
 		_mkemoji(Vector2(cx - 30, cy - 44), Vector2(36, 36), 22, screen_root).text = "⚰️"
 		_mklabel("lost", Vector2(cx - 58, cy + 84), Vector2(116, 16), 11, screen_root, true, Color(0.6, 0.6, 0.6))
+	else:
+		# READY: an HP bar (carried damage) — length + colour read the risk of sending them at a glance.
+		var frac: float = clampf(float(d["hp"]) / float(d["max_hp"]), 0.0, 1.0)
+		var barw: float = 84.0
+		var hpcol: Color = C_GREEN if frac > 0.6 else (C_AMBER if frac > 0.3 else C_RED)
+		_rect(Vector2(cx - barw / 2.0, cy + 88), Vector2(barw, 9), Color(0.25, 0.25, 0.3), screen_root)
+		_rect(Vector2(cx - barw / 2.0, cy + 88), Vector2(barw * frac, 9), hpcol, screen_root)
+		if int(d["hp"]) < int(d["max_hp"]):
+			_mklabel("%d/%d" % [int(d["hp"]), int(d["max_hp"])], Vector2(cx - 58, cy + 100), Vector2(116, 16), 11, screen_root, true, hpcol)
 
 # ============================================================ Screen: Contracts
 func _build_contracts() -> void:
@@ -496,8 +508,8 @@ func _canonical_trio() -> Array:
 func _build_crew_specs(crew: Array) -> Array:
 	var specs: Array = []
 	for d in crew:
-		var mh: int = int(Db.CLASSES[d["cls"]]["max_hp"])
-		specs.append({"cls": d["cls"], "name": d["name"], "hp": mh, "max_hp": mh})
+		# Phase 2: carry CURRENT hp into the fight — a hurt dwarf enters the battle hurt.
+		specs.append({"cls": d["cls"], "name": d["name"], "hp": int(d["hp"]), "max_hp": int(d["max_hp"])})
 	return specs
 
 ## Run combat.tscn as a CHILD, send the crew, await the result, map it into the SAME
@@ -509,7 +521,12 @@ func _embark_fight(c: Dictionary) -> void:
 	selected_contract = -1
 	_msg("%s — into the fight!" % c["title"])
 	var fight = COMBAT_SCENE.instantiate()
-	fight.request = {"crew": _build_crew_specs(current["crew"])}   # set BEFORE add_child (_ready runs on entry)
+	var req: Dictionary = {"crew": _build_crew_specs(current["crew"])}
+	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition
+	if not comp.is_empty():
+		req["enemies"] = comp["enemies"]
+		req["enemy_scale"] = comp["scale"]
+	fight.request = req   # set BEFORE add_child (_ready runs on entry)
 	screen_root.visible = false
 	hud.visible = false
 	add_child(fight)
@@ -536,10 +553,10 @@ func _resolve_from_combat(result: Dictionary, tier: String) -> Dictionary:
 	for i in range(crew_results.size()):
 		var cr: Dictionary = crew_results[i]
 		var d: Dictionary = current["crew"][i]
+		d["hp"] = maxi(0, int(cr["hp_end"]))   # Phase 2: carry battle damage back onto the roster
 		if not cr["survived"]:
+			# Downed -> benched (heals to full on return). Survivors stay READY but hurt (carried HP).
 			pending.append([d, "lost" if LOSS_ENABLED else "wounded"])
-		elif float(cr["hp_end"]) <= 0.4 * float(cr["max_hp"]):
-			pending.append([d, "wounded"])
 	return {"success": success, "payout": payout, "pending": pending, "roll": 0, "strength": 0}
 
 func _resolve_dice(crew: Array, tier: String) -> Dictionary:
@@ -668,6 +685,9 @@ func _advance_months(count: int, e: int) -> String:
 				if int(d["recover"]) <= 0:
 					d["status"] = "ready"
 					d["recover"] = 0
+					d["hp"] = int(d["max_hp"])   # back from the bench at full fighting shape
+			elif d["status"] == "ready" and int(d["hp"]) > 0 and int(d["hp"]) < int(d["max_hp"]):
+				d["hp"] = mini(int(d["max_hp"]), int(d["hp"]) + HP_REGEN_PER_MONTH)   # carried HP mends over time
 		_refresh_hud()
 		await get_tree().create_timer(0.4).timeout
 		if e != run_epoch:

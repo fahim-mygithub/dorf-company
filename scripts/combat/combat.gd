@@ -211,12 +211,15 @@ func _start_combat() -> void:
 
 	enemies = []
 	var enc: Array = request.get("enemies", Db.ENCOUNTER)
+	var escale: float = float(request.get("enemy_scale", 1.0))
 	for i: int in range(enc.size()):
 		var eid: String = enc[i]
 		var ed: Dictionary = Db.ENEMIES[eid]
+		var ehp: int = int(round(float(ed["max_hp"]) * escale))
+		var eatk: int = int(round(float(ed["atk"]) * escale))
 		enemies.append({
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
-			"hp": ed["max_hp"], "max_hp": ed["max_hp"], "block": 0, "atk": ed["atk"],
+			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
 			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
 			"intent_target": -1, "node": en_emoji[i], "slot": i,
 		})

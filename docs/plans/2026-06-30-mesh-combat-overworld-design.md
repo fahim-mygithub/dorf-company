@@ -12,8 +12,15 @@ Source: `combat.gd`, `card_db.gd`, `overworld.gd`, overworld-mvp spec + plan · 
   loss → half payout + all-crew wounded; fee still drains mid-advance; chrome restores; combat child
   frees; **standalone combat (`/`) stays byte-identical** (empty `request` = default party). `USE_REAL_COMBAT`
   toggles the stub-vs-real A/B on identical stakes.
-- **Next (Phase 2+):** carried HP + tier→composition, then crew agency, then the card-reward engine —
-  gated on the Phase-1 playtest confirming A4 holds.
+- **Phase 2 (done):** **carried HP** — roster dwarves hold `hp/max_hp`, enter fights at current HP
+  (a hurt dwarf fights hurt), `hp_end` persists back, ready dwarves mend `HP_REGEN_PER_MONTH` (6)/mo,
+  downed → benched (wounded) and return at full HP; dashboard shows a colour-coded HP bar per dwarf.
+  **Tier→composition** — Med + High are both real fights now (`Db.ENCOUNTERS_BY_TIER`): Med = the
+  balanced trio ×1.0, High = two Brutes + Caster ×1.2 (combat applies `request.enemy_scale`). Verified
+  in-editor: High comp/scale (54/11, 54/11, 34/6); carried HP in→out + regen; downed→bench→full-heal;
+  standalone combat still base-stat identical.
+- **Next (Phase 3+):** crew agency (de-index combat, flip `CREW_SELECT`), then the card-reward engine —
+  gated on the playtest confirming A4 holds and run length stays sane.
 
 
 ## The bet this plan tests

@@ -102,6 +102,14 @@ const ENEMIES := {
 }
 const ENCOUNTER := ["brute", "assassin", "caster"]
 
+## OVERWORLD Phase 2 (overworld.gd reads this to build the combat `request`; combat.gd/grid ignore
+## it). Per danger tier: which enemies to field (max 3 — combat has 3 slots) and a scale multiplier
+## on enemy hp/atk. "med" = the canonical balanced trio; "high" = a heavier comp (two Brutes) + scale.
+const ENCOUNTERS_BY_TIER := {
+	"med":  {"enemies": ["brute", "assassin", "caster"], "scale": 1.0},
+	"high": {"enemies": ["brute", "brute", "caster"],    "scale": 1.2},
+}
+
 const MARK_MULT := 1.25
 
 # ================================================================ Display layer
