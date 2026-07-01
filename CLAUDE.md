@@ -81,6 +81,15 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
 
 ## Current state (2026-06-30) — Slice 2 party puzzle
 
+- **Three deployed modes / three Pages URLs** (root `main_scene` stays combat; CI seds per-export):
+  `/` = combat (Slice 2, below) · `/grid/` = the Fire-Emblem grid fork (`scenes/combat/grid_combat.gd`) ·
+  `/overworld/` = the **Overworld MVP fee-clock economic layer** (the spec's "second layer"). Each is a
+  self-contained bare-`Control` scene, all-UI-in-code; each has its own `export_presets.cfg` preset +
+  `deploy-pages.yml` export step. The overworld WRAPS combat with a dice-roll STUB (does not call it —
+  real combat hook is Step 4). See `docs/plans/2026-06-30-overworld-mvp-{spec,plan}.md`. Step-1 economy
+  is tunable `const`s in `overworld.gd`; Step-2 seams (`CREW_SELECT`, `LOSS_ENABLED`) are gated off.
+  Known open question flagged to the user: careful Low-only grind wins by month 12 in sim (possible A2
+  "obvious choice") — one-line levers `PAYOUT.low 30→25` or `START_TREASURY 100→80` if playtest confirms.
 - Renderer gl_compatibility, **portrait 720×1280**, emoji presentation, deployed to GitHub Pages. `application/run/main_scene` = `scenes/combat/combat.tscn`.
 - **The combat is the spec's Slice 2 "party puzzle"** (reworked from the earlier mobile prototype). `scripts/combat/combat.gd` (all UI built in code) + `scripts/combat/card_db.gd` (data) + `scripts/ui/{card,threat_arrows}.gd` + the `momentum_hit` VFX.
 - **Roles** (replaced the old Warrior/Sorcerer/Paladin + resources): Warrior 🛡️ 36hp (tank), Cleric ⛑️ 28hp (support), Sorcerer 🧙 22hp (dps). Each its own deck + per-character energy (3). No signature-resource system — synergy comes from temp-effects.
