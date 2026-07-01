@@ -297,21 +297,40 @@ func _enemy_phase() -> void:
 	_start_player_phase()
 
 # ================================================================ Targeting (enemy preference)
+## Role-based (NOT slot-indexed) so a non-canonical crew (e.g. {W,W,S} with no Cleric) targets
+## correctly. Byte-identical to the old party[0/1/2] logic for the canonical W/C/S trio.
 func _enemy_target(e: Dictionary) -> Dictionary:
-	if e["forced"] and party[0]["alive"]:
-		return party[0]            # Taunt -> Warrior
+	if e["forced"]:
+		var w: Dictionary = _first_living_role("warrior")   # Taunt -> a Warrior
+		if not w.is_empty():
+			return w
 	match e["pref"]:
 		"tankiest":
 			return _pick_tankiest()
 		"healer_dps":
-			if party[1]["alive"]: return party[1]   # Cleric
-			if party[2]["alive"]: return party[2]   # Sorcerer
-			if party[0]["alive"]: return party[0]
-			return {}
+			var c: Dictionary = _first_living_role("cleric")     # Healer first
+			if not c.is_empty():
+				return c
+			var nt: Dictionary = _first_living_nontank()         # then any non-tank (DPS)
+			if not nt.is_empty():
+				return nt
+			return _pick_lowest_hp()
 		"lowest_hp":
 			return _pick_lowest_hp()
 		_:
 			return _pick_lowest_hp()
+
+func _first_living_role(role: String) -> Dictionary:
+	for a: Dictionary in party:
+		if a["alive"] and a["role"] == role:
+			return a
+	return {}
+
+func _first_living_nontank() -> Dictionary:
+	for a: Dictionary in party:
+		if a["alive"] and a["role"] != "warrior":
+			return a
+	return {}
 
 func _pick_tankiest() -> Dictionary:
 	var best: Dictionary = {}

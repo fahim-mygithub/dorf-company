@@ -21,6 +21,9 @@ const FEE_PERIOD := 2         # rent due every N months (even months)
 const WIN_MONTH := 12         # survive the month-WIN_MONTH advance -> victory
 const WOUND_RECOVERY := 2     # months a downed dwarf is benched; returns at full HP
 const HP_REGEN_PER_MONTH := 6 # Phase 2: a ready-but-hurt dwarf mends this much HP per month
+# Phase 4: post-win reward pool — universal chassis cards any dwarf can learn (signatures stay in
+# starting decks, role-locked). Adding one to a dwarf's deck is how runs recombine (StS deckbuilding).
+const REWARD_POOL := ["strike", "guard", "cleave", "wall"]
 const DWARF_STRENGTH := 3     # flat in MVP (class only drives emoji/color)
 
 const DANGER := {"low": 8, "med": 13, "high": 15}     # crew_strength + 2d6 must reach this
@@ -33,7 +36,7 @@ const FAILURE_PAYOUT_MULT := 0.5
 const FAILURE_ATTRITION_MULT := 2.0
 
 const LOSS_ENABLED := false   # STEP 1: wounds only (A5). Step 2 flips true.
-const CREW_SELECT := false    # STEP 2 seam: manual crew picking.
+const CREW_SELECT := true     # Phase 3: player picks WHICH dwarves crew each fight.
 const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract launches a REAL fight.
 
 const STARTERS := [
@@ -79,6 +82,9 @@ var roster: Array = []
 var contracts: Array = []
 var current: Dictionary = {}
 var selected_contract := -1
+var crew_pick: Array = []     # Phase 3: dwarves the player has tapped for the current fight
+var pending_spoils: Array = [] # Phase 4: reward card ids awaiting a pick after a won fight
+var spoils_pick := -1
 var state := ""
 var run_epoch := 0
 var busy := false
@@ -260,7 +266,8 @@ func _new_run() -> void:
 	roster = []
 	for s in STARTERS:
 		var mh: int = int(Db.CLASSES[s["cls"]]["max_hp"])
-		roster.append({"name": s["name"], "cls": s["cls"], "status": "ready", "recover": 0, "hp": mh, "max_hp": mh})
+		roster.append({"name": s["name"], "cls": s["cls"], "status": "ready", "recover": 0, "hp": mh, "max_hp": mh,
+			"deck": (Db.CLASSES[s["cls"]]["deck"] as Array).duplicate()})   # Phase 4: persistent, growable deck
 	_regen_contracts()
 	overlay.visible = false
 	_msg("Rent's due every 2 months, and it only climbs. Take a job.")
@@ -270,7 +277,8 @@ func _regen_contracts() -> void:
 	contracts = [_make_contract("low"), _make_contract("med"), _make_contract("high")]
 	# Phase 1: the High job is a REAL fight, but only when a canonical W/C/S trio is fieldable
 	# (keeps combat's role-indexed logic valid until Phase 3 de-indexes it).
-	if USE_REAL_COMBAT and _has_canonical_trio():
+	# Phase 3: combat is role-based (de-indexed), so ANY 3 ready dwarves can crew a fight.
+	if USE_REAL_COMBAT and _ready_count() >= 3:
 		contracts[1]["fight"] = true   # Med — the standard fight
 		contracts[2]["fight"] = true   # High — heavier comp + scaled (see Db.ENCOUNTERS_BY_TIER)
 
@@ -468,7 +476,11 @@ func _embark() -> void:
 		return
 	current = c
 	if USE_REAL_COMBAT and c.get("fight", false):
-		await _embark_fight(c)
+		if CREW_SELECT:
+			_open_crew_select(c)          # player picks the crew, then launches
+		else:
+			current["crew"] = _canonical_trio()
+			await _embark_fight(c)
 		return
 	current["crew"] = _auto_assign_crew(c)
 	var result: Dictionary = _resolve_dice(current["crew"], current["tier"])
@@ -505,11 +517,220 @@ func _has_canonical_trio() -> bool:
 func _canonical_trio() -> Array:
 	return [_first_ready_of("warrior"), _first_ready_of("cleric"), _first_ready_of("sorcerer")]
 
+# ============================================================ Crew select (Phase 3)
+func _open_crew_select(c: Dictionary) -> void:
+	crew_pick = []
+	state = "CREW"
+	_clear_screen()
+	_build_crew_select(c)
+	_refresh_hud()
+
+func _build_crew_select(c: Dictionary) -> void:
+	_mklabel("— CHOOSE YOUR CREW —", Vector2(0, 186), Vector2(720, 28), 22, screen_root)
+	_mklabel("%s  ·  %s danger  ·  pays %dg" % [c["title"], TIER_LABEL[c["tier"]], int(c["payout"])], Vector2(0, 220), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	_mklabel("Tap %d ready dwarves to send. Who do you risk?" % int(c["crew_size"]), Vector2(0, 244), Vector2(720, 20), 13, screen_root, true, Color(0.7, 0.7, 0.75))
+	var ready: Array = []
+	for d in roster:
+		if d["status"] == "ready":
+			ready.append(d)
+	var n: int = ready.size()
+	var startx: int = 360 - (n - 1) * 90
+	for i in range(n):
+		_build_pick_token(ready[i], startx + i * 180, 400)
+	_mklabel("crew", Vector2(0, 640), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var cs: int = int(c["crew_size"])
+	var sx: int = 360 - cs * 44
+	for j in range(cs):
+		_rect(Vector2(sx + j * 88, 668), Vector2(76, 76), Color(0.14, 0.14, 0.18), screen_root)
+		if j < crew_pick.size():
+			_mkemoji(Vector2(sx + j * 88 + 38, 706), Vector2(70, 70), 40, screen_root).text = Db.CLASSES[crew_pick[j]["cls"]]["emoji"]
+	_build_crew_gauge(c)
+	var launch := Button.new()
+	launch.text = "⚔️ Launch"
+	launch.add_theme_font_size_override("font_size", 22)
+	launch.position = Vector2(240, 1150)
+	launch.size = Vector2(240, 70)
+	launch.disabled = crew_pick.size() != cs
+	launch.pressed.connect(_launch_fight)
+	screen_root.add_child(launch)
+	var back := Button.new()
+	back.text = "◀ Back"
+	back.add_theme_font_size_override("font_size", 18)
+	back.position = Vector2(30, 1150)
+	back.size = Vector2(140, 64)
+	back.pressed.connect(_on_view_contracts)
+	screen_root.add_child(back)
+
+func _build_pick_token(d: Dictionary, cx: int, cy: int) -> void:
+	var picked: bool = crew_pick.has(d)
+	var col: Color = CLASS_COL[d["cls"]]
+	var card := Control.new()
+	card.position = Vector2(cx - 70, cy - 60)
+	card.size = Vector2(140, 210)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.gui_input.connect(_on_crewpick_input.bind(d))
+	screen_root.add_child(card)
+	if picked:
+		_rect(Vector2(-3, -3), Vector2(146, 216), C_GREEN, card)
+	_rect(Vector2.ZERO, Vector2(140, 210), Color(col.r, col.g, col.b, 0.28 if picked else 0.14), card)
+	_mkemoji(Vector2(70, 54), Vector2(110, 84), 52, card).text = Db.CLASSES[d["cls"]]["emoji"]
+	_mklabel(d["name"], Vector2(0, 106), Vector2(140, 22), 15, card)
+	_mklabel(Db.CLASSES[d["cls"]]["name"], Vector2(0, 128), Vector2(140, 16), 11, card, true, Color(0.75, 0.75, 0.8))
+	var frac: float = clampf(float(d["hp"]) / float(d["max_hp"]), 0.0, 1.0)
+	var hpcol: Color = C_GREEN if frac > 0.6 else (C_AMBER if frac > 0.3 else C_RED)
+	_rect(Vector2(28, 150), Vector2(84, 9), Color(0.25, 0.25, 0.3), card)
+	_rect(Vector2(28, 150), Vector2(84 * frac, 9), hpcol, card)
+	_mklabel("%d/%d" % [int(d["hp"]), int(d["max_hp"])], Vector2(0, 162), Vector2(140, 16), 11, card, true, hpcol)
+	_mklabel("🃏 %d cards" % (d["deck"].size() if d.has("deck") else 0), Vector2(0, 182), Vector2(140, 16), 11, card, true, Color(0.82, 0.78, 0.55))
+	if picked:
+		_mklabel(str(crew_pick.find(d) + 1), Vector2(110, 2), Vector2(26, 24), 16, card, true, C_GREEN)
+
+func _build_crew_gauge(c: Dictionary) -> void:
+	var y: int = 792
+	var has_cleric: bool = false
+	var has_sorc: bool = false
+	var tothp: int = 0
+	for d in crew_pick:
+		if d["cls"] == "cleric": has_cleric = true
+		if d["cls"] == "sorcerer": has_sorc = true
+		tothp += int(d["hp"])
+	if crew_pick.size() == int(c["crew_size"]):
+		var warns: Array = []
+		if not has_cleric: warns.append("⚠ no healer — no Mend / Shield / Aura")
+		if not has_sorc: warns.append("⚠ no burst — no Mark / Channel / Finisher")
+		if warns.is_empty():
+			_mklabel("balanced crew — all three roles", Vector2(0, y), Vector2(720, 20), 14, screen_root, true, C_GREEN)
+		else:
+			for i in range(warns.size()):
+				_mklabel(warns[i], Vector2(0, y + i * 22), Vector2(720, 20), 13, screen_root, true, C_AMBER)
+	if not crew_pick.is_empty():
+		_mklabel("crew HP pool: %d" % tothp, Vector2(0, y + 50), Vector2(720, 18), 12, screen_root, true, Color(0.8, 0.8, 0.85))
+
+func _on_crewpick_input(event: InputEvent, d: Dictionary) -> void:
+	if busy or state != "CREW":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if crew_pick.has(d):
+			crew_pick.erase(d)
+		elif crew_pick.size() < int(current["crew_size"]):
+			crew_pick.append(d)
+		else:
+			_msg("Crew is full — tap a chosen dwarf to swap them out.")
+			return
+		_clear_screen()
+		_build_crew_select(current)
+
+func _launch_fight() -> void:
+	if busy or crew_pick.size() != int(current["crew_size"]):
+		return
+	current["crew"] = crew_pick.duplicate()
+	await _embark_fight(current)
+
+# ============================================================ Card rewards (Phase 4)
+func _roll_rewards() -> Array:
+	var pool: Array = REWARD_POOL.duplicate()
+	pool.shuffle()
+	return pool.slice(0, mini(3, pool.size()))
+
+func _open_spoils() -> void:
+	spoils_pick = -1
+	state = "SPOILS"
+	_clear_screen()
+	_build_spoils()
+	_refresh_hud()
+
+func _build_spoils() -> void:
+	_mklabel("— SPOILS OF WAR —", Vector2(0, 186), Vector2(720, 28), 22, screen_root)
+	_mklabel("A card for the company — pick it, then the dwarf who learns it.", Vector2(0, 222), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var xs := [40, 268, 496]
+	for i in range(pending_spoils.size()):
+		_build_spoil_card(i, xs[i])
+	_mklabel("give to:", Vector2(0, 700), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var targets: Array = []
+	for d in current["crew"]:
+		if d["status"] != "lost":
+			targets.append(d)
+	var n: int = targets.size()
+	var startx: int = 360 - (n - 1) * 100
+	for j in range(n):
+		_build_spoil_target(targets[j], startx + j * 200, 800)
+	var skip := Button.new()
+	skip.text = "Skip"
+	skip.add_theme_font_size_override("font_size", 18)
+	skip.position = Vector2(285, 1150)
+	skip.size = Vector2(150, 62)
+	skip.pressed.connect(_skip_spoils)
+	screen_root.add_child(skip)
+
+func _build_spoil_card(i: int, x: int) -> void:
+	var cid: String = pending_spoils[i]
+	var def: Dictionary = Db.CARDS[cid]
+	var sel: bool = (i == spoils_pick)
+	var card := Control.new()
+	card.position = Vector2(x, 288 if sel else 300)
+	card.size = Vector2(184, 300)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.gui_input.connect(_on_spoil_card_input.bind(i))
+	screen_root.add_child(card)
+	if sel:
+		_rect(Vector2(-3, -3), Vector2(190, 306), C_GREEN, card)
+	_rect(Vector2.ZERO, Vector2(184, 300), Db.type_tint(def.get("type", "skill")), card)
+	_rect(Vector2(8, 8), Vector2(40, 40), C_COIN, card)
+	_mklabel(str(int(def["cost"])), Vector2(8, 14), Vector2(40, 28), 22, card, true, Color(0.1, 0.1, 0.1))
+	_mkemoji(Vector2(92, 84), Vector2(100, 76), 46, card).text = def.get("emoji", "🃏")
+	_mklabel(def["name"], Vector2(4, 138), Vector2(176, 26), 18, card)
+	var body: Dictionary = Db.describe(def, null, 0, 0)
+	_mklabel(body["text"], Vector2(8, 178), Vector2(168, 110), 14, card, true, Color(0.9, 0.9, 0.92))
+
+func _build_spoil_target(d: Dictionary, cx: int, cy: int) -> void:
+	var col: Color = CLASS_COL[d["cls"]]
+	var tok := Control.new()
+	tok.position = Vector2(cx - 70, cy - 60)
+	tok.size = Vector2(140, 170)
+	tok.mouse_filter = Control.MOUSE_FILTER_STOP
+	tok.gui_input.connect(_on_spoil_target_input.bind(d))
+	screen_root.add_child(tok)
+	_rect(Vector2.ZERO, Vector2(140, 170), Color(col.r, col.g, col.b, 0.18), tok)
+	_mkemoji(Vector2(70, 50), Vector2(110, 80), 50, tok).text = Db.CLASSES[d["cls"]]["emoji"]
+	_mklabel(d["name"], Vector2(0, 100), Vector2(140, 22), 15, tok)
+	_mklabel("🃏 %d cards" % int(d["deck"].size()), Vector2(0, 126), Vector2(140, 16), 11, tok, true, Color(0.82, 0.78, 0.55))
+
+func _on_spoil_card_input(event: InputEvent, i: int) -> void:
+	if state != "SPOILS":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		spoils_pick = i
+		_msg("%s — now tap the dwarf who learns it." % Db.CARDS[pending_spoils[i]]["name"])
+		_clear_screen()
+		_build_spoils()
+
+func _on_spoil_target_input(event: InputEvent, d: Dictionary) -> void:
+	if state != "SPOILS":
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if spoils_pick < 0:
+			_msg("Pick a card first.")
+			return
+		var cid: String = pending_spoils[spoils_pick]
+		d["deck"].append(cid)
+		_finish_spoils("%s learned %s — deck now %d cards." % [d["name"], Db.CARDS[cid]["name"], int(d["deck"].size())])
+
+func _skip_spoils() -> void:
+	_finish_spoils("Left the spoils behind.")
+
+func _finish_spoils(msg: String) -> void:
+	pending_spoils = []
+	spoils_pick = -1
+	_regen_contracts()
+	_enter_dashboard()
+	_msg(msg)
+
 func _build_crew_specs(crew: Array) -> Array:
 	var specs: Array = []
 	for d in crew:
-		# Phase 2: carry CURRENT hp into the fight — a hurt dwarf enters the battle hurt.
-		specs.append({"cls": d["cls"], "name": d["name"], "hp": int(d["hp"]), "max_hp": int(d["max_hp"])})
+		# Phase 2: carry CURRENT hp in. Phase 4: send the dwarf's PERSISTENT deck (combat duplicates it).
+		specs.append({"cls": d["cls"], "name": d["name"], "hp": int(d["hp"]), "max_hp": int(d["max_hp"]),
+			"deck": d.get("deck", (Db.CLASSES[d["cls"]]["deck"] as Array))})
 	return specs
 
 ## Run combat.tscn as a CHILD, send the crew, await the result, map it into the SAME
@@ -517,7 +738,6 @@ func _build_crew_specs(crew: Array) -> Array:
 func _embark_fight(c: Dictionary) -> void:
 	busy = true
 	var e := run_epoch
-	current["crew"] = _canonical_trio()
 	selected_contract = -1
 	_msg("%s — into the fight!" % c["title"])
 	var fight = COMBAT_SCENE.instantiate()
@@ -544,6 +764,10 @@ func _embark_fight(c: Dictionary) -> void:
 	_build_outcome(current, shaped)
 	_refresh_hud()
 	await _outcome_beats(current, shaped, e)
+	if e != run_epoch:
+		return
+	if state != "GAMEOVER" and shaped["success"]:
+		pending_spoils = _roll_rewards()   # Phase 4: a card reward waits on the OUTCOME's Continue
 
 func _resolve_from_combat(result: Dictionary, tier: String) -> Dictionary:
 	var success: bool = result["success"]
@@ -717,6 +941,9 @@ func _drain_fee(e: int) -> void:
 
 func _on_continue() -> void:
 	if busy:
+		return
+	if not pending_spoils.is_empty():
+		_open_spoils()
 		return
 	_regen_contracts()
 	_enter_dashboard()
