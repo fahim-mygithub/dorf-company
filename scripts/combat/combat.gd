@@ -14,6 +14,12 @@ const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 
 const HAND_SIZE := 5
 
+## Overworld mesh (Phase 1): a non-empty `request` makes this scene run as a CHILD of the
+## overworld — party/enemies come from `request`, and `_end` emits `combat_finished` instead of
+## showing Play-Again. An EMPTY request = standalone behaviour, byte-identical to before.
+signal combat_finished(result)
+var request: Dictionary = {}
+
 # ---------------------------------------------------------------- State
 var party: Array = []          # 3 char dicts: 0 warrior, 1 cleric, 2 sorcerer
 var enemies: Array = []        # 3 enemy dicts
@@ -184,14 +190,19 @@ func _build_party_slot(i: int) -> void:
 func _start_combat() -> void:
 	combat_epoch += 1
 	party = []
-	for i: int in range(Db.PARTY_ORDER.size()):
-		var cid: String = Db.PARTY_ORDER[i]
+	var crew_specs: Array = request.get("crew", [])
+	if crew_specs.is_empty():
+		for cid: String in Db.PARTY_ORDER:
+			crew_specs.append({"cls": cid})
+	for i: int in range(crew_specs.size()):
+		var spec: Dictionary = crew_specs[i]
+		var cid: String = spec["cls"]
 		var cls: Dictionary = Db.CLASSES[cid]
-		var deck: Array = (cls["deck"] as Array).duplicate()
+		var deck: Array = (spec.get("deck", cls["deck"]) as Array).duplicate()
 		deck.shuffle()
 		party.append({
-			"role": cls["role"], "name": cls["name"], "emoji": cls["emoji"],
-			"hp": cls["max_hp"], "max_hp": cls["max_hp"], "block": 0,
+			"role": cls["role"], "name": spec.get("name", cls["name"]), "emoji": cls["emoji"],
+			"hp": int(spec.get("hp", cls["max_hp"])), "max_hp": int(spec.get("max_hp", cls["max_hp"])), "block": 0,
 			"energy": cls["energy"], "max_energy": cls["energy"], "alive": true,
 			"deck": deck, "hand": [], "discard": [],
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
@@ -199,8 +210,9 @@ func _start_combat() -> void:
 		})
 
 	enemies = []
-	for i: int in range(Db.ENCOUNTER.size()):
-		var eid: String = Db.ENCOUNTER[i]
+	var enc: Array = request.get("enemies", Db.ENCOUNTER)
+	for i: int in range(enc.size()):
+		var eid: String = enc[i]
 		var ed: Dictionary = Db.ENEMIES[eid]
 		enemies.append({
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
@@ -571,6 +583,12 @@ func _check_end() -> bool:
 func _end(won: bool) -> void:
 	phase = "win" if won else "lose"
 	selected_card = -1
+	if not request.is_empty():
+		var crew_results: Array = []
+		for a: Dictionary in party:
+			crew_results.append({"name": a["name"], "cls": a["role"], "survived": a["alive"], "hp_end": a["hp"], "max_hp": a["max_hp"]})
+		combat_finished.emit({"success": won, "crew_results": crew_results, "payout_won": won})
+		return
 	overlay_label.text = "The dwarves delivered.\nQuarterly demon targets met." if won else "Liquidation.\nThe contract is void."
 	overlay.visible = true
 	_refresh()

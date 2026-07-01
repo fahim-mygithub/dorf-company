@@ -10,9 +10,11 @@ extends Control
 ## Step-2 seams: CREW_SELECT (crew picking) + LOSS_ENABLED (permanent loss) are gated off.
 
 const Db := preload("res://scripts/combat/card_db.gd")
+const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
 
 # ============================================================ Economy (tunable)
-const START_TREASURY := 100
+const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
+                              # LONGER reach month 12 solvent — the fee now forces greedier jobs (A1/A2).
 const FEE_BASE := 40
 const FEE_STEP := 10          # fee rises this much per payment
 const FEE_PERIOD := 2         # rent due every N months (even months)
@@ -21,7 +23,7 @@ const WOUND_RECOVERY := 2     # months a wound keeps a dwarf unavailable
 const DWARF_STRENGTH := 3     # flat in MVP (class only drives emoji/color)
 
 const DANGER := {"low": 8, "med": 13, "high": 15}     # crew_strength + 2d6 must reach this
-const PAYOUT := {"low": 30, "med": 80, "high": 100}
+const PAYOUT := {"low": 25, "med": 80, "high": 100}   # low 30->25 (Phase 0): safe grind now insufficient
 const DURATION := {"low": 1, "med": 2, "high": 1}
 const CREW_SIZE := {"low": 1, "med": 3, "high": 3}    # low = crew_size-1 lifeline
 const WOUND_CHANCE := {"low": 0.05, "med": 0.20, "high": 0.35}
@@ -31,6 +33,7 @@ const FAILURE_ATTRITION_MULT := 2.0
 
 const LOSS_ENABLED := false   # STEP 1: wounds only (A5). Step 2 flips true.
 const CREW_SELECT := false    # STEP 2 seam: manual crew picking.
+const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract launches a REAL fight.
 
 const STARTERS := [
 	{"name": "Thrain", "cls": "warrior"},
@@ -263,6 +266,10 @@ func _new_run() -> void:
 
 func _regen_contracts() -> void:
 	contracts = [_make_contract("low"), _make_contract("med"), _make_contract("high")]
+	# Phase 1: the High job is a REAL fight, but only when a canonical W/C/S trio is fieldable
+	# (keeps combat's role-indexed logic valid until Phase 3 de-indexes it).
+	if USE_REAL_COMBAT and _has_canonical_trio():
+		contracts[2]["fight"] = true
 
 func _make_contract(tier: String) -> Dictionary:
 	var titles: Array = TITLES[tier]
@@ -414,10 +421,12 @@ func _build_contract_card(i: int, x: int) -> void:
 	var dur: int = int(c["duration"])
 	for j in range(dur):
 		_rect(Vector2(108 - dur * 17.0 + j * 34, 474), Vector2(28, 20), Color(0.55, 0.6, 0.75), card)
+	if c.get("fight", false):
+		_mklabel("⚔️ REAL FIGHT", Vector2(6, 508), Vector2(204, 22), 15, card, true, Color(1.0, 0.85, 0.4))
 	if not takeable:
 		_mklabel("need %d ready" % cs, Vector2(6, 540), Vector2(204, 22), 14, card, true, C_RED)
 	elif i == selected_contract:
-		_mklabel("tap again to embark", Vector2(6, 540), Vector2(204, 22), 14, card, true, C_GREEN)
+		_mklabel("tap again to %s" % ("FIGHT" if c.get("fight", false) else "embark"), Vector2(6, 540), Vector2(204, 22), 14, card, true, C_GREEN)
 	else:
 		_mklabel("tap to select", Vector2(6, 540), Vector2(204, 22), 13, card, true, Color(0.85, 0.85, 0.9))
 
@@ -446,6 +455,9 @@ func _embark() -> void:
 		_msg("Not enough ready dwarves.")
 		return
 	current = c
+	if USE_REAL_COMBAT and c.get("fight", false):
+		await _embark_fight(c)
+		return
 	current["crew"] = _auto_assign_crew(c)
 	var result: Dictionary = _resolve_dice(current["crew"], current["tier"])
 	selected_contract = -1
@@ -467,6 +479,68 @@ func _auto_assign_crew(c: Dictionary) -> Array:
 		if d["status"] == "ready" and crew.size() < int(c["crew_size"]):
 			crew.append(d)
 	return crew
+
+# ============================================================ Real-combat mesh (Phase 1)
+func _first_ready_of(cls: String) -> Variant:
+	for d in roster:
+		if d["status"] == "ready" and d["cls"] == cls:
+			return d
+	return null
+
+func _has_canonical_trio() -> bool:
+	return _first_ready_of("warrior") != null and _first_ready_of("cleric") != null and _first_ready_of("sorcerer") != null
+
+func _canonical_trio() -> Array:
+	return [_first_ready_of("warrior"), _first_ready_of("cleric"), _first_ready_of("sorcerer")]
+
+func _build_crew_specs(crew: Array) -> Array:
+	var specs: Array = []
+	for d in crew:
+		var mh: int = int(Db.CLASSES[d["cls"]]["max_hp"])
+		specs.append({"cls": d["cls"], "name": d["name"], "hp": mh, "max_hp": mh})
+	return specs
+
+## Run combat.tscn as a CHILD, send the crew, await the result, map it into the SAME
+## {success,payout,pending} shape the dice path produces, then feed the UNCHANGED outcome pipeline.
+func _embark_fight(c: Dictionary) -> void:
+	busy = true
+	var e := run_epoch
+	current["crew"] = _canonical_trio()
+	selected_contract = -1
+	_msg("%s — into the fight!" % c["title"])
+	var fight = COMBAT_SCENE.instantiate()
+	fight.request = {"crew": _build_crew_specs(current["crew"])}   # set BEFORE add_child (_ready runs on entry)
+	screen_root.visible = false
+	hud.visible = false
+	add_child(fight)
+	var result: Dictionary = await fight.combat_finished
+	if e != run_epoch:
+		if is_instance_valid(fight):
+			fight.queue_free()
+		return
+	fight.queue_free()
+	screen_root.visible = true
+	hud.visible = true
+	var shaped: Dictionary = _resolve_from_combat(result, current["tier"])
+	state = "OUTCOME"
+	_clear_screen()
+	_build_outcome(current, shaped)
+	_refresh_hud()
+	await _outcome_beats(current, shaped, e)
+
+func _resolve_from_combat(result: Dictionary, tier: String) -> Dictionary:
+	var success: bool = result["success"]
+	var payout: int = int(round(float(PAYOUT[tier]) * (1.0 if success else FAILURE_PAYOUT_MULT)))
+	var pending: Array = []
+	var crew_results: Array = result["crew_results"]
+	for i in range(crew_results.size()):
+		var cr: Dictionary = crew_results[i]
+		var d: Dictionary = current["crew"][i]
+		if not cr["survived"]:
+			pending.append([d, "lost" if LOSS_ENABLED else "wounded"])
+		elif float(cr["hp_end"]) <= 0.4 * float(cr["max_hp"]):
+			pending.append([d, "wounded"])
+	return {"success": success, "payout": payout, "pending": pending, "roll": 0, "strength": 0}
 
 func _resolve_dice(crew: Array, tier: String) -> Dictionary:
 	var strength: int = crew.size() * DWARF_STRENGTH

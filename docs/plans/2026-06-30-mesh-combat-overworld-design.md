@@ -1,7 +1,20 @@
 # Meshing Combat + Overworld — One Recombining Loop (Design Plan)
 
-Date: 2026-06-30 · Status: synthesis of 4 design lenses (workflow wf_de08021a-006) · Awaiting greenlight
-Source: `combat.gd`, `card_db.gd`, `overworld.gd`, overworld-mvp spec + plan
+Date: 2026-06-30 · Status: **Phase 0 + Phase 1 SHIPPED & verified in-editor** (rest awaiting playtest signal)
+Source: `combat.gd`, `card_db.gd`, `overworld.gd`, overworld-mvp spec + plan · Workflow wf_de08021a-006
+
+## Build status
+- **Phase 0 (done):** `START_TREASURY 100→80`, `PAYOUT.low 30→25`. Sim-verified: a Low-only grind now
+  goes **bankrupt at month 12** (was a comfortable win), while Med survives (170g) — the fee forces
+  the choice, so the fight actually gets taken. A4 is now testable.
+- **Phase 1 (done):** the High "⚔️ REAL FIGHT" contract launches `combat.tscn` as an overworld child
+  via the seam below (`USE_REAL_COMBAT`). Verified in-editor: canonical trio → party; win → +100g;
+  loss → half payout + all-crew wounded; fee still drains mid-advance; chrome restores; combat child
+  frees; **standalone combat (`/`) stays byte-identical** (empty `request` = default party). `USE_REAL_COMBAT`
+  toggles the stub-vs-real A/B on identical stakes.
+- **Next (Phase 2+):** carried HP + tier→composition, then crew agency, then the card-reward engine —
+  gated on the Phase-1 playtest confirming A4 holds.
+
 
 ## The bet this plan tests
 Assumption **A4** — wrapping fights in an economic frame makes *both* layers better: fights carry
