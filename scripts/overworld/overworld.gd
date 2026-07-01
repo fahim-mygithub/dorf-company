@@ -56,13 +56,16 @@ const FAILURE_ATTRITION_MULT := 2.0
 const CREW_SELECT := true     # Phase 3: player picks WHICH dwarves crew each fight.
 const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract launches a REAL fight.
 
-# ============================================================ Hex-crawl expedition (2026-07-01 spec)
-const EXPEDITIONS := true          # Med/High fight contracts open a multi-hex expedition (not one fight).
-const HEX_RADIUS := 2              # axial radius -> ~19 hexes
-const OBJECTIVE_MIN_DEPTH := 2     # the civilian is never in a trivially-close hex
-const HEX_DEPTH_SCALE := 0.20      # enemy_scale grows this much per depth step
-const DEPTH_PAY := 15              # gold banked per deepest-depth-reached step
-const OBJECTIVE_BONUS := 60        # full-success bonus on top of depth pay
+# ============================================================ Hex-crawl expedition (2026-07-01, redesign 2)
+# A VISIBLE-BOARD route-planner (no fog): the whole map is shown, the objective location is marked,
+# and every passable tile telegraphs its KIND (fight/loot/mystery) + a rough danger read. The
+# perimeter is impassable wall; you route through the interior to the captive. "Objective pays big"
+# (the rescue is the bulk of the payout); loot tiles add optional side-gold. Enemy scale comes from a
+# combat tile's telegraphed DANGER, not from distance.
+const EXPEDITIONS := true          # Med/High fight contracts open an expedition (not one fight).
+const HEX_COLS := 6                # offset-hex grid width  (border cols are wall)
+const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
+const DANGER_STEP := 0.30          # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.3/1.6)
 const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
 const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)
 const DS_SUCCESS_CHANCE := 0.55    # tuned toward survival; dorfs cheap-not-free
@@ -131,9 +134,9 @@ var _tre_shown := 0
 # Expedition (hex-crawl) state
 var exp_contract: Dictionary = {}   # the contract being run as an expedition
 var exp_crew: Array = []            # the fixed 3 crew dwarves for this expedition
-var hexes: Dictionary = {}          # "q,r" -> hex dict
+var hexes: Dictionary = {}          # "col,row" -> hex dict (offset coords; kind/danger/resolved/objective)
 var hex_cur := ""                   # current hex key
-var hex_deepest := 0                # deepest depth reached (drives banked payout)
+var exp_loot_gold := 0              # side-gold collected this expedition (paid out on extract/rescue)
 var hex_loot: Array = []            # card ids offered on a reward tile
 var hex_loot_pick := -1
 var hex_event: Dictionary = {}      # the active event tile
@@ -1087,6 +1090,7 @@ func _game_over(kind: String) -> void:
 func _open_expedition(c: Dictionary) -> void:
 	exp_contract = c
 	exp_crew = c["crew"].duplicate()   # shallow: elements are the roster dicts (carried HP/status persists)
+	exp_loot_gold = 0
 	for d in exp_crew:                 # reset per-expedition death-save state; carried HP stays as-is
 		d["downed"] = false
 		d["stable"] = false
@@ -1095,70 +1099,111 @@ func _open_expedition(c: Dictionary) -> void:
 	_gen_hex_map(c)
 	state = "HEX"
 	busy = false
-	_msg("Into %s — reach the captive, or bank what you take and leave." % c["title"])
+	_msg("The whole warren's mapped. Route to the captive — or grab loot and get out.")
 	_clear_screen()
 	_build_hexcrawl()
 	_refresh_hud()
 
-func _hex_key(q: int, r: int) -> String:
-	return "%d,%d" % [q, r]
+func _hex_key(cc: int, rr: int) -> String:
+	return "%d,%d" % [cc, rr]
 
-func _hex_depth(q: int, r: int) -> int:
-	return int((abs(q) + abs(r) + abs(q + r)) / 2)
-
+## Odd-r offset neighbours (odd rows are shoved right half a tile — matches _hex_px).
 func _hex_neighbors(key: String) -> Array:
 	var h: Dictionary = hexes[key]
-	var q: int = int(h["q"])
-	var r: int = int(h["r"])
+	var cc: int = int(h["q"])
+	var rr: int = int(h["r"])
+	var diffs: Array
+	if rr % 2 == 0:
+		diffs = [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]]
+	else:
+		diffs = [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]]
 	var out: Array = []
-	for d in [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]:
-		var k := _hex_key(q + d[0], r + d[1])
+	for d in diffs:
+		var k := _hex_key(cc + d[0], rr + d[1])
 		if hexes.has(k):
 			out.append(k)
 	return out
 
+## BFS hop-distance from `start` over PASSABLE tiles (walls block); writes each hex["dist"].
+func _bfs_dist(start: String) -> void:
+	for k in hexes:
+		hexes[k]["dist"] = -1
+	hexes[start]["dist"] = 0
+	var queue: Array = [start]
+	while not queue.is_empty():
+		var cur: String = queue.pop_front()
+		var cd: int = int(hexes[cur]["dist"])
+		for nk in _hex_neighbors(cur):
+			if hexes[nk]["kind"] == "wall":
+				continue
+			if int(hexes[nk]["dist"]) < 0:
+				hexes[nk]["dist"] = cd + 1
+				queue.append(nk)
+
+## A fixed 6x5 offset grid: border ring = impassable WALL, 4x3 = 12 passable interior.
+## Entry at a corner, objective on the farthest passable tile (visible), rest telegraphed.
 func _gen_hex_map(_c: Dictionary) -> void:
 	hexes = {}
-	for q in range(-HEX_RADIUS, HEX_RADIUS + 1):
-		for r in range(-HEX_RADIUS, HEX_RADIUS + 1):
-			if abs(q + r) > HEX_RADIUS:
-				continue
-			hexes[_hex_key(q, r)] = {"q": q, "r": r, "depth": _hex_depth(q, r),
-				"content": "empty", "revealed": false, "resolved": false, "objective": false}
-	var entry: Dictionary = hexes["0,0"]
-	entry["revealed"] = true
-	entry["resolved"] = true
-	for nk in _hex_neighbors("0,0"):
-		hexes[nk]["revealed"] = true
-	var far: Array = []                        # hide the objective on a random far tile
+	for rr in range(HEX_ROWS):
+		for cc in range(HEX_COLS):
+			var wall: bool = cc == 0 or cc == HEX_COLS - 1 or rr == 0 or rr == HEX_ROWS - 1
+			hexes[_hex_key(cc, rr)] = {"q": cc, "r": rr, "kind": ("wall" if wall else "empty"),
+				"danger": 0, "resolved": wall, "objective": false, "dist": 0}
+	var entry: String = _hex_key(1, HEX_ROWS - 2)   # bottom-left interior corner
+	hexes[entry]["kind"] = "entry"
+	hexes[entry]["resolved"] = true
+	hex_cur = entry
+	_bfs_dist(entry)
+	# objective = farthest passable tile (so the captive is always across the map)
+	var objk: String = entry
+	var maxd: int = -1
 	for k in hexes:
-		if int(hexes[k]["depth"]) >= OBJECTIVE_MIN_DEPTH:
-			far.append(k)
-	far.shuffle()
-	hexes[far[0]]["objective"] = true
-	hexes[far[0]]["content"] = "objective"
-	for k in hexes:                            # roll the rest (depth-weighted)
 		var h: Dictionary = hexes[k]
-		if bool(h["resolved"]) or bool(h["objective"]):
+		if h["kind"] == "wall" or k == entry:
 			continue
-		h["content"] = _roll_hex_content(int(h["depth"]))
-	hex_cur = "0,0"
-	hex_deepest = 0
+		if int(h["dist"]) > maxd:
+			maxd = int(h["dist"])
+			objk = k
+	hexes[objk]["kind"] = "objective"
+	hexes[objk]["objective"] = true
+	hexes[objk]["resolved"] = false
+	# assign telegraphed content to the remaining interior tiles
+	var rest: Array = []
+	for k in hexes:
+		if hexes[k]["kind"] == "empty":
+			rest.append(k)
+	rest.shuffle()
+	var bag: Array = _content_bag(rest.size())
+	for i in range(rest.size()):
+		var k: String = rest[i]
+		var kind: String = bag[i]
+		hexes[k]["kind"] = kind
+		if kind == "combat":
+			var dd: int = int(hexes[k]["dist"])
+			hexes[k]["danger"] = clampi(1 + int(float(dd) * 0.4) + (randi() % 2), 1, 3)   # deeper tiles read deadlier
+		elif kind == "empty":
+			hexes[k]["resolved"] = true   # a quiet passage, nothing to trigger
 
-func _roll_hex_content(depth: int) -> String:
-	var roll := randf()
-	if depth >= 2:
-		if roll < 0.50: return "combat"
-		elif roll < 0.80: return "reward"
-		elif roll < 0.95: return "event"
-		else: return "empty"
-	if roll < 0.35: return "combat"
-	elif roll < 0.60: return "reward"
-	elif roll < 0.75: return "event"
-	return "empty"
+## Content mix for the interior: ~45% combat, ~25% loot, ~15% event, rest quiet.
+func _content_bag(n: int) -> Array:
+	var bag: Array = []
+	var nc: int = maxi(1, int(round(float(n) * 0.45)))
+	var nr: int = maxi(1, int(round(float(n) * 0.25)))
+	var ne: int = maxi(1, int(round(float(n) * 0.15)))
+	for i in range(nc):
+		bag.append("combat")
+	for i in range(nr):
+		bag.append("reward")
+	for i in range(ne):
+		bag.append("event")
+	while bag.size() < n:
+		bag.append("empty")
+	bag = bag.slice(0, n)
+	bag.shuffle()
+	return bag
 
-func _depth_pay(depth: int) -> int:
-	return depth * DEPTH_PAY
+func _danger_scale(danger: int) -> float:
+	return 1.0 + float(maxi(0, danger - 1)) * DANGER_STEP
 
 func _living_up() -> Array:
 	var up: Array = []
@@ -1168,22 +1213,21 @@ func _living_up() -> Array:
 	return up
 
 # ---------------------------------------------------------- Hex map render
-func _hex_px(q: int, r: int) -> Vector2:
-	var hs := 50.0
-	return Vector2(360.0 + hs * sqrt(3.0) * (float(q) + float(r) / 2.0), 500.0 + hs * 1.5 * float(r))
+func _hex_px(cc: int, rr: int) -> Vector2:
+	return Vector2(160.0 + 74.0 * (float(cc) + 0.5 * float(rr & 1)), 300.0 + 62.0 * float(rr))
 
 func _build_hexcrawl() -> void:
-	_mklabel("— EXPEDITION —", Vector2(0, 172), Vector2(720, 26), 20, screen_root)
+	_mklabel("— EXPEDITION —", Vector2(0, 168), Vector2(720, 26), 20, screen_root)
 	var c := exp_contract
 	var modtxt: String = ("  ·  %s %s" % [c["mod"]["emoji"], c["mod"]["name"]]) if c.has("mod") else ""
-	_mklabel("%s  ·  %s%s" % [c["title"], c["loc_name"], modtxt], Vector2(0, 200), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
-	_mklabel("Tap a lit neighbour to push on. Deeper = richer & deadlier.", Vector2(0, 224), Vector2(720, 18), 12, screen_root, true, Color(0.7, 0.7, 0.75))
+	_mklabel("%s  ·  %s%s" % [c["title"], c["loc_name"], modtxt], Vector2(0, 196), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	_mklabel("Route to 🏁 the captive. Icons hint the tile; ☠ = how tough. Detour for loot if you dare.", Vector2(0, 220), Vector2(720, 18), 12, screen_root, true, Color(0.7, 0.7, 0.75))
 	for k in hexes:
 		_build_hex_tile(k)
 	_build_exp_crew_strip()
-	_mklabel("deepest %d  ·  🧍 captive worth +%dg" % [hex_deepest, OBJECTIVE_BONUS], Vector2(24, 1112), Vector2(420, 18), 12, screen_root, false, Color(0.8, 0.78, 0.6))
+	_mklabel("loot bag  +%dg  ·  🏁 the rescue pays the real money" % exp_loot_gold, Vector2(24, 1112), Vector2(430, 18), 12, screen_root, false, Color(0.85, 0.8, 0.55))
 	var ex := Button.new()
-	ex.text = "🏳️ Extract (+%dg)" % _depth_pay(hex_deepest)
+	ex.text = "🏳️ Extract (+%dg)" % exp_loot_gold
 	ex.add_theme_font_size_override("font_size", 18)
 	ex.position = Vector2(430, 1146)
 	ex.size = Vector2(266, 70)
@@ -1194,11 +1238,12 @@ func _build_hexcrawl() -> void:
 func _build_hex_tile(key: String) -> void:
 	var h: Dictionary = hexes[key]
 	var px := _hex_px(int(h["q"]), int(h["r"]))
-	var sz := Vector2(74, 66)
-	var cur := key == hex_cur
-	var revealed := bool(h["revealed"])
-	var neighbor := _hex_neighbors(hex_cur).has(key)
-	var can_move := revealed and neighbor and not cur
+	var sz := Vector2(72, 62)
+	var kind: String = h["kind"]
+	var wall: bool = kind == "wall"
+	var cur: bool = key == hex_cur
+	var resolved: bool = bool(h["resolved"])
+	var can_move: bool = not wall and not cur and _hex_neighbors(hex_cur).has(key)
 	var tile := Control.new()
 	tile.position = px - sz * 0.5
 	tile.size = sz
@@ -1206,31 +1251,46 @@ func _build_hex_tile(key: String) -> void:
 	if can_move:
 		tile.gui_input.connect(_on_hex_input.bind(key))
 	screen_root.add_child(tile)
+	if kind == "objective":
+		_rect(Vector2(-3, -3), sz + Vector2(6, 6), C_COIN, tile)        # gold frame: the goal
+	elif can_move:
+		_rect(Vector2(-2, -2), sz + Vector2(4, 4), C_AMBER, tile)       # amber frame: reachable
 	var col: Color
-	if not revealed:
-		col = Color(0.13, 0.13, 0.16)
+	if wall:
+		col = Color(0.10, 0.10, 0.12)
 	elif cur:
 		col = Color(0.28, 0.42, 0.55)
-	elif bool(h["resolved"]):
-		col = Color(0.18, 0.24, 0.19)
+	elif kind == "objective":
+		col = Color(0.40, 0.34, 0.12)
+	elif resolved:
+		col = Color(0.17, 0.22, 0.18)
 	else:
-		col = Color(0.26, 0.26, 0.32)
+		col = Color(0.24, 0.24, 0.30)
 	_rect(Vector2.ZERO, sz, col, tile)
-	if can_move:
-		_rect(Vector2(0, 0), Vector2(sz.x, 4), C_AMBER, tile)
 	var glyph := ""
-	if not revealed:
-		glyph = ""
+	if wall:
+		glyph = "🪨"
 	elif cur:
 		glyph = "🚩"
-	elif not bool(h["resolved"]):
-		glyph = "❓"
-	elif h["content"] == "empty":
-		glyph = "·"
-	else:
+	elif kind == "objective":
+		glyph = "🏁"
+	elif resolved:
 		glyph = "✔️"
-	if glyph != "":
-		_mkemoji(sz * 0.5, sz, 28, tile).text = glyph
+	elif kind == "combat":
+		glyph = "⚔️"
+	elif kind == "reward":
+		glyph = "🎁"
+	elif kind == "event":
+		glyph = "❔"
+	else:
+		glyph = "·"
+	var gy: float = -6.0 if (kind == "combat" and not resolved) else 0.0
+	_mkemoji(sz * 0.5 + Vector2(0, gy), sz, 26, tile).text = glyph
+	if kind == "combat" and not resolved:
+		var sk := ""
+		for i in range(int(h["danger"])):
+			sk += "☠"
+		_mklabel(sk, Vector2(0, 42), Vector2(sz.x, 16), 12, tile, true, Color(0.95, 0.5, 0.5))
 
 func _build_exp_crew_strip() -> void:
 	_mklabel("crew", Vector2(0, 716), Vector2(720, 18), 12, screen_root, true, Color(0.8, 0.8, 0.85))
@@ -1274,7 +1334,7 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 	if busy or state != "HEX":
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _hex_neighbors(hex_cur).has(key) and bool(hexes[key]["revealed"]):
+		if hexes[key]["kind"] != "wall" and _hex_neighbors(hex_cur).has(key):
 			await _enter_hex(key)
 
 func _enter_hex(key: String) -> void:
@@ -1282,29 +1342,29 @@ func _enter_hex(key: String) -> void:
 	var e := run_epoch
 	hex_cur = key
 	var h: Dictionary = hexes[key]
-	hex_deepest = maxi(hex_deepest, int(h["depth"]))
-	for nk in _hex_neighbors(key):
-		hexes[nk]["revealed"] = true
-	_roll_death_saves()                    # each new tile = time passing for the downed
-	if not bool(h["resolved"]):
-		h["resolved"] = true
-		match h["content"]:
+	_roll_death_saves()                    # each step = time passing for the downed
+	if not bool(h["resolved"]) and not h["kind"] == "entry":
+		match h["kind"]:
 			"objective":
 				await _finish_expedition("objective", e)
 				return
 			"combat":
-				_msg("An ambush in the dark!")
-				await _hex_combat(int(h["depth"]), e)
+				h["resolved"] = true
+				_msg("They ambush you here!")
+				await _hex_combat(int(h["danger"]), e)
 				if e != run_epoch:
 					return
 			"reward":
-				_open_hex_reward(int(h["depth"]), e)
+				h["resolved"] = true
+				_open_hex_reward(e)
 				return
 			"event":
+				h["resolved"] = true
 				_open_hex_event(e)
 				return
 			_:
-				_msg("An empty passage. The fog clears ahead.")
+				h["resolved"] = true
+				_msg("A quiet passage.")
 	await _resume_hex(e)
 
 ## Return to the map after a tile resolves; a wipe (nobody up) ends the expedition here.
@@ -1336,15 +1396,15 @@ func _roll_death_saves() -> void:
 			d["downed"] = false
 			_msg("%s bleeds out. Gone." % d["name"])
 
-func _hex_combat(depth: int, e: int) -> void:
+## Enemy scale = tier base x contract modifier x the tile's telegraphed DANGER (not distance).
+func _hex_combat(danger: int, e: int) -> void:
 	var fight = COMBAT_SCENE.instantiate()
 	var req: Dictionary = {"crew": _build_crew_specs(exp_crew)}   # downed dwarves ride in at 0 HP (benched slot)
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})
 	var mscale: float = float(exp_contract["mod"]["scale"]) if exp_contract.has("mod") else 1.0
-	var dscale: float = 1.0 + float(depth) * HEX_DEPTH_SCALE
 	if not comp.is_empty():
 		req["enemies"] = comp["enemies"]
-		req["enemy_scale"] = float(comp["scale"]) * mscale * dscale
+		req["enemy_scale"] = float(comp["scale"]) * mscale * _danger_scale(danger)
 	fight.request = req                  # BEFORE add_child
 	screen_root.visible = false
 	hud.visible = false
@@ -1366,13 +1426,12 @@ func _hex_combat(depth: int, e: int) -> void:
 			d["downed"] = true          # newly downed -> starts rolling death saves next tile
 	_msg("The ambush is broken." if result["success"] else "The crew is overrun…")
 
-# ---------------------------------------------------------- Reward tile
-func _open_hex_reward(depth: int, e: int) -> void:
-	if randf() < 0.30:                    # a coin cache instead of a card
-		var g := HEX_REWARD_GOLD + depth * 6
-		treasury += g
-		_tween_treasury_to(treasury)
-		_msg("A cache of coin: +%dg." % g)
+# ---------------------------------------------------------- Reward tile (loot -> loot bag / a card)
+func _open_hex_reward(e: int) -> void:
+	if randf() < 0.35:                    # a coin cache instead of a card
+		var g := HEX_REWARD_GOLD + (randi() % 12)
+		exp_loot_gold += g
+		_msg("A cache of coin: +%dg to the loot bag." % g)
 		await _resume_hex(e)
 		return
 	hex_loot = _roll_hex_loot()
@@ -1482,6 +1541,8 @@ func _on_hexloot_target_input(event: InputEvent, d: Dictionary) -> void:
 		await _resume_hex(run_epoch)
 
 func _on_hexloot_skip() -> void:
+	if state != "HEXREWARD":   # guard parity with the other loot handlers (no double-fire after rebuild)
+		return
 	hex_loot = []
 	hex_loot_pick = -1
 	_msg("Left the spoils behind.")
@@ -1498,7 +1559,7 @@ func _build_hex_event() -> void:
 	_mklabel("— A CHOICE —", Vector2(0, 300), Vector2(720, 28), 22, screen_root)
 	_mklabel("A sealed door, and a faint cry beyond it.", Vector2(0, 344), Vector2(720, 22), 15, screen_root, true, Color(0.85, 0.85, 0.9))
 	var safe := Button.new()
-	safe.text = "🚪 Play it safe\n(+%dg)" % EVENT_SAFE_GOLD
+	safe.text = "🚪 Play it safe\n(+%dg loot)" % EVENT_SAFE_GOLD
 	safe.add_theme_font_size_override("font_size", 18)
 	safe.position = Vector2(90, 560)
 	safe.size = Vector2(240, 120)
@@ -1518,16 +1579,14 @@ func _on_event_choice(risky: bool) -> void:
 	var e := run_epoch
 	state = "HEX"   # lock out double taps
 	if not risky:
-		treasury += EVENT_SAFE_GOLD
-		_tween_treasury_to(treasury)
-		_msg("You take the cautious path. +%dg." % EVENT_SAFE_GOLD)
+		exp_loot_gold += EVENT_SAFE_GOLD
+		_msg("You take the cautious path. +%dg to the loot bag." % EVENT_SAFE_GOLD)
 		await _resume_hex(e)
 		return
 	if randf() < 0.55:
-		treasury += EVENT_RISK_GOLD
-		_tween_treasury_to(treasury)
+		exp_loot_gold += EVENT_RISK_GOLD
 		_msg("Fortune favours the bold: +%dg — and loot within." % EVENT_RISK_GOLD)
-		_open_hex_reward(int(hexes[hex_cur]["depth"]), e)
+		_open_hex_reward(e)
 		return
 	var up := _living_up()
 	if up.is_empty():
@@ -1547,7 +1606,7 @@ func _on_extract() -> void:
 		return
 	await _finish_expedition("extract", run_epoch)
 
-## mode: "objective" (full) | "extract" (partial, all living home) | "wipe" (nothing, worst saves resolve).
+## mode: "objective" (rescue: loot + big pay) | "extract" (keep loot only) | "wipe" (lose everything).
 func _finish_expedition(mode: String, e: int) -> void:
 	busy = true
 	if mode == "wipe":                      # the downed who never stabilised finish their saves on the way out
@@ -1564,24 +1623,25 @@ func _finish_expedition(mode: String, e: int) -> void:
 						d["status"] = "lost"
 						d["downed"] = false
 	var success := mode == "objective"
-	var payout := _depth_pay(hex_deepest)
-	if success:
-		payout += OBJECTIVE_BONUS
-	if mode == "wipe":
-		payout = 0
 	var mpay: float = float(exp_contract["mod"]["pay"]) if exp_contract.has("mod") else 1.0
-	payout = int(round(float(payout) * mpay))
+	var obj_pay: int = int(round(float(int(PAYOUT[exp_contract["tier"]])) * mpay)) if success else 0
+	var loot: int = exp_loot_gold
+	var payout: int = loot + obj_pay
+	if mode == "wipe":
+		payout = 0                          # a wipe loses the loot bag too
+		loot = 0
 	var pending: Array = []
 	for d in exp_crew:
 		if d["status"] == "lost":
 			pending.append([d, "lost"])
 		elif bool(d["downed"]) or bool(d["stable"]):
-			pending.append([d, "wounded"])   # extract/objective bring the fallen home wounded
+			pending.append([d, "wounded"])   # extract/rescue bring the fallen home wounded
 		d["downed"] = false                  # clear per-expedition state
 		d["stable"] = false
 		d["ds_success"] = 0
 		d["ds_fail"] = 0
-	var shaped: Dictionary = {"success": success, "payout": payout, "pending": pending, "roll": 0, "strength": 0}
+	var shaped: Dictionary = {"success": success, "payout": payout, "pending": pending,
+		"loot": loot, "obj": obj_pay, "roll": 0, "strength": 0}
 	current = exp_contract
 	state = "OUTCOME"
 	busy = false
@@ -1605,7 +1665,14 @@ func _build_expedition_outcome(c: Dictionary, result: Dictionary, mode: String) 
 			big = "☠️  WIPED OUT"
 			col = C_RED
 	_mklabel(big, Vector2(0, 300), Vector2(720, 44), 30, screen_root, true, col)
-	_mklabel("%s — reached depth %d" % [c["title"], hex_deepest], Vector2(0, 360), Vector2(720, 24), 16, screen_root, true, Color(0.85, 0.85, 0.9))
+	var sub := ""
+	if mode == "objective":
+		sub = "🏁 rescue %dg  +  loot %dg" % [int(result["obj"]), int(result["loot"])]
+	elif mode == "extract":
+		sub = "loot bag %dg  ·  captive left behind" % int(result["loot"])
+	else:
+		sub = "everything lost in the dark"
+	_mklabel("%s — %s" % [c["title"], sub], Vector2(0, 360), Vector2(720, 24), 15, screen_root, true, Color(0.85, 0.85, 0.9))
 	_mklabel("+%dg" % int(result["payout"]), Vector2(0, 430), Vector2(720, 52), 40, screen_root, true, C_COIN)
 	continue_btn = Button.new()
 	continue_btn.text = "Continue ▶"
