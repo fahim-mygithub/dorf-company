@@ -138,6 +138,65 @@ const CARDS := {
 	"trophy_hunter": {"name":"Trophy Hunter","cost":2,"emoji":"🏆","target":"enemy","type":"attack","is_attack":true,
 				"effect":[["dmg",12],["on_kill",[["gain_energy",2]]]],
 				"tip":"Deal 12. If it kills the target, gain 2 Energy."},
+
+	# ============================================================ SURVIVORS MODE (zombie survival, 2026-07-01)
+	# Class cards stay OUT of the pools (deck / class-gated rescue). Generics -> SURVIVORS_REWARD_POOL.
+	# Undead don't bleed -> statuses are Burn 🔥 and Cripple 🦿. New ops live in combat.gd.
+	# --- Brute (tank) ---
+	"crowbar_swing": {"name":"Crowbar Swing","cost":1,"emoji":"🔨","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",13],["self_dmg",2]],
+				"tip":"Deal 13, take 2. A heavy swing that leans you Bloodied."},
+	"hold_the_line": {"name":"Hold the Line","cost":1,"emoji":"🛡️","target":"self","type":"skill",
+				"effect":[["block",8],["force_target_all","warrior"]],
+				"tip":"Gain 8 Block and pull every zombie onto you next turn."},
+	"adrenaline": {"name":"Adrenaline","cost":1,"emoji":"💢","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",5],["if_bloodied",[["dmg",9]]]],
+				"tip":"Deal 5, +9 more while Bloodied. Fear is fuel."},
+	# --- Medic (support) ---
+	"patch": {"name":"Patch Up","cost":1,"emoji":"🩹","target":"ally","type":"skill",
+				"effect":[["heal_ally",11]],
+				"tip":"Heal a chosen ally 11."},
+	"triage": {"name":"Triage","cost":1,"emoji":"🚑","target":"party","type":"skill",
+				"effect":[["heal_lowest",8],["party_block",2]],
+				"tip":"Heal the most-hurt ally 8; all allies gain 2 Block."},
+	"stimshot": {"name":"Stim Shot","cost":0,"emoji":"💉","target":"ally","type":"skill",
+				"effect":[["heal_ally",3],["ally_gain_energy",1]],
+				"tip":"An ally heals 3 and gains 1 Energy. Tempo enabler."},
+	# --- Engineer (dps) ---
+	"pipe_bomb": {"name":"Pipe Bomb","cost":2,"emoji":"🧨","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",8],["dmg_all",5]],
+				"tip":"Deal 8 to the target, then 5 to ALL. AoE burst."},
+	"spike_trap": {"name":"Spike Trap","cost":1,"emoji":"🕳️","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",4],["apply","cripple",2]],
+				"tip":"Deal 4 and apply 2 Cripple — the target hits softer while it lasts."},
+	# --- Survival generics (-> SURVIVORS_REWARD_POOL) ---
+	"scavenge": {"name":"Scavenge","cost":0,"emoji":"🔦","target":"self","type":"skill",
+				"effect":[["draw",1],["gain_energy",1]],
+				"tip":"Draw 1 and refund 1 Energy. Grab what you can."},
+	"machete": {"name":"Machete","cost":1,"emoji":"🔪","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",9]],
+				"tip":"Deal 9. Reliable steel."},
+	"barricade": {"name":"Barricade","cost":1,"emoji":"🧱","target":"self","type":"skill",
+				"effect":[["block",10],["retain_block"]],
+				"tip":"Gain 10 Block that holds through your next turn."},
+	"molotov": {"name":"Molotov","cost":1,"emoji":"🍾","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",4],["apply","burn",4]],
+				"tip":"Deal 4 and apply 4 Burn. Watch them cook."},
+	"headshot": {"name":"Headshot","cost":2,"emoji":"🔫","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",10],["if_target_marked",[["dmg",10]]]],
+				"tip":"Deal 10, +10 more if the target is Marked."},
+	"ration": {"name":"Ration","cost":0,"emoji":"🥫","target":"self","type":"skill",
+				"effect":[["heal_self",6]],
+				"tip":"Heal yourself 6. A cold can of beans."},
+	"suppressing_fire": {"name":"Suppressing Fire","cost":1,"emoji":"💥","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg_all",4],["apply_all","cripple",1]],
+				"tip":"Deal 4 to ALL and Cripple ALL by 1. Crowd control."},
+	"second_wind_s": {"name":"Second Wind","cost":1,"emoji":"🌬️","target":"self","type":"skill",
+				"effect":[["block",6],["draw",1]],
+				"tip":"Gain 6 Block and draw 1. Catch your breath."},
+	"last_stand": {"name":"Last Stand","cost":2,"emoji":"⚰️","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",8],["dmg_per_bloodied_ally",4]],
+				"tip":"Deal 8, +4 per bloodied ally. Nothing left to lose."},
 }
 
 ## Role-skewed decks (~10-12 cards each); the strike/guard split encodes the role.
@@ -148,8 +207,17 @@ const CLASSES := {
 		"deck":["strike","strike","strike","guard","guard","guard","guard","channel_shield","mend_or_smite","aura_of_valor"]},
 	"sorcerer":{"name":"Sorcerer","emoji":"🧙", "role":"sorcerer","max_hp":22, "energy":3, "move":3,
 		"deck":["strike","strike","strike","strike","strike","guard","guard","guard","mark","channel","arcane_finisher"]},
+	# Survivors-mode classes — same combat ROLES as W/C/S (role-based targeting works unchanged),
+	# their own zombie-flavoured starting decks. Overworld/standalone ignore these keys.
+	"brute":    {"name":"Brute",    "emoji":"🪓", "role":"warrior",  "max_hp":36, "energy":3, "move":1,
+		"deck":["strike","strike","strike","machete","guard","guard","guard","crowbar_swing","hold_the_line","adrenaline","barricade"]},
+	"medic":    {"name":"Medic",    "emoji":"⚕️", "role":"cleric",   "max_hp":28, "energy":3, "move":2,
+		"deck":["strike","strike","machete","guard","guard","patch","patch","triage","stimshot","ration"]},
+	"engineer": {"name":"Engineer", "emoji":"🔧", "role":"sorcerer", "max_hp":22, "energy":3, "move":3,
+		"deck":["strike","strike","strike","machete","guard","guard","pipe_bomb","spike_trap","molotov","scavenge"]},
 }
 const PARTY_ORDER := ["warrior", "cleric", "sorcerer"]
+const SURVIVOR_ORDER := ["brute", "medic", "engineer"]
 
 ## Enemies: each picks its highest-priority valid target and telegraphs it.
 ## pref: "tankiest" | "healer_dps" | "lowest_hp".
@@ -160,8 +228,17 @@ const ENEMIES := {
 				"tip":"Dives the backline — Healer first, then DPS. Skips the tank unless forced."},
 	"caster":   {"name":"Caster",   "emoji":"🔮", "max_hp":28, "atk":5, "pref":"lowest_hp", "range":2, "move":2,
 				"tip":"Snipes the weakest — targets whoever has the lowest current HP."},
+	# Survivors-mode zombies — same pref archetypes as brute/assassin/caster (targeting unchanged).
+	"walker":   {"name":"Walker",   "emoji":"🧟", "max_hp":46, "atk":9, "pref":"tankiest", "range":1, "move":1,
+				"tip":"A shambling bruiser — lurches at your toughest survivor."},
+	"lurker":   {"name":"Lurker",   "emoji":"👹", "max_hp":30, "atk":6, "pref":"healer_dps", "range":1, "move":3,
+				"tip":"Fast and vicious — goes for the Medic, then the dps."},
+	"spitter":  {"name":"Spitter",  "emoji":"🤮", "max_hp":28, "atk":5, "pref":"lowest_hp", "range":2, "move":2,
+				"tip":"Ranged bile — hits whoever is weakest."},
 }
 const ENCOUNTER := ["brute", "assassin", "caster"]
+const SURVIVOR_ENCOUNTER := ["walker", "lurker", "spitter"]
+const SURVIVOR_BOSS := ["walker", "walker", "spitter"]
 
 ## OVERWORLD Phase 2 (overworld.gd reads this to build the combat `request`; combat.gd/grid ignore
 ## it). Per danger tier: which enemies to field (max 3 — combat has 3 slots) and a scale multiplier
@@ -172,6 +249,15 @@ const ENCOUNTERS_BY_TIER := {
 }
 
 const MARK_MULT := 1.25
+
+# Survivors-mode reward pools (kept separate so the overworld's REWARD_POOL stays clean).
+const SURVIVORS_REWARD_POOL := ["scavenge", "machete", "barricade", "molotov", "headshot",
+	"ration", "suppressing_fire", "second_wind_s", "last_stand"]
+const SURVIVOR_CLASS_REWARDS := {
+	"brute":    ["crowbar_swing", "hold_the_line", "adrenaline"],
+	"medic":    ["patch", "triage", "stimshot"],
+	"engineer": ["pipe_bomb", "spike_trap"],
+}
 
 # ================================================================ Display layer
 static func type_tint(t: String) -> Color:
@@ -225,6 +311,20 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 				lines.append("Heal yourself %d" % op[1])
 			"heal_ally":
 				lines.append("Heal ally %d" % op[1])
+			"heal_lowest":
+				lines.append("Heal most-hurt ally %d" % op[1])
+			"ally_gain_energy":
+				lines.append("Ally +%d energy" % op[1])
+			"dmg_per_bloodied_ally":
+				lines.append("+%d per bloodied ally" % op[1])
+			"apply_all":
+				match op[1]:
+					"burn":
+						lines.append("Apply %d Burn to ALL" % op[2])
+					"vulnerable":
+						lines.append("Vulnerable ALL")
+					"cripple":
+						lines.append("Cripple ALL by %d" % op[2])
 			"party_block":
 				lines.append("All allies +%d block" % op[1])
 			"gain_energy":
@@ -241,6 +341,8 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 						lines.append("Apply %d 🔥 Burn" % op[2])
 					"vulnerable":
 						lines.append("Apply Vulnerable 💥 (+50%)")
+					"cripple":
+						lines.append("Apply %d 🦿 Cripple" % op[2])
 			"if_bloodied":
 				lines.append("Bloodied: %s" % _nested_text(op[1], ch, party_buff))
 			"if_target_marked":
