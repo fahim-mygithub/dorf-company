@@ -28,8 +28,4 @@ Thumbs.db
 user://*.png
 /screenshots/
 
-# Throwaway editor scratch scenes
-/scenes/_emoji_test.tscn
-/scenes/_emoji_test.tscn.uid
-
 # NOTE: export_presets.cfg IS committed (CI needs the Web preset) — it is intentionally not ignored.

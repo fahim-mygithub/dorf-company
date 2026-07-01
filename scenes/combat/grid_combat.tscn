@@ -1,8 +1,0 @@
-[gd_scene format=3 uid="uid://dq3rmw7n1uovp"]
-
-[ext_resource type="Script" uid="uid://c8gx2qfh5kte1" path="res://scripts/combat/grid_combat.gd" id="1_5vqsm"]
-
-[node name="GridCombat" type="Control" unique_id=843741787]
-layout_mode = 3
-anchors_preset = 0
-script = ExtResource("1_5vqsm")

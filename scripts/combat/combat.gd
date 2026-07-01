@@ -226,7 +226,7 @@ func _start_combat() -> void:
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
 			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
 			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
-			"burn": 0, "vulnerable": 0, "cripple": 0,   # status debuffs (Kindle / Guard Break / Spike Trap)
+			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
 			"intent_target": -1, "node": en_emoji[i], "slot": i,
 		})
 
@@ -270,7 +270,6 @@ func _start_player_phase() -> void:
 		e["marked"] = false
 		e["forced"] = false
 		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
-		e["cripple"] = maxi(0, int(e.get("cripple", 0)) - 1)        # Cripple wanes each turn
 	party_attack_buff = 0
 	attacks_this_turn = 0
 	selected_card = -1
@@ -574,32 +573,6 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 							target["burn"] = int(target.get("burn", 0)) + int(op[2])
 						"vulnerable":
 							target["vulnerable"] = int(target.get("vulnerable", 0)) + int(op[2])
-						"cripple":
-							target["cripple"] = int(target.get("cripple", 0)) + int(op[2])
-			"apply_all":
-				for e2: Dictionary in enemies:
-					if not e2["alive"]:
-						continue
-					match op[1]:
-						"burn":
-							e2["burn"] = int(e2.get("burn", 0)) + int(op[2])
-						"vulnerable":
-							e2["vulnerable"] = int(e2.get("vulnerable", 0)) + int(op[2])
-						"cripple":
-							e2["cripple"] = int(e2.get("cripple", 0)) + int(op[2])
-			"heal_lowest":
-				var low: Dictionary = _pick_lowest_hp()   # living party member with the lowest HP
-				if not low.is_empty():
-					low["hp"] = mini(low["max_hp"], low["hp"] + int(op[1]) * mult)
-			"ally_gain_energy":
-				if not target.is_empty() and target.get("role", "") != "":
-					target["energy"] += int(op[1])
-			"dmg_per_bloodied_ally":
-				var bcount: int = 0
-				for x: Dictionary in party:
-					if x["alive"] and x["hp"] * 2 <= x["max_hp"]:
-						bcount += 1
-				_attack(a, target, bcount * int(op[1]) * mult, is_atk)
 			"force_target_all":
 				for e: Dictionary in enemies:
 					e["forced"] = true
@@ -672,7 +645,7 @@ func _deal_enemy(enemy: Dictionary, amt: int) -> void:
 
 ## Enemy attacks a party character (shield -> block -> hp), then Retaliate fires.
 func _enemy_attack(e: Dictionary, t: Dictionary) -> void:
-	var dmg: int = maxi(0, e["atk"] - int(e.get("cripple", 0)) - int(t["shield"]))   # Cripple softens the hit
+	var dmg: int = maxi(0, e["atk"] - int(t["shield"]))
 	var blocked: int = mini(t["block"], dmg)
 	t["block"] -= blocked
 	var rem: int = dmg - blocked
@@ -769,7 +742,7 @@ func _refresh_enemies() -> void:
 		en_name[i].visible = alive
 		en_intent[i].visible = alive
 		en_hp[i].visible = alive
-		var has_stat: bool = e["block"] > 0 or int(e.get("burn", 0)) > 0 or int(e.get("vulnerable", 0)) > 0 or int(e.get("cripple", 0)) > 0
+		var has_stat: bool = e["block"] > 0 or int(e.get("burn", 0)) > 0 or int(e.get("vulnerable", 0)) > 0
 		en_block[i].visible = alive and has_stat
 		if not alive:
 			continue
@@ -782,8 +755,6 @@ func _refresh_enemies() -> void:
 			estat += "🔥%d " % int(e["burn"])
 		if int(e.get("vulnerable", 0)) > 0:
 			estat += "💥 "
-		if int(e.get("cripple", 0)) > 0:
-			estat += "🦿%d" % int(e["cripple"])
 		en_block[i].text = estat
 		var tname: String = ""
 		var t: Dictionary = _enemy_target(e)
