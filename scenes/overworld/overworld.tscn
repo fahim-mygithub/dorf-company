@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://cviq5ytsqiem3"]
+
+[ext_resource type="Script" uid="uid://c0q0y2hhrfosx" path="res://scripts/overworld/overworld.gd" id="1_k2c4c"]
+
+[node name="Overworld" type="Control" unique_id=674609530]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_k2c4c")

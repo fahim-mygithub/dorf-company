@@ -68,6 +68,17 @@ jobs:
           ls -la "${EXPORT_DIR}/grid"
           test -f "${EXPORT_DIR}/grid/index.html"
 
+      - name: Export Web Overworld build
+        run: |
+          set -euo pipefail
+          # CI-only checkout copy. Replace the whole line so this is independent of whatever the grid step left.
+          sed -i 's#^run/main_scene=.*#run/main_scene="res://scenes/overworld/overworld.tscn"#' project.godot
+          grep -q 'overworld/overworld.tscn' project.godot   # fail loud if the sed no-ops
+          mkdir -p "${EXPORT_DIR}/overworld"
+          godot --headless --export-release "Web Overworld" "${EXPORT_DIR}/overworld/index.html"
+          ls -la "${EXPORT_DIR}/overworld"
+          test -f "${EXPORT_DIR}/overworld/index.html"
+
       - name: Add cross-origin-isolation shim + .nojekyll
         run: |
           curl -fL -o "${EXPORT_DIR}/coi-serviceworker.min.js" \
@@ -77,6 +88,8 @@ jobs:
           # Same shim for the grid build; reuse the already-downloaded copy via a relative path
           # (grid/index.html sits one directory below coi-serviceworker.min.js).
           sed -i 's#<head>#<head><script src="../coi-serviceworker.min.js"></script>#' "${EXPORT_DIR}/grid/index.html"
+          # Same shim for the overworld build; overworld/index.html sits one dir below coi-serviceworker.min.js.
+          sed -i 's#<head>#<head><script src="../coi-serviceworker.min.js"></script>#' "${EXPORT_DIR}/overworld/index.html"
           # Pages would otherwise strip files Jekyll dislikes.
           touch "${EXPORT_DIR}/.nojekyll"
 
