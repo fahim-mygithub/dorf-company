@@ -19,8 +19,25 @@ Source: `combat.gd`, `card_db.gd`, `overworld.gd`, overworld-mvp spec + plan · 
   balanced trio ×1.0, High = two Brutes + Caster ×1.2 (combat applies `request.enemy_scale`). Verified
   in-editor: High comp/scale (54/11, 54/11, 34/6); carried HP in→out + regen; downed→bench→full-heal;
   standalone combat still base-stat identical.
-- **Next (Phase 3+):** crew agency (de-index combat, flip `CREW_SELECT`), then the card-reward engine —
-  gated on the playtest confirming A4 holds and run length stays sane.
+- **Phase 3 (done):** crew agency. Combat's role logic is de-indexed (`_first_living_role` /
+  `_first_living_nontank`) so a non-canonical crew targets correctly; byte-identical for the canonical
+  trio. `CREW_SELECT` is on — a fight opens a crew-select screen (pick which ready dwarves go: HP bars,
+  deck counts, role-coverage warnings). Fights are offered whenever ≥3 dwarves are ready (any comp).
+- **Phase 4 (done):** the recombination engine. Each dwarf carries a persistent, growable `deck`; a
+  won fight opens a "Spoils of War" screen (1-of-3 from `REWARD_POOL` = universal chassis; signatures
+  stay role-locked) → the chosen dwarf's deck grows. Runs diverge by redistributing the same cards.
+- **3 campaigns / month (done, on request):** a month is a container for up to `CAMPAIGNS_PER_MONTH`
+  (3) campaigns. Campaigns no longer tick the clock — you run up to 3, then the month ends (auto at 0,
+  or the "End Month" button) and rent comes due. Retuned to MONTHLY rent (`FEE_PERIOD 1`, `FEE_BASE 55`,
+  `WIN_MONTH 8`); a safe 3-Low/month grind still bankrupts at month 8 (sim-verified). Numbers flagged
+  for playtest.
+- **Phase 5 (started):** contract **modifiers** (Elite 👑 / Lucrative 💰 / Grim 💀) — one data tag
+  reshapes both the offer (payout ×) and the fight (enemy scale ×), the cheapest recomb-per-content axis.
+  Live at `MOD_CHANCE` 0.45 on fight contracts.
+- **Deferred Phase-5 axes (design-now, gate-off — per the north star, build only if playtest exhausts
+  the cheap ones):** parametric danger + enemy-pref roulette, location→enemy bias, dwarf traits,
+  recruiting (also the safe unlock for permanent loss — `LOSS_ENABLED` stays false until the roster can
+  refill), and econ-only company relics. No new cards/enemies/classes until redistribution is exhausted.
 
 
 ## The bet this plan tests

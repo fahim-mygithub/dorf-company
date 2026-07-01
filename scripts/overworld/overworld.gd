@@ -25,6 +25,14 @@ const HP_REGEN_PER_MONTH := 6 # Phase 2: a ready-but-hurt dwarf mends this much 
 # Phase 4: post-win reward pool — universal chassis cards any dwarf can learn (signatures stay in
 # starting decks, role-locked). Adding one to a dwarf's deck is how runs recombine (StS deckbuilding).
 const REWARD_POOL := ["strike", "guard", "cleave", "wall"]
+# Phase 5: contract modifiers — one data tag reshapes BOTH the job offer (payout) and the fight
+# (enemy scale), so "which job" carries more variety from the same 3 enemies. Cheapest recomb axis.
+const MODIFIERS := [
+	{"key": "elite",     "name": "Elite",     "emoji": "👑", "scale": 1.40, "pay": 1.3, "tip": "A champion leads them — much tougher, pays more."},
+	{"key": "lucrative", "name": "Lucrative", "emoji": "💰", "scale": 1.10, "pay": 1.7, "tip": "A rich contract — big payout, only a touch harder."},
+	{"key": "grim",      "name": "Grim",      "emoji": "💀", "scale": 1.25, "pay": 1.15, "tip": "Something worse waits below — harder, a little more coin."},
+]
+const MOD_CHANCE := 0.45
 const DWARF_STRENGTH := 3     # flat in MVP (class only drives emoji/color)
 
 const DANGER := {"low": 8, "med": 13, "high": 15}     # crew_strength + 2d6 must reach this
@@ -279,6 +287,9 @@ func _regen_contracts() -> void:
 	if USE_REAL_COMBAT and _ready_count() >= 3:
 		contracts[1]["fight"] = true   # Med — the standard fight
 		contracts[2]["fight"] = true   # High — heavier comp + scaled (see Db.ENCOUNTERS_BY_TIER)
+		for i in [1, 2]:               # Phase 5: sometimes a modifier reshapes the fight contract
+			if randf() < MOD_CHANCE:
+				contracts[i]["mod"] = MODIFIERS[randi() % MODIFIERS.size()]
 
 func _make_contract(tier: String) -> Dictionary:
 	var titles: Array = TITLES[tier]
@@ -428,10 +439,13 @@ func _build_contract_card(i: int, x: int) -> void:
 	_mkemoji(Vector2(108, 96), Vector2(120, 60), 40, card).text = c["loc_emoji"]
 	_mklabel(c["title"], Vector2(6, 132), Vector2(204, 26), 17, card)
 	_mklabel(c["loc_name"], Vector2(6, 160), Vector2(204, 20), 13, card, true, Color(0.8, 0.8, 0.85))
+	if c.has("mod"):
+		_mklabel("%s %s" % [c["mod"]["emoji"], c["mod"]["name"]], Vector2(6, 194), Vector2(204, 22), 15, card, true, Color(1.0, 0.85, 0.4))
 	var coins: int = COIN_STACK[tier]
 	for j in range(coins):
 		_rect(Vector2(63, 330 - j * 15), Vector2(90, 12), C_COIN, card)
-	_mklabel("%dg" % int(c["payout"]), Vector2(6, 340), Vector2(204, 30), 22, card, true, C_COIN)
+	var eff_pay: int = int(round(float(int(c["payout"])) * (float(c["mod"]["pay"]) if c.has("mod") else 1.0)))
+	_mklabel("%dg" % eff_pay, Vector2(6, 340), Vector2(204, 30), 22, card, true, C_COIN)
 	_mklabel("crew", Vector2(6, 392), Vector2(204, 18), 12, card, true, Color(0.8, 0.8, 0.85))
 	var cs: int = int(c["crew_size"])
 	for j in range(cs):
@@ -523,16 +537,18 @@ func _open_crew_select(c: Dictionary) -> void:
 
 func _build_crew_select(c: Dictionary) -> void:
 	_mklabel("— CHOOSE YOUR CREW —", Vector2(0, 186), Vector2(720, 28), 22, screen_root)
-	_mklabel("%s  ·  %s danger  ·  pays %dg" % [c["title"], TIER_LABEL[c["tier"]], int(c["payout"])], Vector2(0, 220), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	var eff: int = int(round(float(int(c["payout"])) * (float(c["mod"]["pay"]) if c.has("mod") else 1.0)))
+	var modtxt: String = ("  ·  %s %s" % [c["mod"]["emoji"], c["mod"]["name"]]) if c.has("mod") else ""
+	_mklabel("%s  ·  %s danger  ·  pays %dg%s" % [c["title"], TIER_LABEL[c["tier"]], eff, modtxt], Vector2(0, 220), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	_mklabel("Tap %d ready dwarves to send. Who do you risk?" % int(c["crew_size"]), Vector2(0, 244), Vector2(720, 20), 13, screen_root, true, Color(0.7, 0.7, 0.75))
-	var ready: Array = []
+	var avail: Array = []
 	for d in roster:
 		if d["status"] == "ready":
-			ready.append(d)
-	var n: int = ready.size()
+			avail.append(d)
+	var n: int = avail.size()
 	var startx: int = 360 - (n - 1) * 90
 	for i in range(n):
-		_build_pick_token(ready[i], startx + i * 180, 400)
+		_build_pick_token(avail[i], startx + i * 180, 400)
 	_mklabel("crew", Vector2(0, 640), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	var cs: int = int(c["crew_size"])
 	var sx: int = 360 - cs * 44
@@ -738,9 +754,10 @@ func _embark_fight(c: Dictionary) -> void:
 	var fight = COMBAT_SCENE.instantiate()
 	var req: Dictionary = {"crew": _build_crew_specs(current["crew"])}
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition
+	var mscale: float = float(c["mod"]["scale"]) if c.has("mod") else 1.0   # Phase 5: modifier scales the fight
 	if not comp.is_empty():
 		req["enemies"] = comp["enemies"]
-		req["enemy_scale"] = comp["scale"]
+		req["enemy_scale"] = float(comp["scale"]) * mscale
 	fight.request = req   # set BEFORE add_child (_ready runs on entry)
 	screen_root.visible = false
 	hud.visible = false
@@ -766,7 +783,8 @@ func _embark_fight(c: Dictionary) -> void:
 
 func _resolve_from_combat(result: Dictionary, tier: String) -> Dictionary:
 	var success: bool = result["success"]
-	var payout: int = int(round(float(PAYOUT[tier]) * (1.0 if success else FAILURE_PAYOUT_MULT)))
+	var mpay: float = float(current["mod"]["pay"]) if current.has("mod") else 1.0   # Phase 5 modifier
+	var payout: int = int(round(float(PAYOUT[tier]) * mpay * (1.0 if success else FAILURE_PAYOUT_MULT)))
 	var pending: Array = []
 	var crew_results: Array = result["crew_results"]
 	for i in range(crew_results.size()):
@@ -861,7 +879,7 @@ func _build_outcome(c: Dictionary, result: Dictionary) -> void:
 	continue_btn.pressed.connect(_on_continue)
 	screen_root.add_child(continue_btn)
 
-func _outcome_beats(c: Dictionary, result: Dictionary, e: int) -> void:
+func _outcome_beats(_c: Dictionary, result: Dictionary, e: int) -> void:
 	var pay: int = int(result["payout"])
 	_spawn_coins(Vector2(360, 560), Vector2(56, 62), 6)
 	treasury += pay
