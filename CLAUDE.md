@@ -79,10 +79,25 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-07-01) — hex-crawl expedition + shop + card expansion
+## Current state (2026-07-01) — FOUR modes: combat / grid / overworld hex-crawl / survivors
 
-- **NEW (2026-07-01, shipped & deployed):** the overworld's Med/High fight contracts now open a
-  **hex-crawl EXPEDITION** instead of a single fight (spec+notes: `docs/plans/2026-07-01-hex-crawl-shop-spec.md`).
+- **FOUR deployed modes / four Pages URLs** now: `/` combat · `/grid/` grid fork · `/overworld/`
+  hex-crawl expedition + shop · **`/survivors/` NEW** StS-node zombie survival. CI sed-patches
+  `run/main_scene` per export (4 export presets + 4 export steps in `deploy-pages.yml`).
+- **NEW — Survivors mode (`/survivors/`, shipped & deployed):** a fourth peer scene that reuses combat.gd
+  + the seam wholesale, swapping the rent clock for a **food/water survival clock**. StS branching map
+  (connected DAG, whole lap visible, telegraphed node types), run-scoped party assembled by rescuing
+  survivors (Brute/Medic/Engineer → warrior/cleric/sorcerer roles), endless boss-lap (boss → big stash →
+  harder lap). `scripts/survivors/survivors.gd` + `scenes/survivors/survivors.tscn`. Additive combat:
+  17 survivor cards, 3 classes, 3 zombie enemies (walker/lurker/spitter), a new **Cripple** status + ops
+  (heal_lowest/ally_gain_energy/dmg_per_bloodied_ally/apply_all/cripple). Fully SEPARATE state from the
+  overworld (no months/roster/treasury). Spec: `docs/plans/2026-07-01-survivors-mode-spec.md`. Passed a
+  5-dimension adversarial review (4 findings fixed). Crew is padded to combat's fixed 3 slots with benched
+  hp:0 pads (same trick as the expedition).
+- **The hex-crawl was REDESIGNED (2026-07-01) from a fogged crawl into a VISIBLE-BOARD route-planner:**
+  the whole 6×5 offset-hex map is shown, perimeter = impassable wall, the objective location is MARKED,
+  tiles telegraph KIND + ☠ danger; enemy scale comes from a tile's danger (not depth); "objective pays
+  big" (rescue = full PAYOUT[tier] + loot bag, extract = loot only). See the hex-crawl spec (updated).
   Radius-2 fogged axial hex map, hidden objective at depth ≥ 2, push-or-extract after every tile;
   content = combat/reward/event/empty/objective. **Each combat hex reuses the SAME seam** (crew=party,
   `enemy_scale = tier × mod × (1+depth·0.20)`, HP carried in/out, `run_epoch`-guarded across every await).
