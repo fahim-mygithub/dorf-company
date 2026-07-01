@@ -315,6 +315,9 @@ func _new_run() -> void:
 		roster.append(_make_dwarf(s["name"], s["cls"]))
 	_reroll_shop()
 	_regen_contracts()
+	overlay.visible = false
+	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
+	_enter_dashboard()
 
 # One roster dwarf. downed/stable/ds_* are per-EXPEDITION death-save state (reset each expedition start).
 func _make_dwarf(dname: String, cls: String) -> Dictionary:
@@ -322,9 +325,6 @@ func _make_dwarf(dname: String, cls: String) -> Dictionary:
 	return {"name": dname, "cls": cls, "status": "ready", "recover": 0, "hp": mh, "max_hp": mh,
 		"deck": (Db.CLASSES[cls]["deck"] as Array).duplicate(),
 		"downed": false, "stable": false, "ds_success": 0, "ds_fail": 0}
-	overlay.visible = false
-	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
-	_enter_dashboard()
 
 func _regen_contracts() -> void:
 	contracts = [_make_contract("low"), _make_contract("med"), _make_contract("high")]
@@ -1117,7 +1117,7 @@ func _hex_neighbors(key: String) -> Array:
 			out.append(k)
 	return out
 
-func _gen_hex_map(c: Dictionary) -> void:
+func _gen_hex_map(_c: Dictionary) -> void:
 	hexes = {}
 	for q in range(-HEX_RADIUS, HEX_RADIUS + 1):
 		for r in range(-HEX_RADIUS, HEX_RADIUS + 1):
@@ -1169,8 +1169,8 @@ func _living_up() -> Array:
 
 # ---------------------------------------------------------- Hex map render
 func _hex_px(q: int, r: int) -> Vector2:
-	var size := 50.0
-	return Vector2(360.0 + size * sqrt(3.0) * (float(q) + float(r) / 2.0), 500.0 + size * 1.5 * float(r))
+	var hs := 50.0
+	return Vector2(360.0 + hs * sqrt(3.0) * (float(q) + float(r) / 2.0), 500.0 + hs * 1.5 * float(r))
 
 func _build_hexcrawl() -> void:
 	_mklabel("— EXPEDITION —", Vector2(0, 172), Vector2(720, 26), 20, screen_root)
