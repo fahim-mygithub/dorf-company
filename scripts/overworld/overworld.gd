@@ -15,10 +15,11 @@ const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
 # ============================================================ Economy (tunable)
 const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
                               # LONGER reach month 12 solvent — the fee now forces greedier jobs (A1/A2).
-const FEE_BASE := 40
-const FEE_STEP := 10          # fee rises this much per payment
-const FEE_PERIOD := 2         # rent due every N months (even months)
-const WIN_MONTH := 12         # survive the month-WIN_MONTH advance -> victory
+const FEE_BASE := 55          # rent is now MONTHLY (a month holds up to 3 campaigns), so a higher base
+const FEE_STEP := 10          # fee rises this much each month
+const FEE_PERIOD := 1         # rent due EVERY month
+const WIN_MONTH := 8          # survive 8 months solvent -> victory (each month = up to 3 campaigns)
+const CAMPAIGNS_PER_MONTH := 3   # jobs you can run before the month ends and rent comes due
 const WOUND_RECOVERY := 2     # months a downed dwarf is benched; returns at full HP
 const HP_REGEN_PER_MONTH := 6 # Phase 2: a ready-but-hurt dwarf mends this much HP per month
 # Phase 4: post-win reward pool — universal chassis cards any dwarf can learn (signatures stay in
@@ -82,6 +83,7 @@ var roster: Array = []
 var contracts: Array = []
 var current: Dictionary = {}
 var selected_contract := -1
+var campaigns_left := 3       # campaigns remaining this month (resets at month end)
 var crew_pick: Array = []     # Phase 3: dwarves the player has tapped for the current fight
 var pending_spoils: Array = [] # Phase 4: reward card ids awaiting a pick after a won fight
 var spoils_pick := -1
@@ -211,8 +213,9 @@ func _build_hud() -> void:
 	hud_next = _mklabel("", Vector2(360, 56), Vector2(268, 20), 13, hud, false)
 	hud_next.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	fee_pips = []
-	for j in range(FEE_PERIOD):
-		fee_pips.append(_rect(Vector2(548 + j * 26, 88), Vector2(20, 18), C_AMBER, hud))
+	for j in range(CAMPAIGNS_PER_MONTH):
+		fee_pips.append(_rect(Vector2(500 + j * 26, 86), Vector2(20, 18), C_GREEN, hud))
+	_mklabel("jobs left", Vector2(490, 108), Vector2(140, 16), 11, hud, false, Color(0.7, 0.7, 0.75))
 	hud_month = _mklabel("", Vector2(260, 120), Vector2(200, 24), 15, hud)
 
 # ============================================================ HUD refresh
@@ -243,15 +246,9 @@ func _refresh_hud() -> void:
 	hud_fee.add_theme_color_override("font_color", C_RED if treasury < fee else Color(0.9, 0.9, 0.9))
 	hud_next.text = "next  %dg" % (fee + FEE_STEP)
 	hud_month.text = "Month %d / %d" % [month, WIN_MONTH]
-	var r := _months_to_fee()
 	for j in range(fee_pips.size()):
 		var p: ColorRect = fee_pips[j]
-		if j >= r:
-			p.color = Color(0.25, 0.25, 0.3)
-		elif r <= 1:
-			p.color = C_RED
-		else:
-			p.color = C_AMBER
+		p.color = C_GREEN if j < campaigns_left else Color(0.25, 0.25, 0.3)
 
 # ============================================================ Run setup
 func _new_run() -> void:
@@ -262,6 +259,7 @@ func _new_run() -> void:
 	fee = FEE_BASE
 	month = 0
 	months_survived = 0
+	campaigns_left = CAMPAIGNS_PER_MONTH
 	selected_contract = -1
 	roster = []
 	for s in STARTERS:
@@ -270,7 +268,7 @@ func _new_run() -> void:
 			"deck": (Db.CLASSES[s["cls"]]["deck"] as Array).duplicate()})   # Phase 4: persistent, growable deck
 	_regen_contracts()
 	overlay.visible = false
-	_msg("Rent's due every 2 months, and it only climbs. Take a job.")
+	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
 	_enter_dashboard()
 
 func _regen_contracts() -> void:
@@ -340,6 +338,7 @@ func _on_view_contracts() -> void:
 func _build_dashboard() -> void:
 	_mklabel("— DORF & CO. —", Vector2(0, 190), Vector2(720, 30), 24, screen_root)
 	_mklabel("Your crew. Send them to make rent — or lose them.", Vector2(0, 226), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	_mklabel("%d campaign%s left this month · rent %dg due at month end" % [campaigns_left, "" if campaigns_left == 1 else "s", fee], Vector2(0, 256), Vector2(720, 20), 14, screen_root, true, C_AMBER if campaigns_left <= 1 else Color(0.72, 0.84, 0.95))
 	var cx := [96, 272, 448, 624]
 	for i in range(roster.size()):
 		_build_dwarf_token(roster[i], cx[i], 470)
@@ -351,10 +350,10 @@ func _build_dashboard() -> void:
 	vc.pressed.connect(_on_view_contracts)
 	screen_root.add_child(vc)
 	var rest := Button.new()
-	rest.text = "🛌 Rest"
-	rest.add_theme_font_size_override("font_size", 18)
-	rest.position = Vector2(40, 1150)
-	rest.size = Vector2(150, 70)
+	rest.text = "⏭️ End Month"
+	rest.add_theme_font_size_override("font_size", 17)
+	rest.position = Vector2(24, 1150)
+	rest.size = Vector2(180, 70)
 	rest.pressed.connect(_on_rest)
 	screen_root.add_child(rest)
 
@@ -437,10 +436,7 @@ func _build_contract_card(i: int, x: int) -> void:
 	var cs: int = int(c["crew_size"])
 	for j in range(cs):
 		_rect(Vector2(108 - cs * 15.0 + j * 30, 414), Vector2(24, 24), Color(0.1, 0.1, 0.13), card)
-	_mklabel("time", Vector2(6, 452), Vector2(204, 18), 12, card, true, Color(0.8, 0.8, 0.85))
-	var dur: int = int(c["duration"])
-	for j in range(dur):
-		_rect(Vector2(108 - dur * 17.0 + j * 34, 474), Vector2(28, 20), Color(0.55, 0.6, 0.75), card)
+	_mklabel("1 of 3 campaigns", Vector2(6, 460), Vector2(204, 18), 12, card, true, Color(0.68, 0.68, 0.73))
 	if c.get("fight", false):
 		_mklabel("⚔️ REAL FIGHT", Vector2(6, 508), Vector2(204, 22), 15, card, true, Color(1.0, 0.85, 0.4))
 	if not takeable:
@@ -721,9 +717,8 @@ func _skip_spoils() -> void:
 func _finish_spoils(msg: String) -> void:
 	pending_spoils = []
 	spoils_pick = -1
-	_regen_contracts()
-	_enter_dashboard()
 	_msg(msg)
+	await _after_campaign()
 
 func _build_crew_specs(crew: Array) -> Array:
 	var specs: Array = []
@@ -875,13 +870,7 @@ func _outcome_beats(c: Dictionary, result: Dictionary, e: int) -> void:
 	await get_tree().create_timer(0.7).timeout
 	if e != run_epoch:
 		return
-	var verdict := await _advance_months(int(c["duration"]), e)
-	if verdict == "abort":
-		return
-	if verdict == "bankrupt":
-		_game_over("bankrupt")
-		return
-	# Apply wounds AFTER the advance so a job never heals the crew it just hurt.
+	# A campaign does NOT advance the clock now — wounds land immediately; rent waits for month-end.
 	for entry in result["pending"]:
 		var d: Dictionary = entry[0]
 		if entry[1] == "lost":
@@ -890,13 +879,12 @@ func _outcome_beats(c: Dictionary, result: Dictionary, e: int) -> void:
 		else:
 			d["status"] = "wounded"
 			d["recover"] = WOUND_RECOVERY
-	if verdict == "victory":
-		_game_over("victory")
-		return
+	campaigns_left -= 1
 	busy = false
 	if is_instance_valid(continue_btn):
 		continue_btn.disabled = false
-	_msg("Back home. Continue when ready.")
+	_refresh_hud()
+	_msg("Campaign done — %d left before rent." % campaigns_left)
 
 # Returns "ok" | "bankrupt" | "victory" | "abort".
 func _advance_months(count: int, e: int) -> String:
@@ -945,15 +933,23 @@ func _on_continue() -> void:
 	if not pending_spoils.is_empty():
 		_open_spoils()
 		return
-	_regen_contracts()
-	_enter_dashboard()
+	await _after_campaign()
 
-func _on_rest() -> void:
+# After a campaign resolves: another slot if any remain, else the month ends (rent due).
+func _after_campaign() -> void:
+	if campaigns_left <= 0:
+		await _end_month()
+	else:
+		_regen_contracts()
+		_enter_dashboard()
+
+# Advance one month: crew mends + wounds tick, then rent comes due; resets the campaign slots.
+func _end_month() -> void:
 	if busy:
 		return
 	busy = true
 	var e := run_epoch
-	_msg("Resting a month — the crew mends, but rent still looms.")
+	_msg("The month closes — rent comes due.")
 	var verdict := await _advance_months(1, e)
 	if verdict == "abort":
 		return
@@ -963,9 +959,14 @@ func _on_rest() -> void:
 	if verdict == "victory":
 		_game_over("victory")
 		return
+	campaigns_left = CAMPAIGNS_PER_MONTH
 	busy = false
 	_regen_contracts()
 	_enter_dashboard()
+
+func _on_rest() -> void:
+	# "End Month": advance to the next month now, forgoing any remaining campaigns (crew mends, rent due).
+	await _end_month()
 
 # ============================================================ Coin VFX
 func _tween_treasury_to(target: int) -> void:
