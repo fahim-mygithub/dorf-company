@@ -13,6 +13,7 @@ const Threat := preload("res://scripts/ui/threat_arrows.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 
 const HAND_SIZE := 5
+const VULN_MULT := 1.5   # Vulnerable enemies take +50% (stacks multiplicatively with Mark's +25%)
 
 ## Overworld mesh (Phase 1): a non-empty `request` makes this scene run as a CHILD of the
 ## overworld — party/enemies come from `request`, and `_end` emits `combat_finished` instead of
@@ -203,9 +204,13 @@ func _start_combat() -> void:
 		party.append({
 			"role": cls["role"], "name": spec.get("name", cls["name"]), "emoji": cls["emoji"],
 			"hp": int(spec.get("hp", cls["max_hp"])), "max_hp": int(spec.get("max_hp", cls["max_hp"])), "block": 0,
-			"energy": cls["energy"], "max_energy": cls["energy"], "alive": true,
+			"energy": cls["energy"], "max_energy": cls["energy"],
+			# A crew member sent in at 0 HP (a downed dwarf on a hex expedition) starts as a benched slot.
+			# Standalone/mesh crews always have hp > 0, so this stays byte-identical for those paths.
+			"alive": int(spec.get("hp", cls["max_hp"])) > 0,
 			"deck": deck, "hand": [], "discard": [],
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
+			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
 			"node": pc_emoji[i], "slot": i,
 		})
 
@@ -221,6 +226,7 @@ func _start_combat() -> void:
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
 			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
 			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
+			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
 			"intent_target": -1, "node": en_emoji[i], "slot": i,
 		})
 
@@ -240,7 +246,9 @@ func _start_combat() -> void:
 
 func _fresh_temp() -> Dictionary:
 	# fortify -> Retaliate +2 (persists through enemy phase); fortify_guard -> next Guard +5 (consumed)
-	return {"retaliate": 0, "fortify": false, "fortify_guard": false, "channel_charges": 0, "channel_bonus": 0}
+	# next_attack_bonus (Whetstone) / double_next (Empower) / retain_block (Bracing Stance) are one-turn flags.
+	return {"retaliate": 0, "fortify": false, "fortify_guard": false, "channel_charges": 0, "channel_bonus": 0,
+		"next_attack_bonus": 0, "double_next": false, "retain_block": false}
 
 # ================================================================ Phase flow
 func _start_player_phase() -> void:
@@ -248,15 +256,20 @@ func _start_player_phase() -> void:
 	for a: Dictionary in party:
 		if not a["alive"]:
 			continue
-		a["block"] = 0
+		# Bracing Stance: block set to keep through the next turn instead of zeroing.
+		if not bool(a["temp"].get("retain_block", false)):
+			a["block"] = 0
 		a["energy"] = a["max_energy"]
 		a["temp"] = _fresh_temp()
 		a["shield"] = 0
+		a["momentum"] = 0
+		a["devotion"] = 0
 		a["attacks_this_turn"] = 0
 		_draw_cards(a, HAND_SIZE)
 	for e: Dictionary in enemies:
 		e["marked"] = false
 		e["forced"] = false
+		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
 	party_attack_buff = 0
 	attacks_this_turn = 0
 	selected_card = -1
@@ -278,6 +291,25 @@ func _on_end_turn() -> void:
 
 func _enemy_phase() -> void:
 	var epoch: int = combat_epoch
+	# Burn ticks at the start of the enemy turn (status damage — ignores block, then decays by 1).
+	var any_burn := false
+	for e: Dictionary in enemies:
+		if e["alive"] and int(e.get("burn", 0)) > 0:
+			any_burn = true
+			var b: int = int(e["burn"])
+			e["hp"] = maxi(0, e["hp"] - b)
+			if e["hp"] <= 0:
+				e["alive"] = false
+			e["burn"] = maxi(0, b - 1)
+			_flash(e)
+			_impact(e, b)
+	if any_burn:
+		_refresh()
+		if _check_end():
+			return
+		await get_tree().create_timer(0.35).timeout
+		if epoch != combat_epoch:
+			return
 	for e: Dictionary in enemies:
 		if not e["alive"]:
 			continue
@@ -401,7 +433,7 @@ func _on_card_clicked(card) -> void:
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	var tgt: String = def["target"]
-	if tgt == "self" or tgt == "all_enemies":
+	if tgt == "self" or tgt == "all_enemies" or tgt == "party":
 		if not _can_play(a, cid, def):
 			return
 		_spend(a, idx)
@@ -410,7 +442,7 @@ func _on_card_clicked(card) -> void:
 				if e["alive"]:
 					_resolve(def, a, e)
 		else:
-			_resolve(def, a, {})
+			_resolve(def, a, {})   # self / party: ops loop over the party internally
 		_finish_play(a, def, cid)
 		return
 	if selected_card != idx:
@@ -467,7 +499,10 @@ func _spend(a: Dictionary, idx: int) -> void:
 func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 	a["discard"].append(cid)
 	if def.get("is_attack", false):
-		attacks_this_turn += 1   # party-wide count for Finisher
+		attacks_this_turn += 1                             # party-wide count for Finisher
+		a["momentum"] = int(a.get("momentum", 0)) + 1      # Warrior: per-char attacks this turn (Momentum Strike)
+	else:
+		a["devotion"] = int(a.get("devotion", 0)) + 1      # Cleric: per-char skills this turn (Divine Smite spend)
 	selected_card = -1
 	_log("%s played %s." % [a["name"], def["name"]])
 	_refresh()
@@ -476,33 +511,68 @@ func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 # ================================================================ Resolver
 ## a = acting character; target = enemy OR ally char (or {} for self/none).
 func _resolve(def: Dictionary, a: Dictionary, target: Dictionary) -> void:
-	for op: Array in def["effect"]:
+	# Empower: the NEXT card resolved this turn has its numeric ops doubled, then the flag clears.
+	var mult := 1
+	if bool(a["temp"].get("double_next", false)):
+		mult = 2
+		a["temp"]["double_next"] = false
+	_run_ops(def["effect"], a, target, mult, def.get("is_attack", false), def.get("fortifiable", false))
+
+## Executes a list of [op, ...args]. Recurses for conditional ops (if_bloodied / on_kill / etc.).
+## mult = Empower doubling; is_atk = whether damage ops route as attacks (get Channel/Aura/Mark);
+## fortifiable = whether a `block` op earns Fortify's +5 (only the top-level Guard, never nested blocks).
+func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: bool, fortifiable: bool) -> void:
+	for op: Array in ops:
 		match op[0]:
-			"damage":
-				_attack(a, target, op[1], def.get("is_attack", false))
-			"block":
-				var bonus: int = 0
-				if a["temp"]["fortify_guard"] and def.get("fortifiable", false):
-					bonus = 5
-					a["temp"]["fortify_guard"] = false   # consume the +5; Retaliate +2 persists
-				a["block"] += op[1] + bonus
-			"self_damage":
-				a["hp"] = maxi(0, a["hp"] - op[1])
-				if a["hp"] <= 0:
-					a["alive"] = false
-			"draw":
-				_draw_cards(a, op[1])
+			"damage", "dmg":
+				_attack(a, target, int(op[1]) * mult, is_atk)
+			"dmg_all":
+				for e: Dictionary in enemies:
+					if e["alive"]:
+						_attack(a, e, int(op[1]) * mult, is_atk)
+			"dmg_per_momentum":
+				_attack(a, target, int(a.get("momentum", 0)) * int(op[1]) * mult, is_atk)
 			"damage_scaling":
 				var base: int = op[2] + op[3] * attacks_this_turn
-				_attack(a, target, base, true)
+				_attack(a, target, base * mult, true)
+			"block":
+				var bonus: int = 0
+				if a["temp"]["fortify_guard"] and fortifiable:
+					bonus = 5
+					a["temp"]["fortify_guard"] = false   # consume the +5; Retaliate +2 persists
+				a["block"] += int(op[1]) * mult + bonus
+			"party_block":
+				for x: Dictionary in party:
+					if x["alive"]:
+						x["block"] += int(op[1]) * mult
+			"self_damage", "self_dmg":
+				a["hp"] = maxi(0, a["hp"] - int(op[1]))     # a cost — ignores block, not doubled by Empower
+				if a["hp"] <= 0:
+					a["alive"] = false
+			"heal_self":
+				a["hp"] = mini(a["max_hp"], a["hp"] + int(op[1]) * mult)
+			"heal_ally":
+				if not target.is_empty() and target.get("role", "") != "":
+					target["hp"] = mini(target["max_hp"], target["hp"] + int(op[1]) * mult)
+			"draw":
+				_draw_cards(a, int(op[1]))
+			"gain_energy":
+				a["energy"] += int(op[1])
 			"heal_or_damage":
 				if target.get("role", "") != "":     # an ally char
-					target["hp"] = mini(target["max_hp"], target["hp"] + op[1])
+					target["hp"] = mini(target["max_hp"], target["hp"] + int(op[1]) * mult)
 				else:                                  # an enemy
-					_attack(a, target, op[1], false)
+					_attack(a, target, int(op[1]) * mult, false)
 			"apply_status":
 				if op[1] == "marked":
 					target["marked"] = true
+			"apply":
+				if not target.is_empty() and target.get("alive", false):
+					match op[1]:
+						"burn":
+							target["burn"] = int(target.get("burn", 0)) + int(op[2])
+						"vulnerable":
+							target["vulnerable"] = int(target.get("vulnerable", 0)) + int(op[2])
 			"force_target_all":
 				for e: Dictionary in enemies:
 					e["forced"] = true
@@ -517,13 +587,32 @@ func _resolve(def: Dictionary, a: Dictionary, target: Dictionary) -> void:
 					"channel":
 						a["temp"]["channel_charges"] = op[3]
 						a["temp"]["channel_bonus"] = op[2]
+			"buff_next_attack":
+				a["temp"]["next_attack_bonus"] = int(a["temp"].get("next_attack_bonus", 0)) + int(op[1]) * mult
+			"retain_block":
+				a["temp"]["retain_block"] = true
+			"next_card_double":
+				a["temp"]["double_next"] = true
 			"shield_ally":
-				target["shield"] += op[1]
+				target["shield"] += int(op[1]) * mult
 			"party_buff":
 				if op[1] == "attack":
-					party_attack_buff += op[2]
+					party_attack_buff += int(op[2]) * mult
+			"if_bloodied":
+				if a["hp"] * 2 <= a["max_hp"]:
+					_run_ops(op[1], a, target, mult, is_atk, false)
+			"if_target_marked":
+				if not target.is_empty() and target.get("marked", false):
+					_run_ops(op[1], a, target, mult, is_atk, false)
+			"spend_devotion":
+				if int(a.get("devotion", 0)) > 0:
+					a["devotion"] = int(a["devotion"]) - 1
+					_run_ops(op[1], a, target, mult, is_atk, false)
+			"on_kill":
+				if not target.is_empty() and not target.get("alive", true):
+					_run_ops(op[1], a, target, mult, is_atk, false)
 
-## Damage to an ENEMY (resolution order: base -> +flat -> xMark -> block,hp).
+## Damage to an ENEMY (resolution order: base -> +flat -> xMark -> xVulnerable -> block,hp).
 func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> void:
 	if enemy.is_empty() or not enemy.get("alive", false):
 		return
@@ -532,9 +621,14 @@ func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> vo
 		if a["temp"]["channel_charges"] > 0:
 			amt += a["temp"]["channel_bonus"]
 			a["temp"]["channel_charges"] -= 1
+		if int(a["temp"].get("next_attack_bonus", 0)) > 0:   # Whetstone: one-shot flat bonus
+			amt += int(a["temp"]["next_attack_bonus"])
+			a["temp"]["next_attack_bonus"] = 0
 		amt += party_attack_buff
 	if enemy["marked"]:
 		amt = int(round(amt * Db.MARK_MULT))
+	if int(enemy.get("vulnerable", 0)) > 0:
+		amt = int(round(amt * VULN_MULT))
 	_deal_enemy(enemy, amt)
 	_flash(enemy)
 	_impact(enemy, amt)
@@ -648,12 +742,20 @@ func _refresh_enemies() -> void:
 		en_name[i].visible = alive
 		en_intent[i].visible = alive
 		en_hp[i].visible = alive
-		en_block[i].visible = alive and e["block"] > 0
+		var has_stat: bool = e["block"] > 0 or int(e.get("burn", 0)) > 0 or int(e.get("vulnerable", 0)) > 0
+		en_block[i].visible = alive and has_stat
 		if not alive:
 			continue
 		en_name[i].text = ("🎯 " if e["marked"] else "") + e["name"]
 		en_hp[i].text = "%d/%d" % [e["hp"], e["max_hp"]]
-		en_block[i].text = "🛡️%d" % e["block"]
+		var estat := ""
+		if e["block"] > 0:
+			estat += "🛡️%d " % e["block"]
+		if int(e.get("burn", 0)) > 0:
+			estat += "🔥%d " % int(e["burn"])
+		if int(e.get("vulnerable", 0)) > 0:
+			estat += "💥"
+		en_block[i].text = estat
 		var tname: String = ""
 		var t: Dictionary = _enemy_target(e)
 		if not t.is_empty():
@@ -687,6 +789,14 @@ func _refresh_party() -> void:
 				st += "🔧 "
 			if int(a["temp"]["retaliate"]) > 0:
 				st += "🔁%d" % a["temp"]["retaliate"]
+			if int(a.get("momentum", 0)) > 0:
+				st += "⚔️%d " % a["momentum"]
+			if int(a.get("devotion", 0)) > 0:
+				st += "🙏%d " % a["devotion"]
+			if int(a["temp"].get("next_attack_bonus", 0)) > 0:
+				st += "🪨+%d " % a["temp"]["next_attack_bonus"]
+			if bool(a["temp"].get("double_next", false)):
+				st += "✨"
 			pc_block[i].text = st
 			pc_energy[i].text = "⚡%d/%d" % [a["energy"], a["max_energy"]]
 		else:

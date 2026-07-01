@@ -77,6 +77,67 @@ const CARDS := {
 	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack","is_attack":true, "range":2,
 				"effect":[["damage_scaling","attacks_this_turn",5,3]],
 				"tip":"Unleash everything — deal 5 +3 per attack already played this turn. Play it LAST."},
+
+	# ============================================================ EXPANSION (hex-crawl spec, 2026-07-01)
+	# Class cards stay OUT of REWARD_POOL (role-locked); generic cards join it. New ops live in combat.gd.
+	# --- Warrior (Momentum) ---
+	"reckless_swing": {"name":"Reckless Swing","cost":1,"emoji":"🪓","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",14],["self_dmg",3]],
+				"tip":"Deal 14. Take 3. Leans you Bloodied — pairs with cards that reward it."},
+	"second_wind": {"name":"Second Wind","cost":1,"emoji":"🛡️","target":"self","type":"skill",
+				"effect":[["block",6],["if_bloodied",[["block",6]]]],
+				"tip":"Gain 6 Block. +6 more while Bloodied (at or below half HP)."},
+	"momentum_strike": {"name":"Momentum Strike","cost":1,"emoji":"⚔️","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",6],["dmg_per_momentum",3]],
+				"tip":"Deal 6, +3 per Momentum (attacks you've already played this turn). Play it late."},
+	# --- Sorcerer (Surge / Wild Magic) ---
+	"arc_lightning": {"name":"Arc Lightning","cost":2,"emoji":"⚡","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",9],["dmg_all",4]],
+				"tip":"Deal 9 to the target, then 4 to ALL enemies."},
+	"empower": {"name":"Empower","cost":0,"emoji":"✨","target":"self","type":"power",
+				"effect":[["next_card_double"]],
+				"tip":"Your next card's numbers are doubled. Set up a big hit."},
+	"kindle": {"name":"Kindle","cost":1,"emoji":"🔥","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",5],["apply","burn",3]],
+				"tip":"Deal 5, then apply 3 Burn (ticks at the start of each enemy turn, ignores block)."},
+	# --- Cleric / Paladin (Devotion / Oath) — gated to the cleric role until a Paladin class lands ---
+	"lay_on_hands": {"name":"Lay on Hands","cost":1,"emoji":"🙌","target":"ally","type":"skill",
+				"effect":[["heal_ally",10]],
+				"tip":"Heal a chosen ally 10."},
+	"consecrate": {"name":"Consecrate","cost":1,"emoji":"🕯️","target":"party","type":"skill",
+				"effect":[["party_block",4]],
+				"tip":"All allies gain 4 Block."},
+	"divine_smite": {"name":"Divine Smite","cost":2,"emoji":"🌟","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",10],["spend_devotion",[["dmg",8]]]],
+				"tip":"Deal 10, +8 more if you spend 1 Devotion (built by playing skills)."},
+	# --- Generic (universal chassis; these join REWARD_POOL) ---
+	"power_through": {"name":"Power Through","cost":1,"emoji":"💪","target":"self","type":"skill",
+				"effect":[["block",8],["draw",1]],
+				"tip":"Gain 8 Block. Draw 1."},
+	"precise_jab": {"name":"Precise Jab","cost":0,"emoji":"🗡️","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",4],["gain_energy",1]],
+				"tip":"Deal 4, then refund 1 Energy — nearly free tempo."},
+	"whetstone": {"name":"Whetstone","cost":0,"emoji":"🪨","target":"self","type":"skill",
+				"effect":[["buff_next_attack",4]],
+				"tip":"Your next attack this turn deals +4."},
+	"guard_break": {"name":"Guard Break","cost":1,"emoji":"💥","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",7],["apply","vulnerable",1]],
+				"tip":"Deal 7 and apply Vulnerable (target takes +50% for a turn). Applies AFTER this hit."},
+	"field_dressing": {"name":"Field Dressing","cost":1,"emoji":"🩹","target":"self","type":"skill",
+				"effect":[["heal_self",7]],
+				"tip":"Heal yourself 7."},
+	"bracing_stance": {"name":"Bracing Stance","cost":1,"emoji":"🧱","target":"self","type":"skill",
+				"effect":[["block",10],["retain_block"]],
+				"tip":"Gain 10 Block that does NOT expire on your next turn."},
+	"opportunist": {"name":"Opportunist","cost":1,"emoji":"🎯","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",6],["if_target_marked",[["dmg",6]]]],
+				"tip":"Deal 6, +6 more if the target is Marked."},
+	"rally": {"name":"Rally","cost":1,"emoji":"📣","target":"party","type":"skill",
+				"effect":[["party_block",3],["draw",1]],
+				"tip":"All allies gain 3 Block. Draw 1."},
+	"trophy_hunter": {"name":"Trophy Hunter","cost":2,"emoji":"🏆","target":"enemy","type":"attack","is_attack":true,
+				"effect":[["dmg",12],["on_kill",[["gain_energy",2]]]],
+				"tip":"Deal 12. If it kills the target, gain 2 Energy."},
 }
 
 ## Role-skewed decks (~10-12 cards each); the strike/guard split encodes the role.
@@ -139,13 +200,55 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 	var fg: bool = bool(temp.get("fortify_guard", false))   # next-Guard +5
 	var fr: bool = bool(temp.get("fortify", false))         # Retaliate +2 while active
 	var aoe: bool = def.get("target", "") == "all_enemies"
+	var mom: int = 0 if ch == null else int(ch.get("momentum", 0))
+	var dev: int = 0 if ch == null else int(ch.get("devotion", 0))
 	for op: Array in def["effect"]:
 		match op[0]:
-			"damage":
+			"damage", "dmg":
 				var dmg: int = attack_preview(op[1], ch, party_buff)
 				if dmg != op[1]:
 					buffed = true
 				lines.append("Deal %d%s" % [dmg, " to ALL" if aoe else ""])
+			"dmg_all":
+				var da: int = attack_preview(op[1], ch, party_buff)
+				if da != op[1]:
+					buffed = true
+				lines.append("Deal %d to ALL" % da)
+			"dmg_per_momentum":
+				if mom > 0:
+					lines.append("+%d (%d ⚔️×%d)" % [op[1] * mom, mom, op[1]])
+				else:
+					lines.append("+%d per ⚔️ Momentum" % op[1])
+			"self_dmg":
+				lines.append("Lose %d HP" % op[1])
+			"heal_self":
+				lines.append("Heal yourself %d" % op[1])
+			"heal_ally":
+				lines.append("Heal ally %d" % op[1])
+			"party_block":
+				lines.append("All allies +%d block" % op[1])
+			"gain_energy":
+				lines.append("Gain %d ⚡" % op[1])
+			"buff_next_attack":
+				lines.append("Next attack +%d" % op[1])
+			"retain_block":
+				lines.append("Block keeps next turn")
+			"next_card_double":
+				lines.append("Next card ×2")
+			"apply":
+				match op[1]:
+					"burn":
+						lines.append("Apply %d 🔥 Burn" % op[2])
+					"vulnerable":
+						lines.append("Apply Vulnerable 💥 (+50%)")
+			"if_bloodied":
+				lines.append("Bloodied: %s" % _nested_text(op[1], ch, party_buff))
+			"if_target_marked":
+				lines.append("If 🎯 Marked: %s" % _nested_text(op[1], ch, party_buff))
+			"spend_devotion":
+				lines.append("Spend 🙏 (%d): %s" % [dev, _nested_text(op[1], ch, party_buff)])
+			"on_kill":
+				lines.append("On kill: %s" % _nested_text(op[1], ch, party_buff))
 			"block":
 				var blk: int = op[1] + (5 if (fg and def.get("fortifiable", false)) else 0)
 				if blk != op[1]:
@@ -186,3 +289,22 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 				if op[1] == "attack":
 					lines.append("All allies +%d attack" % op[2])
 	return {"text": "\n".join(lines), "buffed": buffed}
+
+## Compact one-line description of nested ops (for conditional cards: if_bloodied, on_kill, etc.).
+static func _nested_text(ops: Array, ch, party_buff: int) -> String:
+	var parts: Array = []
+	for o: Array in ops:
+		match o[0]:
+			"damage", "dmg":
+				parts.append("+%d dmg" % attack_preview(o[1], ch, party_buff))
+			"block":
+				parts.append("+%d block" % o[1])
+			"gain_energy":
+				parts.append("+%d ⚡" % o[1])
+			"heal_self":
+				parts.append("heal %d" % o[1])
+			"heal_ally":
+				parts.append("heal ally %d" % o[1])
+			_:
+				parts.append(str(o[0]))
+	return ", ".join(parts)
