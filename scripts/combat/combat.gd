@@ -941,9 +941,9 @@ func _intent_text(e: Dictionary) -> String:
 	var mv: Dictionary = _enemy_move(e)
 	match mv["kind"]:
 		"attack":
-			return "%s%d→%s" % [mv["emoji"], _intent_hit(e, mv), _intent_tname(e)]
+			return "%s%d>%s" % [mv["emoji"], _intent_hit(e, mv), _intent_tname(e)]
 		"multi":
-			return "%s%d×%d→%s" % [mv["emoji"], _intent_hit(e, mv), int(mv.get("hits", 1)), _intent_tname(e)]
+			return "%s%d×%d>%s" % [mv["emoji"], _intent_hit(e, mv), int(mv.get("hits", 1)), _intent_tname(e)]
 		"attack_all":
 			return "%s%d×all" % [mv["emoji"], _move_dmg(e, mv)]
 		"block", "guard_all":
@@ -952,7 +952,7 @@ func _intent_text(e: Dictionary) -> String:
 			var g: int = _rage_gain(e, mv)
 			return ("%s+%d" % [mv["emoji"], g]) if g > 0 else "%smax" % mv["emoji"]
 		"expose":
-			return "%s→%s" % [mv["emoji"], _intent_tname(e)]
+			return "%s>%s" % [mv["emoji"], _intent_tname(e)]
 	return str(mv["emoji"])
 
 func _intent_hit(e: Dictionary, mv: Dictionary) -> int:

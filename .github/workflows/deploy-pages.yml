@@ -26,6 +26,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The web build ships exactly two fonts and the browser has NO OS fallbacks —
+      # any UI character outside their cmaps renders as tofu on Pages while looking
+      # fine in the editor. Fail the deploy before wasting an export.
+      - name: Validate web glyph coverage
+        run: |
+          pip install --quiet fonttools
+          python3 scripts/check_web_glyphs.py
+
       - name: Install Godot + export templates
         run: |
           set -euo pipefail

@@ -1787,7 +1787,7 @@ func _build_shop_slot(i: int, x: int) -> void:
 		"heal":
 			emoji = "🩹"
 			title = "Field Medic"
-			desc = "a dwarf → full HP"
+			desc = "a dwarf to full HP"
 		"recruit":
 			emoji = Db.CLASSES[s["cls"]]["emoji"]
 			title = "Recruit"
