@@ -13,6 +13,7 @@ const Threat := preload("res://scripts/ui/threat_arrows.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
 
 const HAND_SIZE := 5
+const MINI_SIZE := Vector2(34, 48)   # tiny hand-card under a non-active dwarf
 const VULN_MULT := 1.5   # Vulnerable enemies take +50% (stacks multiplicatively with Mark's +25%)
 # Scaling audit (2026-07-01): HP scales at full enemy_scale (fights get longer/costlier), but
 # damage+block scale at this damped rate — pure damage scaling is what makes cells impossible.
@@ -36,6 +37,8 @@ var party_attack_buff := 0     # Aura of Valor (this player phase)
 var taunt_last_turn := -99
 var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
 var combat_epoch := 0
+var _hand_anim := ""       # one-shot on next _refresh: "deal" (phase start) / "switch" (active change)
+var _switch_from := -1     # who just went inactive (their mini row animates in on "switch")
 var _is_touch := false
 var reticle_tex: ImageTexture
 var _cursor_on := false
@@ -54,6 +57,7 @@ var pc_hp: Array = []
 var pc_block: Array = []
 var pc_energy: Array = []
 var pc_outline: Array = []
+var pc_minis: Array = []   # per-slot container for the tiny hand row (non-active dwarves)
 
 var threat: Node2D
 var intent_panel: Control       # hover/tap explainer for an enemy's telegraphed move
@@ -158,8 +162,9 @@ func _build_ui() -> void:
 	for i: int in range(3):
 		_build_party_slot(i)
 
-	active_label = _label("", Vector2(20, 800), Vector2(680, 26), 20)
-	hint_label = _label("", Vector2(20, 830), Vector2(680, 22), 15)
+	# (moved below the mini-hand band at y≈798-846)
+	active_label = _label("", Vector2(20, 852), Vector2(680, 26), 20)
+	hint_label = _label("", Vector2(20, 880), Vector2(680, 22), 15)
 
 	hand_box = Control.new()
 	hand_box.position = Vector2(0, 905)
@@ -229,6 +234,13 @@ func _build_party_slot(i: int) -> void:
 	pc_hp.append(_label("", Vector2(pos.x - 80, pos.y + 38), Vector2(160, 20), 16))
 	pc_block.append(_label("", Vector2(pos.x - 80, pos.y + 58), Vector2(160, 18), 14))
 	pc_energy.append(_label("", Vector2(pos.x - 80, pos.y + 76), Vector2(160, 18), 14))
+	# Tiny hand row (this dwarf's cards while NOT active) sits right under the stat block.
+	var mb := Control.new()
+	mb.position = Vector2(pos.x - 89, 798)
+	mb.size = Vector2(178, 50)
+	mb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(mb)
+	pc_minis.append(mb)
 
 # ================================================================ Combat start
 func _start_combat() -> void:
@@ -251,7 +263,7 @@ func _start_combat() -> void:
 			# A crew member sent in at 0 HP (a downed dwarf on a hex expedition) starts as a benched slot.
 			# Standalone/mesh crews always have hp > 0, so this stays byte-identical for those paths.
 			"alive": int(spec.get("hp", cls["max_hp"])) > 0,
-			"deck": deck, "hand": [], "discard": [],
+			"deck": deck, "hand": [], "discard": [], "played_turn": [],
 			"vulnerable": 0,   # enemy Expose/Hex: takes x1.5 from enemy hits, decays 1/player-phase
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
 			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
@@ -326,6 +338,7 @@ func _start_player_phase() -> void:
 		a["momentum"] = 0
 		a["devotion"] = 0
 		a["attacks_this_turn"] = 0
+		a["played_turn"] = []
 		a["vulnerable"] = maxi(0, int(a.get("vulnerable", 0)) - 1)   # Expose/Hex wears off
 		_draw_cards(a, HAND_SIZE)
 	for e: Dictionary in enemies:
@@ -337,6 +350,7 @@ func _start_player_phase() -> void:
 	selected_card = -1
 	active_idx = _first_living_party()
 	phase = "playerTurn"
+	_hand_anim = "deal"   # everyone visibly draws: minis + the active hand fly from the portraits
 	_refresh()
 
 func _on_end_turn() -> void:
@@ -528,6 +542,9 @@ func _on_party_clicked(idx: int) -> void:
 			_play_on_ally(idx)
 			return
 	# Otherwise just switch the active character.
+	if idx != active_idx:
+		_hand_anim = "switch"      # new hand pops from the tapped dwarf...
+		_switch_from = active_idx  # ...and the old one's mini row animates back in
 	active_idx = idx
 	selected_card = -1
 	_refresh()
@@ -622,6 +639,7 @@ func _spend(a: Dictionary, idx: int) -> void:
 	var cid: String = a["hand"][idx]
 	a["energy"] -= Db.CARDS[cid]["cost"]
 	a["hand"].remove_at(idx)
+	a["played_turn"].append(cid)   # ghosted in the mini row until next player phase
 
 func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 	a["discard"].append(cid)
@@ -860,10 +878,13 @@ func _refresh() -> void:
 	_refresh_threats()
 	_refresh_panel()
 	_rebuild_hand()
+	_refresh_minis()
 	end_turn_btn.disabled = phase != "playerTurn"
 	end_turn_btn.visible = not overlay.visible
 	_update_cursor()
 	_refresh_intent_panel()
+	_hand_anim = ""   # one-shot: consumed by _rebuild_hand/_refresh_minis above
+	_switch_from = -1
 
 func _refresh_enemies() -> void:
 	for i: int in range(3):
@@ -1106,7 +1127,108 @@ func _rebuild_hand() -> void:
 		var t: float = float(i) - float(n - 1) / 2.0
 		var rot: float = deg_to_rad(t * 5.0)
 		var bc := Vector2(360.0 + t * spacing, 196.0 + absf(t) * 9.0)
-		card.set_slot(bc - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y), rot)
+		var slot_pos: Vector2 = bc - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+		card.set_slot(slot_pos, rot)
+		if _hand_anim != "":
+			# Entrance: the card flies out of the active dwarf's portrait into its fan slot.
+			# The card scales about its bottom-center pivot (card.gd), so subtract the FULL pivot
+			# (not half-size) to park the shrunken card ON the portrait, not the stat block below it.
+			card.position = PC_POS[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+			card.rotation = 0.0
+			card.scale = Vector2(0.25, 0.25)
+			card.modulate.a = 0.0
+			# Invisible in-flight cards must not be pickable — modulate.a=0 doesn't disable input,
+			# so an unfiltered card parked under the portrait would eat taps (silent play on touch)
+			# and fire hover tweens that fight this entrance. Mute input until it lands.
+			card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			var d: float = (0.12 * float(active_idx) + 0.07 * float(i)) if _hand_anim == "deal" else 0.03 * float(i)
+			var dur: float = 0.30 if _hand_anim == "deal" else 0.16
+			var tw := card.create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			tw.tween_property(card, "position", slot_pos, dur).set_delay(d)
+			tw.tween_property(card, "rotation", rot, dur).set_delay(d)
+			tw.tween_property(card, "scale", Vector2.ONE, dur).set_delay(d)
+			tw.tween_property(card, "modulate:a", 1.0, dur * 0.6).set_delay(d)
+			tw.finished.connect(func() -> void:
+				if is_instance_valid(card):
+					card.mouse_filter = Control.MOUSE_FILTER_STOP)
+
+## Tiny face-up rows under the NON-active dwarves: cards still in hand (bright) plus cards
+## already played this turn (ghosted) — party-wide planning at a glance. The active dwarf's
+## row is empty (their hand IS the big fan below).
+func _refresh_minis() -> void:
+	for i: int in range(3):
+		var box: Control = pc_minis[i]
+		for c in box.get_children():
+			c.queue_free()
+		if phase != "playerTurn" or i == active_idx or not party[i]["alive"]:
+			continue
+		var a: Dictionary = party[i]
+		var items: Array = []
+		for cid: String in a["hand"]:
+			items.append({"cid": cid, "played": false})
+		# Ghost only cards played this turn that are STILL spent (sitting in discard). A card
+		# reshuffled back into hand mid-turn leaves discard, so it shows once (bright) — never
+		# both bright and ghosted (which would inflate the row past the dwarf's real card count).
+		var disc: Dictionary = {}
+		for cid: String in a.get("discard", []):
+			disc[cid] = int(disc.get(cid, 0)) + 1
+		for cid: String in a.get("played_turn", []):
+			if int(disc.get(cid, 0)) > 0:
+				disc[cid] = int(disc[cid]) - 1
+				items.append({"cid": cid, "played": true})
+		var n: int = items.size()
+		if n == 0:
+			continue
+		var step: float = minf(36.0, 178.0 / float(n))
+		var animate: bool = _hand_anim == "deal" or (_hand_anim == "switch" and i == _switch_from)
+		for k: int in range(n):
+			var it: Dictionary = items[k]
+			var m := _mk_mini(Db.CARDS[it["cid"]], bool(it["played"]))
+			box.add_child(m)
+			var target := Vector2(89.0 + (float(k) - float(n - 1) * 0.5) * step - MINI_SIZE.x * 0.5, 0.0)
+			if animate and not bool(it["played"]):
+				# Drawn from this dwarf's portrait: start centered above the row, fade-scale in.
+				m.position = Vector2(89.0 - MINI_SIZE.x * 0.5, -95.0)
+				m.scale = Vector2(0.3, 0.3)
+				m.modulate.a = 0.0
+				var d: float = (0.12 * float(i) + 0.05 * float(k)) if _hand_anim == "deal" else 0.04 * float(k)
+				var tw := m.create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+				tw.tween_property(m, "position", target, 0.24).set_delay(d)
+				tw.tween_property(m, "scale", Vector2.ONE, 0.24).set_delay(d)
+				tw.tween_property(m, "modulate:a", 1.0, 0.16).set_delay(d)
+			else:
+				m.position = target
+
+func _mk_mini(def: Dictionary, played: bool) -> Control:
+	var m := Panel.new()
+	m.size = MINI_SIZE
+	m.pivot_offset = MINI_SIZE * 0.5
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	var tint: Color = Db.type_tint(def.get("type", "skill"))
+	sb.bg_color = tint.darkened(0.55) if played else tint
+	sb.set_corner_radius_all(5)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(1, 1, 1, 0.10 if played else 0.30)
+	m.add_theme_stylebox_override("panel", sb)
+	var e := Label.new()
+	e.text = def["emoji"]
+	e.add_theme_font_size_override("font_size", 17)
+	e.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	e.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	e.size = MINI_SIZE
+	e.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(e)
+	var c := Label.new()
+	c.text = str(def["cost"])
+	c.add_theme_font_size_override("font_size", 10)
+	c.add_theme_color_override("font_color", Color(0.96, 0.84, 0.25))
+	c.position = Vector2(3, 0)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(c)
+	if played:
+		m.modulate = Color(0.6, 0.6, 0.66, 0.8)
+	return m
 
 # ================================================================ Targeting cursor
 func _update_cursor() -> void:
