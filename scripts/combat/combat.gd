@@ -37,6 +37,10 @@ var party_attack_buff := 0     # Aura of Valor (this player phase)
 var taunt_last_turn := -99
 var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
 var combat_epoch := 0
+enum Mode { SOLO, AUTHORITY, CLIENT }   # SOLO = today's local game; AUTHORITY/CLIENT wired in M3
+var mode: int = Mode.SOLO
+var party_n := 3               # combat party size (2-4); pc_pos is sized to it
+var pc_pos: Array = []         # runtime party portrait centers (set in _build_ui)
 var _hand_anim := ""       # one-shot on next _refresh: "deal" (phase start) / "switch" (active change)
 var _switch_from := -1     # who just went inactive (their mini row animates in on "switch")
 var _is_touch := false
@@ -78,6 +82,9 @@ var overlay_btn: Button
 # enemy slot screen positions / party slot screen positions
 const EN_POS := [Vector2(170, 200), Vector2(360, 200), Vector2(550, 200)]
 const PC_POS := [Vector2(170, 700), Vector2(360, 700), Vector2(550, 700)]
+const PARTY_MAX := 4
+# Debug hotseat: force a party size (2/4) when no request.crew is supplied. 0 = off (SOLO 3).
+const DEBUG_PARTY_N := 0
 
 # ================================================================ Lifecycle
 func _ready() -> void:
@@ -114,6 +121,8 @@ func _emoji(center_pos: Vector2, box: Vector2, font: int) -> Label:
 
 # ================================================================ UI build
 func _build_ui() -> void:
+	party_n = _effective_crew().size()
+	pc_pos = _party_layout(party_n)
 	var bg := ColorRect.new()
 	bg.color = Color(0.09, 0.09, 0.12)
 	bg.size = Vector2(720, 1280)
@@ -159,7 +168,7 @@ func _build_ui() -> void:
 	ip_pref.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	ip_pref.reparent(intent_panel, false)
 
-	for i: int in range(3):
+	for i: int in range(party_n):
 		_build_party_slot(i)
 
 	# (moved below the mini-hand band at y≈798-846)
@@ -218,7 +227,7 @@ func _build_enemy_slot(i: int) -> void:
 	en_block.append(_label("", Vector2(pos.x - 80, pos.y + 60), Vector2(160, 18), 14))
 
 func _build_party_slot(i: int) -> void:
-	var pos: Vector2 = PC_POS[i]
+	var pos: Vector2 = pc_pos[i]
 	var o := ColorRect.new()
 	o.color = Color(1.0, 0.85, 0.2, 0.16)
 	o.position = pos - Vector2(64, 60)
@@ -243,13 +252,33 @@ func _build_party_slot(i: int) -> void:
 	pc_minis.append(mb)
 
 # ================================================================ Combat start
+## The crew for this combat: request.crew when supplied (2-4), else a synthesized party
+## (DEBUG_PARTY_N size for hotseat testing, otherwise the SOLO 3 from PARTY_ORDER).
+func _effective_crew() -> Array:
+	var crew: Array = request.get("crew", [])
+	if crew.size() >= 2 and crew.size() <= PARTY_MAX:
+		return crew
+	var n: int = DEBUG_PARTY_N if (DEBUG_PARTY_N >= 2 and DEBUG_PARTY_N <= PARTY_MAX) else 3
+	var out: Array = []
+	for i: int in range(n):
+		out.append({"cls": Db.PARTY_ORDER[i % Db.PARTY_ORDER.size()]})
+	return out
+
+## Party portrait centers, sized to N. N == 3 keeps the exact original layout (SOLO
+## behavior-equivalent); N == 2/4 spread evenly across the 720 width.
+func _party_layout(n: int) -> Array:
+	if n == 3:
+		return PC_POS.duplicate()
+	var out: Array = []
+	var slot_w: float = 720.0 / float(n)
+	for i: int in range(n):
+		out.append(Vector2(slot_w * (float(i) + 0.5), 700.0))
+	return out
+
 func _start_combat() -> void:
 	combat_epoch += 1
 	party = []
-	var crew_specs: Array = request.get("crew", [])
-	if crew_specs.is_empty():
-		for cid: String in Db.PARTY_ORDER:
-			crew_specs.append({"cls": cid})
+	var crew_specs: Array = _effective_crew()
 	for i: int in range(crew_specs.size()):
 		var spec: Dictionary = crew_specs[i]
 		var cid: String = spec["cls"]
@@ -307,10 +336,11 @@ func _start_combat() -> void:
 	overlay.visible = false
 	intent_open = -1
 	intent_panel.visible = false
-	for i: int in range(3):
+	for i: int in range(enemies.size()):
 		en_emoji[i].text = enemies[i]["emoji"]
 		en_emoji[i].modulate = Color.WHITE
 		en_emoji[i].scale = Vector2.ONE
+	for i: int in range(party.size()):
 		pc_emoji[i].text = party[i]["emoji"]
 		pc_emoji[i].modulate = Color.WHITE
 		pc_emoji[i].scale = Vector2.ONE
@@ -918,7 +948,7 @@ func _refresh_enemies() -> void:
 func _refresh_party() -> void:
 	var arm: Dictionary = _armed_def()
 	var ally_arm: bool = selected_card >= 0 and arm.get("target", "") in ["ally", "ally_or_enemy"]
-	for i: int in range(3):
+	for i: int in range(party.size()):
 		var a: Dictionary = party[i]
 		var alive: bool = a["alive"]
 		pc_outline[i].visible = alive and i == active_idx and phase == "playerTurn"
@@ -1087,7 +1117,7 @@ func _refresh_threats() -> void:
 				continue
 			pairs.append({
 				"from": EN_POS[e["slot"]] + Vector2(0, 42),
-				"to": PC_POS[t["slot"]] + Vector2(0, -42),
+				"to": pc_pos[t["slot"]] + Vector2(0, -42),
 			})
 	threat.set_threats(pairs)
 
@@ -1133,7 +1163,7 @@ func _rebuild_hand() -> void:
 			# Entrance: the card flies out of the active dwarf's portrait into its fan slot.
 			# The card scales about its bottom-center pivot (card.gd), so subtract the FULL pivot
 			# (not half-size) to park the shrunken card ON the portrait, not the stat block below it.
-			card.position = PC_POS[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+			card.position = pc_pos[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
 			card.rotation = 0.0
 			card.scale = Vector2(0.25, 0.25)
 			card.modulate.a = 0.0
@@ -1156,7 +1186,7 @@ func _rebuild_hand() -> void:
 ## already played this turn (ghosted) — party-wide planning at a glance. The active dwarf's
 ## row is empty (their hand IS the big fan below).
 func _refresh_minis() -> void:
-	for i: int in range(3):
+	for i: int in range(party.size()):
 		var box: Control = pc_minis[i]
 		for c in box.get_children():
 			c.queue_free()
