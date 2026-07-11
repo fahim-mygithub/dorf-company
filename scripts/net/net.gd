@@ -26,15 +26,28 @@ var _join_ref := ""
 var _hb_accum := 0.0
 var _self_echo := false                         # broadcast.self — true only for the self-test
 
+# --- Multiplayer session handoff (set by menu/lobby, read by combat after change_scene) ---
+var room_code := ""
+var is_authority := false
+var my_peer_id := ""
+var my_seat := -1
+var combat_request: Dictionary = {}   # the request dict combat._start_combat() consumes
+
+## Stable per-client id for seat ownership (assigned once, kept across reconnect).
+func ensure_peer_id() -> String:
+	if my_peer_id == "":
+		my_peer_id = "%08x%08x" % [randi(), randi()]
+	return my_peer_id
+
 func is_online() -> bool:
 	return _state == State.JOINED
 
 ## Dial a room by code. self_echo=true asks the server to echo our OWN broadcasts back
 ## (used only to self-test the round-trip on a single client; production uses false).
-func connect_realtime(room_code: String, self_echo := false) -> void:
+func connect_realtime(room: String, self_echo := false) -> void:
 	disconnect_realtime()
 	_self_echo = self_echo
-	_topic = Config.room_topic(room_code)
+	_topic = Config.room_topic(room)
 	_ref = 0
 	_join_ref = ""
 	_hb_accum = 0.0
