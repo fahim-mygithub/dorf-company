@@ -32,7 +32,18 @@ var enemies: Array = []        # 3 enemy dicts
 var phase := ""                # playerTurn / enemyTurn / win / lose
 var turn := 0
 var active_idx := 0            # selected character
-var selected_card := -1        # armed card index in active char's hand
+var selected_uid := ""         # uid of the armed card in the active char's hand ("" = none)
+var _card_uid_seq := 0
+# --- co-op scaffolding (inert in SOLO) ---
+var my_seat := 0
+var _seat_count := 1
+var _seq := 0
+var _last_board_seq := -1
+var _last_hand_seq := -1
+var _action_nonce := 0
+var _barrier_open := true
+var _ready_seats := {}
+var _seat_ready: Array = []
 var party_attack_buff := 0     # Aura of Valor (this player phase)
 var taunt_last_turn := -99
 var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
@@ -275,8 +286,26 @@ func _party_layout(n: int) -> Array:
 		out.append(Vector2(slot_w * (float(i) + 0.5), 700.0))
 	return out
 
+func _next_uid() -> String:
+	_card_uid_seq += 1
+	return "c%d" % _card_uid_seq
+
+func _next_seq() -> int:
+	_seq += 1
+	return _seq
+
+func _next_nonce() -> int:
+	_action_nonce += 1
+	return _action_nonce
+
+func _hand_index_of(a: Dictionary, uid: String) -> int:
+	if uid == "":
+		return -1
+	return (a.get("hand_uids", []) as Array).find(uid)
+
 func _start_combat() -> void:
 	combat_epoch += 1
+	_card_uid_seq = 0
 	party = []
 	var crew_specs: Array = _effective_crew()
 	for i: int in range(crew_specs.size()):
@@ -292,7 +321,7 @@ func _start_combat() -> void:
 			# A crew member sent in at 0 HP (a downed dwarf on a hex expedition) starts as a benched slot.
 			# Standalone/mesh crews always have hp > 0, so this stays byte-identical for those paths.
 			"alive": int(spec.get("hp", cls["max_hp"])) > 0,
-			"deck": deck, "hand": [], "discard": [], "played_turn": [],
+			"deck": deck, "hand": [], "hand_uids": [], "discard": [], "played_turn": [],
 			"vulnerable": 0,   # enemy Expose/Hex: takes x1.5 from enemy hits, decays 1/player-phase
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
 			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
@@ -377,7 +406,7 @@ func _start_player_phase() -> void:
 		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
 	party_attack_buff = 0
 	attacks_this_turn = 0
-	selected_card = -1
+	selected_uid = ""
 	active_idx = _first_living_party()
 	phase = "playerTurn"
 	_hand_anim = "deal"   # everyone visibly draws: minis + the active hand fly from the portraits
@@ -390,7 +419,8 @@ func _on_end_turn() -> void:
 		for c: String in a["hand"]:
 			a["discard"].append(c)
 		a["hand"].clear()
-	selected_card = -1
+		a["hand_uids"].clear()
+	selected_uid = ""
 	phase = "enemyTurn"
 	_refresh()
 	await _enemy_phase()
@@ -566,7 +596,7 @@ func _on_party_clicked(idx: int) -> void:
 	if phase != "playerTurn" or not party[idx]["alive"]:
 		return
 	# If an ally-target card is armed, this tap chooses the ally.
-	if selected_card >= 0:
+	if selected_uid != "":
 		var def: Dictionary = _armed_def()
 		if def.get("target", "") in ["ally", "ally_or_enemy"]:
 			_play_on_ally(idx)
@@ -576,13 +606,13 @@ func _on_party_clicked(idx: int) -> void:
 		_hand_anim = "switch"      # new hand pops from the tapped dwarf...
 		_switch_from = active_idx  # ...and the old one's mini row animates back in
 	active_idx = idx
-	selected_card = -1
+	selected_uid = ""
 	_refresh()
 
 func _on_enemy_clicked(idx: int) -> void:
 	if phase != "playerTurn" or not enemies[idx]["alive"]:
 		return
-	if selected_card < 0:
+	if selected_uid == "":
 		return
 	var def: Dictionary = _armed_def()
 	if def.get("target", "") in ["enemy", "ally_or_enemy"]:
@@ -590,9 +620,10 @@ func _on_enemy_clicked(idx: int) -> void:
 
 func _armed_def() -> Dictionary:
 	var a: Dictionary = party[active_idx]
-	if selected_card < 0 or selected_card >= a["hand"].size():
+	var idx := _hand_index_of(a, selected_uid)
+	if idx < 0:
 		return {}
-	return Db.CARDS[a["hand"][selected_card]]
+	return Db.CARDS[a["hand"][idx]]
 
 ## Self/all-enemies cards have no target to pick, so a single tap plays them right away
 ## (hover already previews the tooltip on desktop). Target cards still arm on the first
@@ -619,12 +650,12 @@ func _on_card_clicked(card) -> void:
 			_resolve(def, a, {})   # self / party: ops loop over the party internally
 		_finish_play(a, def, cid)
 		return
-	if selected_card != idx:
-		selected_card = idx                      # inspect + arm target card
+	if selected_uid != card.uid:
+		selected_uid = card.uid                  # inspect + arm target card
 		_log("%s — %s" % [def["name"], _select_hint(def)])
 		_refresh()
 	else:
-		selected_card = -1                       # deselect a target card
+		selected_uid = ""                       # deselect a target card
 		_refresh()
 
 func _select_hint(def: Dictionary) -> String:
@@ -645,7 +676,7 @@ func _can_play(a: Dictionary, cid: String, def: Dictionary) -> bool:
 
 func _play_on_enemy(e_idx: int) -> void:
 	var a: Dictionary = party[active_idx]
-	var idx: int = selected_card
+	var idx: int = _hand_index_of(a, selected_uid)
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	if not _can_play(a, cid, def):
@@ -656,7 +687,7 @@ func _play_on_enemy(e_idx: int) -> void:
 
 func _play_on_ally(c_idx: int) -> void:
 	var a: Dictionary = party[active_idx]
-	var idx: int = selected_card
+	var idx: int = _hand_index_of(a, selected_uid)
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	if not _can_play(a, cid, def):
@@ -669,6 +700,7 @@ func _spend(a: Dictionary, idx: int) -> void:
 	var cid: String = a["hand"][idx]
 	a["energy"] -= Db.CARDS[cid]["cost"]
 	a["hand"].remove_at(idx)
+	a["hand_uids"].remove_at(idx)
 	a["played_turn"].append(cid)   # ghosted in the mini row until next player phase
 
 func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
@@ -678,7 +710,7 @@ func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 		a["momentum"] = int(a.get("momentum", 0)) + 1      # Warrior: per-char attacks this turn (Momentum Strike)
 	else:
 		a["devotion"] = int(a.get("devotion", 0)) + 1      # Cleric: per-char skills this turn (Divine Smite spend)
-	selected_card = -1
+	selected_uid = ""
 	_log("%s played %s." % [a["name"], def["name"]])
 	_refresh()
 	_check_end()
@@ -853,6 +885,7 @@ func _draw_cards(a: Dictionary, n: int) -> void:
 		if a["deck"].is_empty():
 			break
 		a["hand"].append(a["deck"].pop_back())
+		a["hand_uids"].append(_next_uid())
 
 # ================================================================ Win/Lose
 func _check_end() -> bool:
@@ -876,7 +909,7 @@ func _check_end() -> bool:
 
 func _end(won: bool) -> void:
 	phase = "win" if won else "lose"
-	selected_card = -1
+	selected_uid = ""
 	if not request.is_empty():
 		var crew_results: Array = []
 		for a: Dictionary in party:
@@ -943,11 +976,11 @@ func _refresh_enemies() -> void:
 		# Highlight valid enemy targets while an enemy-target card is armed.
 		var arm: Dictionary = _armed_def()
 		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
-		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_card >= 0) else Color.WHITE
+		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_uid != "") else Color.WHITE
 
 func _refresh_party() -> void:
 	var arm: Dictionary = _armed_def()
-	var ally_arm: bool = selected_card >= 0 and arm.get("target", "") in ["ally", "ally_or_enemy"]
+	var ally_arm: bool = selected_uid != "" and arm.get("target", "") in ["ally", "ally_or_enemy"]
 	for i: int in range(party.size()):
 		var a: Dictionary = party[i]
 		var alive: bool = a["alive"]
@@ -1135,41 +1168,56 @@ func _refresh_panel() -> void:
 		hint_label.text = ""
 
 func _rebuild_hand() -> void:
-	for c in hand_box.get_children():
-		c.queue_free()
 	if phase != "playerTurn":
+		for c in hand_box.get_children():
+			c.queue_free()
 		return
 	var a: Dictionary = party[active_idx]
 	var hand: Array = a["hand"]
+	var uids: Array = a.get("hand_uids", [])
 	var n: int = hand.size()
 	var spacing: float = minf(116.0, 624.0 / float(maxi(1, n)))
+	# Reconcile by uid: keep survivor nodes (preserve hover/arm), free departed, add new.
+	var existing := {}
+	for c in hand_box.get_children():
+		existing[c.uid] = c
+	var want := {}
+	for i in range(n):
+		if i < uids.size():
+			want[uids[i]] = true
+	for u in existing.keys():
+		if not want.has(u):
+			existing[u].queue_free()
+			existing.erase(u)
 	for i: int in range(n):
 		var cid: String = hand[i]
+		var uid: String = uids[i] if i < uids.size() else ""
 		var def: Dictionary = Db.CARDS[cid]
-		var card := Card.new()
-		hand_box.add_child(card)
-		card.index = i
 		var face: Dictionary = Db.describe(def, a, party_attack_buff, attacks_this_turn)
 		var cooldown: bool = cid == "taunt" and turn - taunt_last_turn < 2
 		var playable: bool = def["cost"] <= a["energy"] and not cooldown
-		card.setup(def, face, playable, i == selected_card, def.get("tip", ""), cooldown)
-		card.clicked.connect(_on_card_clicked)
 		var t: float = float(i) - float(n - 1) / 2.0
 		var rot: float = deg_to_rad(t * 5.0)
 		var bc := Vector2(360.0 + t * spacing, 196.0 + absf(t) * 9.0)
 		var slot_pos: Vector2 = bc - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+		var survivor: bool = existing.has(uid)
+		var card: Card
+		if survivor:
+			card = existing[uid]
+		else:
+			card = Card.new()
+			card.uid = uid
+			hand_box.add_child(card)
+			card.clicked.connect(_on_card_clicked)
+		card.index = i
+		card.setup(def, face, playable, uid == selected_uid, def.get("tip", ""), cooldown)
 		card.set_slot(slot_pos, rot)
-		if _hand_anim != "":
-			# Entrance: the card flies out of the active dwarf's portrait into its fan slot.
-			# The card scales about its bottom-center pivot (card.gd), so subtract the FULL pivot
-			# (not half-size) to park the shrunken card ON the portrait, not the stat block below it.
+		if not survivor and _hand_anim != "":
+			# Entrance: a NEW card flies out of the active dwarf's portrait into its fan slot.
 			card.position = pc_pos[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
 			card.rotation = 0.0
 			card.scale = Vector2(0.25, 0.25)
 			card.modulate.a = 0.0
-			# Invisible in-flight cards must not be pickable — modulate.a=0 doesn't disable input,
-			# so an unfiltered card parked under the portrait would eat taps (silent play on touch)
-			# and fire hover tweens that fight this entrance. Mute input until it lands.
 			card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			var d: float = (0.12 * float(active_idx) + 0.07 * float(i)) if _hand_anim == "deal" else 0.03 * float(i)
 			var dur: float = 0.30 if _hand_anim == "deal" else 0.16
@@ -1264,7 +1312,7 @@ func _mk_mini(def: Dictionary, played: bool) -> Control:
 func _update_cursor() -> void:
 	var arm: Dictionary = _armed_def()
 	var needs_target: bool = arm.get("target", "") in ["enemy", "ally", "ally_or_enemy"]
-	var targeting: bool = phase == "playerTurn" and selected_card >= 0 and needs_target
+	var targeting: bool = phase == "playerTurn" and selected_uid != "" and needs_target
 	if targeting == _cursor_on:
 		return
 	_cursor_on = targeting

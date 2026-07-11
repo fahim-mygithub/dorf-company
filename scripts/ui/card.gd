@@ -9,6 +9,7 @@ const Db := preload("res://scripts/combat/card_db.gd")
 const SIZE := Vector2(130, 188)
 
 var index: int = -1
+var uid: String = ""
 var playable: bool = true
 var _base_pos: Vector2 = Vector2.ZERO
 var _base_rot: float = 0.0
@@ -122,7 +123,7 @@ func setup(def: Dictionary, face: Dictionary, is_playable: bool, is_selected: bo
 	_sb.set_border_width_all(4 if is_selected else 2)
 	modulate = Color.WHITE if is_playable else Color(0.7, 0.7, 0.78)
 	_tip_label.text = (face["text"] + "\n— " + tip) if tip != "" else face["text"]
-	_tip_panel.visible = is_selected
+	_tip_panel.visible = is_selected or _hover
 
 func set_slot(pos: Vector2, rot: float) -> void:
 	_base_pos = pos
