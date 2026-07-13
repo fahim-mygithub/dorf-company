@@ -24,6 +24,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 MCPScreenshot="*res://addons/godot_mcp/mcp_screenshot_service.gd"
 MCPInputService="*res://addons/godot_mcp/mcp_input_service.gd"
 MCPGameInspector="*res://addons/godot_mcp/mcp_game_inspector_service.gd"
+Net="*res://scripts/net/net.gd"
 
 [display]
 

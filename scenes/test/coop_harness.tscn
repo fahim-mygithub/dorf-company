@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://mjw7gnr36vbl"]
+
+[ext_resource type="Script" uid="uid://dcr35llsc815a" path="res://scripts/test/coop_harness.gd" id="1_mc3uo"]
+
+[node name="CoopHarness" type="Control" unique_id=448257890]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_mc3uo")

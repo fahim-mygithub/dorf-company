@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://djopvk3nhl666"]
+
+[ext_resource type="Script" uid="uid://3mwhr02343lw" path="res://scripts/menu/lobby.gd" id="1_720y1"]
+
+[node name="Lobby" type="Control" unique_id=1313979292]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_720y1")

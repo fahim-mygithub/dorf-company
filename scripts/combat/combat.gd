@@ -32,11 +32,26 @@ var enemies: Array = []        # 3 enemy dicts
 var phase := ""                # playerTurn / enemyTurn / win / lose
 var turn := 0
 var active_idx := 0            # selected character
-var selected_card := -1        # armed card index in active char's hand
+var selected_uid := ""         # uid of the armed card in the active char's hand ("" = none)
+var _card_uid_seq := 0
+# --- co-op scaffolding (inert in SOLO) ---
+var my_seat := 0
+var _seat_count := 1
+var _seq := 0
+var _last_board_seq := -1
+var _last_hand_seq := -1
+var _action_nonce := 0
+var _barrier_open := true
+var _ready_seats := {}
+var _seat_ready: Array = []
 var party_attack_buff := 0     # Aura of Valor (this player phase)
 var taunt_last_turn := -99
 var attacks_this_turn := 0   # party-wide, this player phase (feeds Arcane Finisher)
 var combat_epoch := 0
+enum Mode { SOLO, AUTHORITY, CLIENT }   # SOLO = today's local game; AUTHORITY/CLIENT wired in M3
+var mode: int = Mode.SOLO
+var party_n := 3               # combat party size (2-4); pc_pos is sized to it
+var pc_pos: Array = []         # runtime party portrait centers (set in _build_ui)
 var _hand_anim := ""       # one-shot on next _refresh: "deal" (phase start) / "switch" (active change)
 var _switch_from := -1     # who just went inactive (their mini row animates in on "switch")
 var _is_touch := false
@@ -78,10 +93,29 @@ var overlay_btn: Button
 # enemy slot screen positions / party slot screen positions
 const EN_POS := [Vector2(170, 200), Vector2(360, 200), Vector2(550, 200)]
 const PC_POS := [Vector2(170, 700), Vector2(360, 700), Vector2(550, 700)]
+const PARTY_MAX := 4
+# Debug hotseat: force a party size (2/4) when no request.crew is supplied. 0 = off (SOLO 3).
+const DEBUG_PARTY_N := 0
 
 # ================================================================ Lifecycle
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Co-op handoff from the lobby (consume-and-clear: a later SOLO run must not inherit it).
+	if request.is_empty() and not Net.combat_request.is_empty():
+		request = Net.combat_request
+		Net.combat_request = {}
+	# Parse the net block ONCE. Standalone ({}), and the overworld's child (request without a
+	# "net" key), both land on SOLO — so neither ever touches Net.
+	var net: Dictionary = request.get("net", {})
+	var m: String = str(net.get("mode", ""))
+	mode = Mode.AUTHORITY if m == "authority" else (Mode.CLIENT if m == "client" else Mode.SOLO)
+	my_seat = int(net.get("seat", 0))
+	_seat_count = int(net.get("seat_count", 1))
+	if mode != Mode.SOLO:
+		Net.ensure_peer_id()
+		Net.message_received.connect(_on_net_message)
+		Net.realtime_joined.connect(_on_net_rejoined)   # a dropped socket re-dials; re-sync on the way back
+		combat_finished.connect(_on_match_finished_local)
 	reticle_tex = _make_reticle()
 	_is_touch = DisplayServer.is_touchscreen_available()
 	_build_ui()
@@ -114,6 +148,8 @@ func _emoji(center_pos: Vector2, box: Vector2, font: int) -> Label:
 
 # ================================================================ UI build
 func _build_ui() -> void:
+	party_n = _effective_crew().size()
+	pc_pos = _party_layout(party_n)
 	var bg := ColorRect.new()
 	bg.color = Color(0.09, 0.09, 0.12)
 	bg.size = Vector2(720, 1280)
@@ -159,7 +195,7 @@ func _build_ui() -> void:
 	ip_pref.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	ip_pref.reparent(intent_panel, false)
 
-	for i: int in range(3):
+	for i: int in range(party_n):
 		_build_party_slot(i)
 
 	# (moved below the mini-hand band at y≈798-846)
@@ -218,7 +254,7 @@ func _build_enemy_slot(i: int) -> void:
 	en_block.append(_label("", Vector2(pos.x - 80, pos.y + 60), Vector2(160, 18), 14))
 
 func _build_party_slot(i: int) -> void:
-	var pos: Vector2 = PC_POS[i]
+	var pos: Vector2 = pc_pos[i]
 	var o := ColorRect.new()
 	o.color = Color(1.0, 0.85, 0.2, 0.16)
 	o.position = pos - Vector2(64, 60)
@@ -243,13 +279,51 @@ func _build_party_slot(i: int) -> void:
 	pc_minis.append(mb)
 
 # ================================================================ Combat start
+## The crew for this combat: request.crew when supplied (2-4), else a synthesized party
+## (DEBUG_PARTY_N size for hotseat testing, otherwise the SOLO 3 from PARTY_ORDER).
+func _effective_crew() -> Array:
+	var crew: Array = request.get("crew", [])
+	if crew.size() >= 2 and crew.size() <= PARTY_MAX:
+		return crew
+	var n: int = DEBUG_PARTY_N if (DEBUG_PARTY_N >= 2 and DEBUG_PARTY_N <= PARTY_MAX) else 3
+	var out: Array = []
+	for i: int in range(n):
+		out.append({"cls": Db.PARTY_ORDER[i % Db.PARTY_ORDER.size()]})
+	return out
+
+## Party portrait centers, sized to N. N == 3 keeps the exact original layout (SOLO
+## behavior-equivalent); N == 2/4 spread evenly across the 720 width.
+func _party_layout(n: int) -> Array:
+	if n == 3:
+		return PC_POS.duplicate()
+	var out: Array = []
+	var slot_w: float = 720.0 / float(n)
+	for i: int in range(n):
+		out.append(Vector2(slot_w * (float(i) + 0.5), 700.0))
+	return out
+
+func _next_uid() -> String:
+	_card_uid_seq += 1
+	return "c%d" % _card_uid_seq
+
+func _next_seq() -> int:
+	_seq += 1
+	return _seq
+
+func _next_nonce() -> int:
+	_action_nonce += 1
+	return _action_nonce
+
+func _hand_index_of(a: Dictionary, uid: String) -> int:
+	if uid == "":
+		return -1
+	return (a.get("hand_uids", []) as Array).find(uid)
+
 func _start_combat() -> void:
 	combat_epoch += 1
+	_card_uid_seq = 0
 	party = []
-	var crew_specs: Array = request.get("crew", [])
-	if crew_specs.is_empty():
-		for cid: String in Db.PARTY_ORDER:
-			crew_specs.append({"cls": cid})
+	var crew_specs: Array = _effective_crew()
 	for i: int in range(crew_specs.size()):
 		var spec: Dictionary = crew_specs[i]
 		var cid: String = spec["cls"]
@@ -263,7 +337,7 @@ func _start_combat() -> void:
 			# A crew member sent in at 0 HP (a downed dwarf on a hex expedition) starts as a benched slot.
 			# Standalone/mesh crews always have hp > 0, so this stays byte-identical for those paths.
 			"alive": int(spec.get("hp", cls["max_hp"])) > 0,
-			"deck": deck, "hand": [], "discard": [], "played_turn": [],
+			"deck": deck, "hand": [], "hand_uids": [], "discard": [], "played_turn": [],
 			"vulnerable": 0,   # enemy Expose/Hex: takes x1.5 from enemy hits, decays 1/player-phase
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
 			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
@@ -307,15 +381,34 @@ func _start_combat() -> void:
 	overlay.visible = false
 	intent_open = -1
 	intent_panel.visible = false
-	for i: int in range(3):
+	for i: int in range(enemies.size()):
 		en_emoji[i].text = enemies[i]["emoji"]
 		en_emoji[i].modulate = Color.WHITE
 		en_emoji[i].scale = Vector2.ONE
+	for i: int in range(party.size()):
 		pc_emoji[i].text = party[i]["emoji"]
 		pc_emoji[i].modulate = Color.WHITE
 		pc_emoji[i].scale = Vector2.ONE
+	_seat_ready = []
+	for s: int in range(party.size()):
+		_seat_ready.append(false)
 	_log("The demon lord convenes the raid. Sequence your dwarves.")
-	_start_player_phase()
+	match mode:
+		Mode.AUTHORITY:
+			# Deal every seat's opening hand up front so the barrier can answer a join instantly.
+			_barrier_open = false
+			_ready_seats.clear()
+			_start_player_phase()
+		Mode.CLIENT:
+			# No local draw: the board (and this seat's hand) arrive with the authority's snapshot.
+			active_idx = my_seat
+			phase = ""
+			_log("Joining the raid…")
+			_refresh()
+			_client_hello()
+			_start_hello_retry()
+		_:
+			_start_player_phase()
 
 func _fresh_temp() -> Dictionary:
 	# fortify -> Retaliate +2 (persists through enemy phase); fortify_guard -> next Guard +5 (consumed)
@@ -347,7 +440,7 @@ func _start_player_phase() -> void:
 		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
 	party_attack_buff = 0
 	attacks_this_turn = 0
-	selected_card = -1
+	selected_uid = ""
 	active_idx = _first_living_party()
 	phase = "playerTurn"
 	_hand_anim = "deal"   # everyone visibly draws: minis + the active hand fly from the portraits
@@ -356,13 +449,18 @@ func _start_player_phase() -> void:
 func _on_end_turn() -> void:
 	if phase != "playerTurn":
 		return
+	# M3a: the authority owns the phase clock (M3b makes this a per-seat Ready gate).
+	if mode == Mode.CLIENT:
+		return
 	for a: Dictionary in party:
 		for c: String in a["hand"]:
 			a["discard"].append(c)
 		a["hand"].clear()
-	selected_card = -1
+		a["hand_uids"].clear()
+	selected_uid = ""
 	phase = "enemyTurn"
 	_refresh()
+	_net_board()
 	await _enemy_phase()
 
 func _enemy_phase() -> void:
@@ -385,6 +483,7 @@ func _enemy_phase() -> void:
 			_impact(e, b)
 	if any_burn:
 		_refresh()
+		_net_board()
 		if _check_end():
 			return
 		await get_tree().create_timer(0.35).timeout
@@ -399,12 +498,16 @@ func _enemy_phase() -> void:
 		_do_enemy_move(e, _enemy_move(e))
 		e["move_i"] = int(e["move_i"]) + 1   # rotation advances; the intent label now telegraphs next turn
 		_refresh()
+		# SOLO: no-op. AUTHORITY (M3a): clients watch the numbers move beat-by-beat.
+		# M3b replaces this with the folded event bundle + a VFX replay on every peer.
+		_net_board()
 		if _check_end():
 			return
 	await get_tree().create_timer(0.25).timeout
 	if epoch != combat_epoch:
 		return
 	_start_player_phase()
+	_net_push_all()   # new hands were just dealt off authority RNG — every seat needs its own
 
 ## The move this enemy is committed to (latched by construction: move_i only advances after acting).
 ## An entry without a rotation falls back to the classic flat attack.
@@ -523,6 +626,297 @@ func _pick_lowest_hp() -> Dictionary:
 			best = a
 	return best
 
+# ================================================================ Co-op net (M3a)
+## Host-authoritative: ONE peer owns the RNG and runs every mutation; the others send action
+## intents and render absolute snapshots. Snapshots are MERGED field-by-field into the local
+## dicts — never assigned over them, because `node` (the live Label), `deck` and `hand` are
+## local-only keys that a wholesale replace would null out.
+const _INT_KEYS := ["slot", "hp", "max_hp", "block", "shield", "energy", "max_energy",
+	"vulnerable", "momentum", "devotion", "attacks_this_turn", "hand_count",
+	"atk", "burn", "move_i", "rage", "intent_target"]
+const _INT_KEYS_TEMP := ["retaliate", "channel_charges", "channel_bonus", "next_attack_bonus"]
+
+func _build_snapshot() -> Dictionary:
+	var ps: Array = []
+	for a: Dictionary in party:
+		var c: Dictionary = a.duplicate()   # SHALLOW copy: erasing on the live dict would kill node/deck
+		c.erase("node")
+		c.erase("deck")
+		c.erase("discard")
+		c.erase("hand")        # hands are PRIVATE — they ride their own per-seat message
+		c.erase("hand_uids")
+		c["hand_count"] = (a["hand"] as Array).size()
+		ps.append(c)
+	var es: Array = []
+	for e: Dictionary in enemies:
+		var d: Dictionary = e.duplicate()
+		d.erase("node")
+		d.erase("moves")   # every peer rebuilds identical pre-scaled moves from request.enemy_scale
+		es.append(d)
+	return {
+		"seq": _next_seq(), "party": ps, "enemies": es,
+		"globals": {
+			"phase": phase, "turn": turn, "party_attack_buff": party_attack_buff,
+			"taunt_last_turn": taunt_last_turn, "attacks_this_turn": attacks_this_turn,
+			"combat_epoch": combat_epoch,
+		},
+		"ready": _seat_ready.duplicate(),
+	}
+
+func _build_hand_msg(seat: int) -> Dictionary:
+	var a: Dictionary = party[seat]
+	return {"seat": seat, "hand": (a["hand"] as Array).duplicate(),
+		"uids": (a["hand_uids"] as Array).duplicate(), "seq": _seq}
+
+## Merge, never replace. `incoming` carries no hand/hand_uids/deck/discard/node, so it
+## physically cannot clobber them. JSON hands back floats — coerce the int leaves.
+func _merge_into(local: Dictionary, incoming: Dictionary) -> void:
+	for k in incoming:
+		local[k] = incoming[k]
+	for k: String in _INT_KEYS:
+		if local.has(k):
+			local[k] = int(local[k])
+	if local.has("temp") and local["temp"] is Dictionary:
+		for k: String in _INT_KEYS_TEMP:
+			if (local["temp"] as Dictionary).has(k):
+				local["temp"][k] = int(local["temp"][k])
+
+func _apply_snapshot(snap: Dictionary, force := false) -> void:
+	if party.is_empty() or enemies.is_empty():
+		return
+	var seq: int = int(snap.get("seq", 0))
+	if not force and seq <= _last_board_seq:
+		return
+	if _last_board_seq >= 0 and seq > _last_board_seq + 1:
+		_request_resync()   # gap — still apply it, absolute snapshots are idempotent
+	_last_board_seq = seq
+	var g: Dictionary = snap.get("globals", {})
+	phase = str(g.get("phase", phase))
+	turn = int(g.get("turn", turn))
+	party_attack_buff = int(g.get("party_attack_buff", party_attack_buff))
+	taunt_last_turn = int(g.get("taunt_last_turn", taunt_last_turn))
+	attacks_this_turn = int(g.get("attacks_this_turn", attacks_this_turn))
+	combat_epoch = int(g.get("combat_epoch", combat_epoch))
+	_seat_ready = (snap.get("ready", _seat_ready) as Array).duplicate()
+	for c: Dictionary in (snap.get("enemies", []) as Array):
+		var eslot: int = int(c.get("slot", -1))
+		if eslot < 0 or eslot >= enemies.size():
+			continue
+		_merge_into(enemies[eslot], c)
+		enemies[eslot]["node"] = en_emoji[eslot]   # rebind the poison key from the slot
+	for c: Dictionary in (snap.get("party", []) as Array):
+		var cslot: int = int(c.get("slot", -1))
+		if cslot < 0 or cslot >= party.size():
+			continue
+		_merge_into(party[cslot], c)
+		party[cslot]["node"] = pc_emoji[cslot]
+	_refresh()
+
+func _apply_hand(payload: Dictionary) -> void:
+	if party.is_empty() or int(payload.get("seat", -1)) != my_seat:
+		return                                    # someone else's hand — not mine to see
+	var seq: int = int(payload.get("seq", 0))
+	if seq <= _last_hand_seq:
+		return
+	_last_hand_seq = seq
+	var a: Dictionary = party[my_seat]
+	a["hand"] = (payload.get("hand", []) as Array).duplicate()
+	a["hand_uids"] = (payload.get("uids", []) as Array).duplicate()
+	_refresh()
+
+func _request_resync() -> void:
+	if mode == Mode.CLIENT:
+		Net.send_message("resync", {"seat": my_seat})
+
+func _peer_owns_seat(_peer_id: String, _seat: int) -> bool:
+	return true   # M4: check against the lobby's peer -> seat map
+
+func _net_board() -> void:
+	if mode == Mode.AUTHORITY:
+		Net.send_message("apply_snapshot", _build_snapshot())
+
+func _net_push_all() -> void:
+	if mode == Mode.AUTHORITY:
+		_broadcast_all()
+
+func _broadcast_all() -> void:
+	Net.send_message("apply_snapshot", _build_snapshot())
+	for s: int in range(party.size()):
+		Net.send_message("hand", _build_hand_msg(s))
+
+func _broadcast_play(seat: int) -> void:
+	Net.send_message("apply_snapshot", _build_snapshot())
+	Net.send_message("hand", _build_hand_msg(seat))   # only the actor's hand changed
+
+# ---------------------------------------------------------------- Action plumbing
+func _make_action(seat: int, uid: String, hand_index: int, target_kind: String, target_idx: int) -> Dictionary:
+	return {"seat": seat, "peer_id": Net.ensure_peer_id(), "card_uid": uid,
+		"hand_index": hand_index, "target_kind": target_kind, "target_idx": target_idx,
+		"nonce": _next_nonce()}
+
+## The ONE mutation path for a card play. SOLO, the host's own taps, and a client's action
+## resolved on the host all funnel through here — a networked play is bit-identical to a local one.
+func _apply_play(a: Dictionary, idx: int, cid: String, def: Dictionary, target_kind: String, target_idx: int) -> void:
+	_spend(a, idx)
+	match target_kind:
+		"all":
+			for e: Dictionary in enemies:
+				if e["alive"]:
+					_resolve(def, a, e)
+		"enemy":
+			_resolve(def, a, enemies[target_idx])
+		"ally":
+			_resolve(def, a, party[target_idx])
+		_:
+			_resolve(def, a, {})   # self / party: the ops loop over the party internally
+	_finish_play(a, def, cid)
+
+## Every tap routes here. CLIENT sends an intent and mutates nothing; AUTHORITY/SOLO resolve.
+func _try_play(seat: int, uid: String, target_kind: String, target_idx: int) -> void:
+	if seat < 0 or seat >= party.size():
+		return
+	var a: Dictionary = party[seat]
+	var idx: int = _hand_index_of(a, uid)
+	if idx < 0:
+		return
+	var cid: String = a["hand"][idx]
+	var def: Dictionary = Db.CARDS[cid]
+	if mode == Mode.CLIENT:
+		if def["cost"] > a["energy"]:   # courtesy check only; the authority re-validates everything
+			_log("Not enough energy for %s." % def["name"])
+			return
+		Net.send_message("submit_action", _make_action(seat, uid, idx, target_kind, target_idx))
+		selected_uid = ""
+		_refresh()   # NO local mutate: the card leaves my hand when the authority's hand msg lands
+		return
+	# The host waits at the same barrier it holds everyone else at: resolving a card before a
+	# teammate has rendered the board would show them a fight already in progress.
+	if mode == Mode.AUTHORITY and not _barrier_open:
+		_log("Waiting for the other players…")
+		return
+	if not _can_play(a, cid, def):
+		return
+	_apply_play(a, idx, cid, def, target_kind, target_idx)
+	if mode == Mode.AUTHORITY:
+		_broadcast_play(seat)
+
+## Authority: validate a client's action, resolve it, broadcast. Nothing here trusts the client.
+func _on_action(act: Dictionary) -> void:
+	if not _barrier_open or phase != "playerTurn":
+		return
+	var seat: int = int(act.get("seat", -1))
+	if seat < 0 or seat >= party.size():
+		return
+	if not _peer_owns_seat(str(act.get("peer_id", "")), seat):
+		return
+	var a: Dictionary = party[seat]
+	if not a["alive"]:
+		return
+	var idx: int = _hand_index_of(a, str(act.get("card_uid", "")))
+	if idx < 0:
+		return   # unknown or already-played uid — never slot-substitute
+	var cid: String = a["hand"][idx]
+	var def: Dictionary = Db.CARDS[cid]
+	if not _can_play(a, cid, def):
+		return
+	var kind: String = str(act.get("target_kind", "self"))
+	var t_idx: int = int(act.get("target_idx", -1))
+	if not _valid_target(def, kind, t_idx):
+		return
+	var saved: String = selected_uid     # a teammate's play must not drop the host's own armed card
+	_apply_play(a, idx, cid, def, kind, t_idx)
+	selected_uid = saved
+	_refresh()
+	_broadcast_play(seat)
+
+func _valid_target(def: Dictionary, kind: String, t_idx: int) -> bool:
+	var want: String = def.get("target", "self")
+	match kind:
+		"enemy":
+			if not (want in ["enemy", "ally_or_enemy"]):
+				return false
+			return t_idx >= 0 and t_idx < enemies.size() and enemies[t_idx]["alive"]
+		"ally":
+			if not (want in ["ally", "ally_or_enemy"]):
+				return false
+			return t_idx >= 0 and t_idx < party.size() and party[t_idx]["alive"]
+		"all":
+			return want == "all_enemies"
+		_:
+			return want == "self" or want == "party"
+
+# ---------------------------------------------------------------- Transport
+## Broadcast fans every message out to every subscriber; the mode guards drop the ones
+## addressed to the other role (a client sees other clients' submit_action and ignores them).
+func _on_net_message(event: String, payload: Dictionary) -> void:
+	if mode == Mode.AUTHORITY:
+		match event:
+			"submit_action": _on_action(payload)
+			"combat_ready": _authority_on_combat_ready(payload)
+			"resync": _authority_on_resync(payload)
+	elif mode == Mode.CLIENT:
+		match event:
+			"apply_snapshot": _apply_snapshot(payload)
+			"hand": _apply_hand(payload)
+			"match_over": _client_match_over(payload)
+
+## Combat-start barrier: the host holds play closed until every other seat has checked in, so
+## an early host tap cannot resolve against a board its teammates have not rendered yet.
+func _authority_on_combat_ready(payload: Dictionary) -> void:
+	var seat: int = int(payload.get("seat", -1))
+	if seat < 0 or seat >= party.size():
+		return
+	if not _peer_owns_seat(str(payload.get("peer_id", "")), seat):
+		return
+	_ready_seats[seat] = true
+	Net.send_message("apply_snapshot", _build_snapshot())
+	Net.send_message("hand", _build_hand_msg(seat))
+	if not _barrier_open and _ready_seats.size() >= _seat_count - 1:
+		_barrier_open = true
+		_log("Everyone is in. Sequence your dwarves.")
+		_refresh()   # the barrier gates End Turn, so the button has to be re-enabled here
+		_broadcast_all()
+
+func _authority_on_resync(payload: Dictionary) -> void:
+	var seat: int = int(payload.get("seat", -1))
+	Net.send_message("apply_snapshot", _build_snapshot())
+	if seat >= 0 and seat < party.size():
+		Net.send_message("hand", _build_hand_msg(seat))
+
+func _client_hello() -> void:
+	if mode == Mode.CLIENT:
+		Net.send_message("combat_ready", {"seat": my_seat, "peer_id": Net.ensure_peer_id()})
+
+## The socket dropped and Net re-dialed (a backgrounded tab stalls the heartbeat). Whatever
+## the board did while we were mute, an absolute snapshot repairs in one message.
+func _on_net_rejoined() -> void:
+	if mode == Mode.AUTHORITY:
+		_broadcast_all()
+	elif mode == Mode.CLIENT:
+		_client_hello()   # the host answers with a fresh snapshot + this seat's hand
+
+## Broadcast is fire-and-forget: keep knocking until the first snapshot proves the host heard us.
+func _start_hello_retry() -> void:
+	var t := Timer.new()
+	t.wait_time = 1.5
+	t.autostart = true
+	add_child(t)
+	t.timeout.connect(func() -> void:
+		if _last_board_seq >= 0:
+			t.queue_free()
+		else:
+			_client_hello())
+
+func _on_match_finished_local(result: Dictionary) -> void:
+	Net.send_message("match_over", {"won": bool(result.get("success", false))})
+	_to_lobby()
+
+func _client_match_over(_payload: Dictionary) -> void:
+	_to_lobby()
+
+func _to_lobby() -> void:
+	get_tree().change_scene_to_file("res://scenes/menu/lobby.tscn")
+
 # ================================================================ Card play
 func _on_party_input(event: InputEvent, idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -536,33 +930,37 @@ func _on_party_clicked(idx: int) -> void:
 	if phase != "playerTurn" or not party[idx]["alive"]:
 		return
 	# If an ally-target card is armed, this tap chooses the ally.
-	if selected_card >= 0:
+	if selected_uid != "":
 		var def: Dictionary = _armed_def()
 		if def.get("target", "") in ["ally", "ally_or_enemy"]:
-			_play_on_ally(idx)
+			_try_play(active_idx, selected_uid, "ally", idx)
 			return
+	# A client pilots exactly ONE seat: tapping a teammate must never repoint active_idx.
+	if mode == Mode.CLIENT:
+		return
 	# Otherwise just switch the active character.
 	if idx != active_idx:
 		_hand_anim = "switch"      # new hand pops from the tapped dwarf...
 		_switch_from = active_idx  # ...and the old one's mini row animates back in
 	active_idx = idx
-	selected_card = -1
+	selected_uid = ""
 	_refresh()
 
 func _on_enemy_clicked(idx: int) -> void:
 	if phase != "playerTurn" or not enemies[idx]["alive"]:
 		return
-	if selected_card < 0:
+	if selected_uid == "":
 		return
 	var def: Dictionary = _armed_def()
 	if def.get("target", "") in ["enemy", "ally_or_enemy"]:
-		_play_on_enemy(idx)
+		_try_play(active_idx, selected_uid, "enemy", idx)
 
 func _armed_def() -> Dictionary:
 	var a: Dictionary = party[active_idx]
-	if selected_card < 0 or selected_card >= a["hand"].size():
+	var idx := _hand_index_of(a, selected_uid)
+	if idx < 0:
 		return {}
-	return Db.CARDS[a["hand"][selected_card]]
+	return Db.CARDS[a["hand"][idx]]
 
 ## Self/all-enemies cards have no target to pick, so a single tap plays them right away
 ## (hover already previews the tooltip on desktop). Target cards still arm on the first
@@ -571,30 +969,21 @@ func _on_card_clicked(card) -> void:
 	if phase != "playerTurn":
 		return
 	var a: Dictionary = party[active_idx]
-	var idx: int = card.index
-	if idx < 0 or idx >= a["hand"].size():
+	var idx: int = _hand_index_of(a, card.uid)   # resolve the tapped card by uid, never by index
+	if idx < 0:
 		return
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	var tgt: String = def["target"]
 	if tgt == "self" or tgt == "all_enemies" or tgt == "party":
-		if not _can_play(a, cid, def):
-			return
-		_spend(a, idx)
-		if tgt == "all_enemies":
-			for e: Dictionary in enemies:
-				if e["alive"]:
-					_resolve(def, a, e)
-		else:
-			_resolve(def, a, {})   # self / party: ops loop over the party internally
-		_finish_play(a, def, cid)
+		_try_play(active_idx, card.uid, ("all" if tgt == "all_enemies" else "self"), -1)
 		return
-	if selected_card != idx:
-		selected_card = idx                      # inspect + arm target card
+	if selected_uid != card.uid:
+		selected_uid = card.uid                  # inspect + arm target card
 		_log("%s — %s" % [def["name"], _select_hint(def)])
 		_refresh()
 	else:
-		selected_card = -1                       # deselect a target card
+		selected_uid = ""                       # deselect a target card
 		_refresh()
 
 func _select_hint(def: Dictionary) -> String:
@@ -613,32 +1002,11 @@ func _can_play(a: Dictionary, cid: String, def: Dictionary) -> bool:
 		return false
 	return true
 
-func _play_on_enemy(e_idx: int) -> void:
-	var a: Dictionary = party[active_idx]
-	var idx: int = selected_card
-	var cid: String = a["hand"][idx]
-	var def: Dictionary = Db.CARDS[cid]
-	if not _can_play(a, cid, def):
-		return
-	_spend(a, idx)
-	_resolve(def, a, enemies[e_idx])
-	_finish_play(a, def, cid)
-
-func _play_on_ally(c_idx: int) -> void:
-	var a: Dictionary = party[active_idx]
-	var idx: int = selected_card
-	var cid: String = a["hand"][idx]
-	var def: Dictionary = Db.CARDS[cid]
-	if not _can_play(a, cid, def):
-		return
-	_spend(a, idx)
-	_resolve(def, a, party[c_idx])   # target is an ally char
-	_finish_play(a, def, cid)
-
 func _spend(a: Dictionary, idx: int) -> void:
 	var cid: String = a["hand"][idx]
 	a["energy"] -= Db.CARDS[cid]["cost"]
 	a["hand"].remove_at(idx)
+	a["hand_uids"].remove_at(idx)
 	a["played_turn"].append(cid)   # ghosted in the mini row until next player phase
 
 func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
@@ -648,7 +1016,7 @@ func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 		a["momentum"] = int(a.get("momentum", 0)) + 1      # Warrior: per-char attacks this turn (Momentum Strike)
 	else:
 		a["devotion"] = int(a.get("devotion", 0)) + 1      # Cleric: per-char skills this turn (Divine Smite spend)
-	selected_card = -1
+	selected_uid = ""
 	_log("%s played %s." % [a["name"], def["name"]])
 	_refresh()
 	_check_end()
@@ -823,6 +1191,7 @@ func _draw_cards(a: Dictionary, n: int) -> void:
 		if a["deck"].is_empty():
 			break
 		a["hand"].append(a["deck"].pop_back())
+		a["hand_uids"].append(_next_uid())
 
 # ================================================================ Win/Lose
 func _check_end() -> bool:
@@ -846,7 +1215,7 @@ func _check_end() -> bool:
 
 func _end(won: bool) -> void:
 	phase = "win" if won else "lose"
-	selected_card = -1
+	selected_uid = ""
 	if not request.is_empty():
 		var crew_results: Array = []
 		for a: Dictionary in party:
@@ -879,8 +1248,9 @@ func _refresh() -> void:
 	_refresh_panel()
 	_rebuild_hand()
 	_refresh_minis()
-	end_turn_btn.disabled = phase != "playerTurn"
-	end_turn_btn.visible = not overlay.visible
+	# M3a: only the authority ends the turn (M3b replaces this with the per-seat Ready gate).
+	end_turn_btn.disabled = phase != "playerTurn" or mode == Mode.CLIENT or not _barrier_open
+	end_turn_btn.visible = not overlay.visible and mode != Mode.CLIENT
 	_update_cursor()
 	_refresh_intent_panel()
 	_hand_anim = ""   # one-shot: consumed by _rebuild_hand/_refresh_minis above
@@ -913,12 +1283,12 @@ func _refresh_enemies() -> void:
 		# Highlight valid enemy targets while an enemy-target card is armed.
 		var arm: Dictionary = _armed_def()
 		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
-		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_card >= 0) else Color.WHITE
+		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_uid != "") else Color.WHITE
 
 func _refresh_party() -> void:
 	var arm: Dictionary = _armed_def()
-	var ally_arm: bool = selected_card >= 0 and arm.get("target", "") in ["ally", "ally_or_enemy"]
-	for i: int in range(3):
+	var ally_arm: bool = selected_uid != "" and arm.get("target", "") in ["ally", "ally_or_enemy"]
+	for i: int in range(party.size()):
 		var a: Dictionary = party[i]
 		var alive: bool = a["alive"]
 		pc_outline[i].visible = alive and i == active_idx and phase == "playerTurn"
@@ -1087,7 +1457,7 @@ func _refresh_threats() -> void:
 				continue
 			pairs.append({
 				"from": EN_POS[e["slot"]] + Vector2(0, 42),
-				"to": PC_POS[t["slot"]] + Vector2(0, -42),
+				"to": pc_pos[t["slot"]] + Vector2(0, -42),
 			})
 	threat.set_threats(pairs)
 
@@ -1096,50 +1466,70 @@ func _refresh_panel() -> void:
 		var a: Dictionary = party[active_idx]
 		var aura: String = "   📣+%d atk" % party_attack_buff if party_attack_buff > 0 else ""
 		active_label.text = "%s  %s   ⚡%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], aura]
-		hint_label.text = "Tap a dwarf to switch • tap a card to play (target cards: tap a target)"
+		if mode == Mode.SOLO:
+			hint_label.text = "Tap a dwarf to switch • tap a card to play (target cards: tap a target)"
+		elif not Net.is_online():
+			hint_label.text = "Reconnecting…"
+		else:
+			hint_label.text = "You pilot %s • tap a card to play (target cards: tap a target)" % a["name"]
 	elif phase == "enemyTurn":
 		active_label.text = "Enemy turn…"
 		hint_label.text = ""
 	else:
 		active_label.text = ""
-		hint_label.text = ""
+		hint_label.text = "Waiting for the host…" if mode == Mode.CLIENT else ""
 
 func _rebuild_hand() -> void:
-	for c in hand_box.get_children():
-		c.queue_free()
 	if phase != "playerTurn":
+		for c in hand_box.get_children():
+			c.queue_free()
 		return
 	var a: Dictionary = party[active_idx]
 	var hand: Array = a["hand"]
+	var uids: Array = a.get("hand_uids", [])
 	var n: int = hand.size()
 	var spacing: float = minf(116.0, 624.0 / float(maxi(1, n)))
+	# Reconcile by uid: keep survivor nodes (preserve hover/arm), free departed, add new.
+	var existing := {}
+	for c in hand_box.get_children():
+		existing[c.uid] = c
+	var want := {}
+	for i in range(n):
+		if i < uids.size():
+			want[uids[i]] = true
+	for u in existing.keys():
+		if not want.has(u):
+			existing[u].queue_free()
+			existing.erase(u)
 	for i: int in range(n):
 		var cid: String = hand[i]
+		var uid: String = uids[i] if i < uids.size() else ""
 		var def: Dictionary = Db.CARDS[cid]
-		var card := Card.new()
-		hand_box.add_child(card)
-		card.index = i
 		var face: Dictionary = Db.describe(def, a, party_attack_buff, attacks_this_turn)
 		var cooldown: bool = cid == "taunt" and turn - taunt_last_turn < 2
 		var playable: bool = def["cost"] <= a["energy"] and not cooldown
-		card.setup(def, face, playable, i == selected_card, def.get("tip", ""), cooldown)
-		card.clicked.connect(_on_card_clicked)
 		var t: float = float(i) - float(n - 1) / 2.0
 		var rot: float = deg_to_rad(t * 5.0)
 		var bc := Vector2(360.0 + t * spacing, 196.0 + absf(t) * 9.0)
 		var slot_pos: Vector2 = bc - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+		var survivor: bool = existing.has(uid)
+		var card: Card
+		if survivor:
+			card = existing[uid]
+		else:
+			card = Card.new()
+			card.uid = uid
+			hand_box.add_child(card)
+			card.clicked.connect(_on_card_clicked)
+		card.index = i
+		card.setup(def, face, playable, uid == selected_uid, def.get("tip", ""), cooldown)
 		card.set_slot(slot_pos, rot)
-		if _hand_anim != "":
-			# Entrance: the card flies out of the active dwarf's portrait into its fan slot.
-			# The card scales about its bottom-center pivot (card.gd), so subtract the FULL pivot
-			# (not half-size) to park the shrunken card ON the portrait, not the stat block below it.
-			card.position = PC_POS[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
+		if not survivor and _hand_anim != "":
+			# Entrance: a NEW card flies out of the active dwarf's portrait into its fan slot.
+			card.position = pc_pos[active_idx] - hand_box.position - Vector2(Card.SIZE.x * 0.5, Card.SIZE.y)
 			card.rotation = 0.0
 			card.scale = Vector2(0.25, 0.25)
 			card.modulate.a = 0.0
-			# Invisible in-flight cards must not be pickable — modulate.a=0 doesn't disable input,
-			# so an unfiltered card parked under the portrait would eat taps (silent play on touch)
-			# and fire hover tweens that fight this entrance. Mute input until it lands.
 			card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			var d: float = (0.12 * float(active_idx) + 0.07 * float(i)) if _hand_anim == "deal" else 0.03 * float(i)
 			var dur: float = 0.30 if _hand_anim == "deal" else 0.16
@@ -1156,13 +1546,27 @@ func _rebuild_hand() -> void:
 ## already played this turn (ghosted) — party-wide planning at a glance. The active dwarf's
 ## row is empty (their hand IS the big fan below).
 func _refresh_minis() -> void:
-	for i: int in range(3):
+	for i: int in range(party.size()):
 		var box: Control = pc_minis[i]
 		for c in box.get_children():
 			c.queue_free()
 		if phase != "playerTurn" or i == active_idx or not party[i]["alive"]:
 			continue
 		var a: Dictionary = party[i]
+		# Co-op: a teammate's hand is SECRET. Render count-only backs (from the snapshot's
+		# hand_count) plus played ghosts — never the card faces.
+		if mode != Mode.SOLO and i != my_seat:
+			var backs: int = int(a.get("hand_count", (a["hand"] as Array).size()))
+			var ghosts: int = (a.get("played_turn", []) as Array).size()
+			var tot: int = backs + ghosts
+			if tot == 0:
+				continue
+			var st: float = minf(36.0, 178.0 / float(tot))
+			for k: int in range(tot):
+				var mb := _mk_mini_back(k >= backs)
+				box.add_child(mb)
+				mb.position = Vector2(89.0 + (float(k) - float(tot - 1) * 0.5) * st - MINI_SIZE.x * 0.5, 0.0)
+			continue
 		var items: Array = []
 		for cid: String in a["hand"]:
 			items.append({"cid": cid, "played": false})
@@ -1230,11 +1634,36 @@ func _mk_mini(def: Dictionary, played: bool) -> Control:
 		m.modulate = Color(0.6, 0.6, 0.66, 0.8)
 	return m
 
+## A teammate's card in co-op: a blank back (no cid, no emoji — the face never crosses the wire).
+func _mk_mini_back(played: bool) -> Control:
+	var m := Panel.new()
+	m.size = MINI_SIZE
+	m.pivot_offset = MINI_SIZE * 0.5
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.16, 0.17, 0.24) if played else Color(0.26, 0.28, 0.40)
+	sb.set_corner_radius_all(5)
+	sb.set_border_width_all(1)
+	sb.border_color = Color(1, 1, 1, 0.08 if played else 0.22)
+	m.add_theme_stylebox_override("panel", sb)
+	var e := Label.new()
+	e.text = "" if played else "?"
+	e.add_theme_font_size_override("font_size", 15)
+	e.add_theme_color_override("font_color", Color(1, 1, 1, 0.35))
+	e.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	e.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	e.size = MINI_SIZE
+	e.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	m.add_child(e)
+	if played:
+		m.modulate = Color(0.6, 0.6, 0.66, 0.8)
+	return m
+
 # ================================================================ Targeting cursor
 func _update_cursor() -> void:
 	var arm: Dictionary = _armed_def()
 	var needs_target: bool = arm.get("target", "") in ["enemy", "ally", "ally_or_enemy"]
-	var targeting: bool = phase == "playerTurn" and selected_card >= 0 and needs_target
+	var targeting: bool = phase == "playerTurn" and selected_uid != "" and needs_target
 	if targeting == _cursor_on:
 		return
 	_cursor_on = targeting
