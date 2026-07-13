@@ -14,6 +14,7 @@ signal realtime_joined                          # channel join acked by the serv
 signal realtime_error(msg: String)
 signal realtime_closed(code: int, reason: String)
 signal message_received(event: String, payload: Dictionary)
+signal resumed_from_sleep(asleep_ms: int)       # our tab was frozen (backgrounded) and just woke up
 
 enum State { OFFLINE, CONNECTING, JOINING, JOINED }
 const HEARTBEAT_SEC := 20.0                     # Phoenix idles out ~25s; stay well under
@@ -28,6 +29,8 @@ var _hb_accum := 0.0
 var _self_echo := false                         # broadcast.self — true only for the self-test
 var _want_room := ""                            # non-empty = keep this room dialed (auto re-dial)
 var _redial_accum := 0.0
+const SLEEP_GAP_MS := 2000                      # a frame gap this big means the browser froze us
+var _last_tick_ms := 0
 
 # --- Multiplayer session handoff (set by menu/lobby, read by combat after change_scene) ---
 var room_code := ""
@@ -103,7 +106,23 @@ func _send_join() -> void:
 func _send_heartbeat() -> void:
 	_send_frame(null, _next_ref(), "phoenix", "heartbeat", {})
 
+## A browser does not run a backgrounded tab: the whole game loop stops, so a peer in a background
+## tab cannot check in, play, or end its turn — to everyone else it looks like a player who simply
+## refuses to move. We cannot report that WHILE frozen, but we can notice it the instant we wake up:
+## a huge gap between two frames means the browser had us switched off. Scenes surface this as a
+## warning, because "my teammate never does anything" and "my tab was asleep" look identical.
+func _detect_sleep() -> void:
+	var now: int = Time.get_ticks_msec()
+	if _last_tick_ms > 0:
+		var gap: int = now - _last_tick_ms
+		if gap >= SLEEP_GAP_MS:
+			print("[net] tab was frozen for %dms (backgrounded?)" % gap)
+			resumed_from_sleep.emit(gap)
+	_last_tick_ms = now
+
 func _process(delta: float) -> void:
+	if _want_room != "":
+		_detect_sleep()
 	if _ws == null:
 		# Dropped. A backgrounded browser tab stalls _process, so the heartbeat misses its
 		# window and Phoenix closes us out — without this re-dial the peer goes silently mute

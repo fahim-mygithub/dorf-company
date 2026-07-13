@@ -119,6 +119,7 @@ func _ready() -> void:
 		Net.ensure_peer_id()
 		Net.message_received.connect(_on_net_message)
 		Net.realtime_joined.connect(_on_net_rejoined)   # a dropped socket re-dials; re-sync on the way back
+		Net.resumed_from_sleep.connect(_on_woke_up)
 		if mode == Mode.AUTHORITY:
 			# Only the host announces the result. A client emits combat_finished for ITS OWN parent
 			# (see _client_match_over) and must not echo match_over back onto the wire.
@@ -914,6 +915,14 @@ func _authority_on_resync(_payload: Dictionary) -> void:
 func _client_hello() -> void:
 	if mode == Mode.CLIENT:
 		Net.send_message("combat_ready", {"seat": my_seat, "peer_id": Net.ensure_peer_id()})
+
+## The browser froze this tab and just let it run again. While frozen we were not playing, not
+## checking in and not ending our turn — so to our teammates we looked like a player who would not
+## move. Say so plainly: this is otherwise indistinguishable from the game being broken.
+func _on_woke_up(asleep_ms: int) -> void:
+	_log("⚠ This tab was asleep for %ds — browsers freeze background tabs. Keep it in front (two players on one PC: use two side-by-side WINDOWS, not tabs)." % int(asleep_ms / 1000.0))
+	if mode == Mode.CLIENT:
+		_client_hello()   # tell the host we are back; it answers with a fresh board
 
 ## The socket dropped and Net re-dialed (a backgrounded tab stalls the heartbeat). Whatever
 ## the board did while we were mute, an absolute snapshot repairs in one message.

@@ -240,6 +240,7 @@ func _ready() -> void:
 	Net.ensure_peer_id()
 	Net.message_received.connect(_on_net)
 	Net.realtime_joined.connect(_on_net_rejoined)
+	Net.resumed_from_sleep.connect(_on_woke_up)
 	_seat_iseq = []
 	for i in range(seat_count):
 		_seat_iseq.append(0)
@@ -2215,6 +2216,18 @@ func _on_net(event: String, p: Dictionary) -> void:
 			if mode == Mode.AUTHORITY:
 				_mark_seen(int(p.get("seat", -1)))
 				_push()   # a hello is also "send me the board" — this is the whole resync path
+
+## The browser froze this tab and just let it run again. While frozen we were not voting, not
+## acting and — if we are the HOST — not resolving anything for anybody. Say so plainly: from the
+## outside this is indistinguishable from the game being broken.
+func _on_woke_up(asleep_ms: int) -> void:
+	var secs: int = int(asleep_ms / 1000.0)
+	if mode == Mode.AUTHORITY:
+		_msg("⚠ You host — this tab was asleep %ds and the whole company stopped. Keep it in front." % secs)
+	else:
+		_msg("⚠ This tab was asleep %ds — browsers freeze background tabs. Keep it in front." % secs)
+		_send_hello()   # tell the host we are back; it answers with the whole board
+	_refresh_hud()
 
 ## The socket dropped and Net re-dialed. One absolute snapshot repairs whatever we missed.
 func _on_net_rejoined() -> void:
