@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://dn8p3wqk1xvbe"]
+
+[ext_resource type="Script" path="res://scripts/test/combat_verify.gd" id="1_cverif"]
+
+[node name="CombatVerify" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_cverif")

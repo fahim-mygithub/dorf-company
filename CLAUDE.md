@@ -122,6 +122,13 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   - **AFK escape hatch**: a seat that goes quiet for `ABSENT_SEC` (12s) is marked absent and pruned
     from the open ring, so one friend wandering off can't freeze the company. A seat is only ever
     removed from an open ring, never added to one.
+- **Combat play is SIMULTANEOUS, and end-turn is order-free.** There is deliberately NO turn-order
+  gate: `_on_action` validates seat/uid/energy/target and never asks "is it your turn". Both players
+  act at once; the host resolves plays in the order it receives them (first come, first served — and
+  note the host's own taps apply locally, so it wins a genuine tie). Ending is per-seat in any order
+  (a client may end before the host); the enemy phase fires only when EVERY living seat has ended
+  (`_all_alive_ended()`), and an ended seat can't sneak in another card. Locked down by
+  `scenes/test/combat_verify.tscn` (33 checks).
 - **VERIFY NETCODE HEADLESSLY — do not use browser tabs.** `scenes/test/campaign_verify.tscn` runs
   BOTH peers in one process against live Supabase, drives a scripted session, and prints PASS/FAIL
   (62 checks, all green as of 2026-07-12):
