@@ -114,6 +114,7 @@ func _ready() -> void:
 	if mode != Mode.SOLO:
 		Net.ensure_peer_id()
 		Net.message_received.connect(_on_net_message)
+		Net.realtime_joined.connect(_on_net_rejoined)   # a dropped socket re-dials; re-sync on the way back
 		combat_finished.connect(_on_match_finished_local)
 	reticle_tex = _make_reticle()
 	_is_touch = DisplayServer.is_touchscreen_available()
@@ -880,6 +881,14 @@ func _client_hello() -> void:
 	if mode == Mode.CLIENT:
 		Net.send_message("combat_ready", {"seat": my_seat, "peer_id": Net.ensure_peer_id()})
 
+## The socket dropped and Net re-dialed (a backgrounded tab stalls the heartbeat). Whatever
+## the board did while we were mute, an absolute snapshot repairs in one message.
+func _on_net_rejoined() -> void:
+	if mode == Mode.AUTHORITY:
+		_broadcast_all()
+	elif mode == Mode.CLIENT:
+		_client_hello()   # the host answers with a fresh snapshot + this seat's hand
+
 ## Broadcast is fire-and-forget: keep knocking until the first snapshot proves the host heard us.
 func _start_hello_retry() -> void:
 	var t := Timer.new()
@@ -1453,6 +1462,8 @@ func _refresh_panel() -> void:
 		active_label.text = "%s  %s   ⚡%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], aura]
 		if mode == Mode.SOLO:
 			hint_label.text = "Tap a dwarf to switch • tap a card to play (target cards: tap a target)"
+		elif not Net.is_online():
+			hint_label.text = "Reconnecting…"
 		else:
 			hint_label.text = "You pilot %s • tap a card to play (target cards: tap a target)" % a["name"]
 	elif phase == "enemyTurn":

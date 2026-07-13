@@ -17,6 +17,7 @@ signal message_received(event: String, payload: Dictionary)
 
 enum State { OFFLINE, CONNECTING, JOINING, JOINED }
 const HEARTBEAT_SEC := 20.0                     # Phoenix idles out ~25s; stay well under
+const RECONNECT_SEC := 2.0                      # re-dial delay after an unwanted drop
 
 var _ws: WebSocketPeer = null
 var _state: int = State.OFFLINE
@@ -25,6 +26,8 @@ var _ref := 0
 var _join_ref := ""
 var _hb_accum := 0.0
 var _self_echo := false                         # broadcast.self — true only for the self-test
+var _want_room := ""                            # non-empty = keep this room dialed (auto re-dial)
+var _redial_accum := 0.0
 
 # --- Multiplayer session handoff (set by menu/lobby, read by combat after change_scene) ---
 var room_code := ""
@@ -44,10 +47,17 @@ func is_online() -> bool:
 
 ## Dial a room by code. self_echo=true asks the server to echo our OWN broadcasts back
 ## (used only to self-test the round-trip on a single client; production uses false).
+## Dial a room by code and STAY dialed: a drop re-dials automatically until
+## disconnect_realtime() is called. self_echo=true asks the server to echo our OWN
+## broadcasts back (used only to self-test the round-trip; production uses false).
 func connect_realtime(room: String, self_echo := false) -> void:
 	disconnect_realtime()
+	_want_room = room
 	_self_echo = self_echo
-	_topic = Config.room_topic(room)
+	_open_socket()
+
+func _open_socket() -> void:
+	_topic = Config.room_topic(_want_room)
 	_ref = 0
 	_join_ref = ""
 	_hb_accum = 0.0
@@ -59,7 +69,9 @@ func connect_realtime(room: String, self_echo := false) -> void:
 		return
 	_state = State.CONNECTING
 
+## Deliberate hang-up: clears _want_room so _process stops re-dialing.
 func disconnect_realtime() -> void:
+	_want_room = ""
 	if _ws != null:
 		_ws.close()
 	_ws = null
@@ -92,6 +104,15 @@ func _send_heartbeat() -> void:
 
 func _process(delta: float) -> void:
 	if _ws == null:
+		# Dropped. A backgrounded browser tab stalls _process, so the heartbeat misses its
+		# window and Phoenix closes us out — without this re-dial the peer goes silently mute
+		# for the rest of the match. Listeners re-sync off realtime_joined.
+		if _want_room != "":
+			_redial_accum += delta
+			if _redial_accum >= RECONNECT_SEC:
+				_redial_accum = 0.0
+				print("[net] redialing room ", _want_room)
+				_open_socket()
 		return
 	_ws.poll()
 	match _ws.get_ready_state():
@@ -110,6 +131,8 @@ func _process(delta: float) -> void:
 			var reason := _ws.get_close_reason()
 			_ws = null
 			_state = State.OFFLINE
+			_redial_accum = 0.0
+			print("[net] closed code=%d reason=%s redial=%s" % [code, reason, str(_want_room != "")])
 			realtime_closed.emit(code, reason)
 
 func _on_text(txt: String) -> void:
@@ -125,12 +148,13 @@ func _on_text(txt: String) -> void:
 			var status := ""
 			if typeof(payload) == TYPE_DICTIONARY:
 				status = str((payload as Dictionary).get("status", ""))
-			if _state == State.JOINING and str(ref) == _join_ref:
-				if status == "ok":
-					_state = State.JOINED
-					realtime_joined.emit()
-				else:
-					realtime_error.emit("join refused: " + txt)
+				if _state == State.JOINING and str(ref) == _join_ref:
+					if status == "ok":
+						_state = State.JOINED
+						print("[net] joined ", _topic)
+						realtime_joined.emit()
+					else:
+						realtime_error.emit("join refused: " + txt)
 		"broadcast":
 			if typeof(payload) == TYPE_DICTIONARY:
 				var ev := str((payload as Dictionary).get("event", ""))
