@@ -874,6 +874,7 @@ func _authority_on_combat_ready(payload: Dictionary) -> void:
 	if not _barrier_open and _ready_seats.size() >= _seat_count - 1:
 		_barrier_open = true
 		_log("Everyone is in. Sequence your dwarves.")
+		_refresh()   # the barrier gates End Turn, so the button has to be re-enabled here
 		_broadcast_all()
 
 func _authority_on_resync(payload: Dictionary) -> void:
