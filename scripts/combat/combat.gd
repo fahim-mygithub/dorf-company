@@ -789,6 +789,11 @@ func _try_play(seat: int, uid: String, target_kind: String, target_idx: int) -> 
 		selected_uid = ""
 		_refresh()   # NO local mutate: the card leaves my hand when the authority's hand msg lands
 		return
+	# The host waits at the same barrier it holds everyone else at: resolving a card before a
+	# teammate has rendered the board would show them a fight already in progress.
+	if mode == Mode.AUTHORITY and not _barrier_open:
+		_log("Waiting for the other players…")
+		return
 	if not _can_play(a, cid, def):
 		return
 	_apply_play(a, idx, cid, def, target_kind, target_idx)
@@ -1243,7 +1248,7 @@ func _refresh() -> void:
 	_rebuild_hand()
 	_refresh_minis()
 	# M3a: only the authority ends the turn (M3b replaces this with the per-seat Ready gate).
-	end_turn_btn.disabled = phase != "playerTurn" or mode == Mode.CLIENT
+	end_turn_btn.disabled = phase != "playerTurn" or mode == Mode.CLIENT or not _barrier_open
 	end_turn_btn.visible = not overlay.visible and mode != Mode.CLIENT
 	_update_cursor()
 	_refresh_intent_panel()
