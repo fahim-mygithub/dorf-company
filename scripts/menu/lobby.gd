@@ -149,8 +149,19 @@ func _on_start() -> void:
 
 func _enter_combat(p: Dictionary) -> void:
 	var order: Array = p.get("order", [])
-	Net.my_seat = order.find(Net.my_peer_id)
-	Net.combat_request = p.get("request", {})
+	var seat: int = order.find(Net.my_peer_id)
+	if seat < 0:
+		status.text = "the host started without you"
+		return
+	Net.my_seat = seat
+	# Same request on every peer, plus a per-peer `net` block: who I am and who resolves.
+	var req: Dictionary = (p.get("request", {}) as Dictionary).duplicate(true)
+	req["net"] = {
+		"mode": "authority" if Net.is_authority else "client",
+		"seat": seat,
+		"seat_count": order.size(),
+	}
+	Net.combat_request = req
 	get_tree().change_scene_to_file(COMBAT)   # Net stays connected across the scene change
 
 func _on_back() -> void:
