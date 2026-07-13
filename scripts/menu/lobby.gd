@@ -6,10 +6,12 @@ extends Control
 ##   "hello"  {peer_id, dorf:{cls,name}, ready}  client/host -> announces or updates itself
 ##   "roster" {seats:[{peer_id,dorf,ready}]}     host -> authoritative seat list (order = seat)
 ##   "start"  {order:[peer_id...], request}       host -> everyone change_scene into combat
+##   "camp_start" {order:[peer_id...], seats}     host -> everyone change_scene into the CAMPAIGN
 ## Broadcast is fire-and-forget, so clients re-send "hello" until the host has seated them.
 
 const Db := preload("res://scripts/combat/card_db.gd")
 const COMBAT := "res://scenes/combat/combat.tscn"
+const OVERWORLD := "res://scenes/overworld/overworld.tscn"
 const MENU := "res://scenes/menu/main_menu.tscn"
 const NAMES := ["Grimli", "Thora", "Bruni", "Vali", "Kili", "Odd", "Dwalin", "Nala", "Bofur", "Gerda", "Sten", "Yrsa"]
 const MAX_SEATS := 4
@@ -26,6 +28,7 @@ var seat_box: Control
 var roster_box: Control
 var ready_btn: Button
 var start_btn: Button
+var camp_btn: Button
 var status: Label
 
 func _ready() -> void:
@@ -72,6 +75,8 @@ func _on_msg(event: String, p: Dictionary) -> void:
 				_refresh()
 		"start":
 			_enter_combat(p)
+		"camp_start":
+			_enter_campaign(p)
 
 func _host_absorb(p: Dictionary) -> void:
 	var pid: String = str(p.get("peer_id", ""))
@@ -147,6 +152,45 @@ func _on_start() -> void:
 	Net.send_message("start", {"order": order, "request": req})
 	_enter_combat({"order": order, "request": req})
 
+## The CAMPAIGN start. Unlike a skirmish, there is no pre-rolled encounter to agree on: the host
+## builds the whole company (contracts, hex maps, every die) and streams it. All the lobby has to
+## settle is WHO SITS WHERE — seat i pilots roster[i] for the rest of the campaign.
+func _on_start_campaign() -> void:
+	if not Net.is_authority:
+		return
+	if seats.size() < 2:
+		status.text = "need at least 2 players"
+		return
+	for s in seats:
+		if not bool(s["ready"]):
+			status.text = "waiting for everyone to ready up"
+			return
+	var order: Array = []
+	var crew: Array = []
+	for s in seats:
+		var d: Dictionary = s.get("dorf", {})
+		order.append(s["peer_id"])
+		crew.append({"name": str(d.get("name", "Dorf")), "cls": str(d.get("cls", "warrior")), "present": true})
+	Net.send_message("camp_start", {"order": order, "seats": crew})
+	_enter_campaign({"order": order, "seats": crew})
+
+func _enter_campaign(p: Dictionary) -> void:
+	var order: Array = p.get("order", [])
+	var seat: int = order.find(Net.my_peer_id)
+	if seat < 0:
+		status.text = "the host started without you"
+		return
+	Net.my_seat = seat
+	Net.campaign_request = {
+		"net": {
+			"mode": "authority" if Net.is_authority else "client",
+			"seat": seat,
+			"seat_count": order.size(),
+		},
+		"seats": (p.get("seats", []) as Array).duplicate(true),
+	}
+	get_tree().change_scene_to_file(OVERWORLD)   # Net stays connected across the scene change
+
 func _enter_combat(p: Dictionary) -> void:
 	var order: Array = p.get("order", [])
 	var seat: int = order.find(Net.my_peer_id)
@@ -196,7 +240,15 @@ func _build() -> void:
 	start_btn.size = Vector2(310, 60)
 	start_btn.pressed.connect(_on_start)
 	add_child(start_btn)
-	status = _lbl("", Vector2(0, 880), Vector2(720, 26), 16, Color(0.9, 0.8, 0.45))
+	camp_btn = Button.new()
+	camp_btn.text = "🏰  Start Campaign"
+	camp_btn.add_theme_font_size_override("font_size", 22)
+	camp_btn.position = Vector2(40, 876)
+	camp_btn.size = Vector2(640, 64)
+	camp_btn.pressed.connect(_on_start_campaign)
+	add_child(camp_btn)
+	_lbl("one company · one purse · one rising rent", Vector2(0, 944), Vector2(720, 22), 14, Color(0.66, 0.66, 0.72))
+	status = _lbl("", Vector2(0, 976), Vector2(720, 26), 16, Color(0.9, 0.8, 0.45))
 	var back := Button.new()
 	back.text = "Leave"
 	back.add_theme_font_size_override("font_size", 16)
@@ -238,6 +290,8 @@ func _refresh() -> void:
 	ready_btn.text = "Unready" if my_ready else "Ready"
 	start_btn.visible = Net.is_authority
 	start_btn.disabled = not _all_ready()
+	camp_btn.visible = Net.is_authority
+	camp_btn.disabled = not _all_ready()
 
 func _all_ready() -> bool:
 	if seats.size() < 2:

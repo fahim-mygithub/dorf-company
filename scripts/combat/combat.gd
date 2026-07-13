@@ -25,6 +25,10 @@ const RAGE_CAP := 8      # Howl ramp is an enrage clock, not a divergence
 ## showing Play-Again. An EMPTY request = standalone behaviour, byte-identical to before.
 signal combat_finished(result)
 var request: Dictionary = {}
+## True when a CAMPAIGN scene owns us (we are its child, mid-expedition). Nested combat must hand
+## control BACK to that parent — never change_scene to the lobby, which would delete the campaign.
+var nested := false
+var _match_done := false   # match_over is fire-and-forget and may arrive twice; resolve once
 
 # ---------------------------------------------------------------- State
 var party: Array = []          # 3 char dicts: 0 warrior, 1 cleric, 2 sorcerer
@@ -110,11 +114,15 @@ func _ready() -> void:
 	mode = Mode.AUTHORITY if m == "authority" else (Mode.CLIENT if m == "client" else Mode.SOLO)
 	my_seat = int(net.get("seat", 0))
 	_seat_count = int(net.get("seat_count", 1))
+	nested = bool(request.get("nested", false))
 	if mode != Mode.SOLO:
 		Net.ensure_peer_id()
 		Net.message_received.connect(_on_net_message)
 		Net.realtime_joined.connect(_on_net_rejoined)   # a dropped socket re-dials; re-sync on the way back
-		combat_finished.connect(_on_match_finished_local)
+		if mode == Mode.AUTHORITY:
+			# Only the host announces the result. A client emits combat_finished for ITS OWN parent
+			# (see _client_match_over) and must not echo match_over back onto the wire.
+			combat_finished.connect(_on_match_finished_local)
 	reticle_tex = _make_reticle()
 	_is_touch = DisplayServer.is_touchscreen_available()
 	_build_ui()
@@ -927,12 +935,29 @@ func _start_hello_retry() -> void:
 		else:
 			_client_hello())
 
+## AUTHORITY only. The full result rides the wire, so every peer's parent scene reads the SAME
+## crew_results — post-fight HP cannot diverge between host and client.
 func _on_match_finished_local(result: Dictionary) -> void:
-	Net.send_message("match_over", {"won": bool(result.get("success", false))})
-	_to_lobby()
+	_match_done = true
+	Net.send_message("match_over", {
+		"won": bool(result.get("success", false)),
+		"crew_results": result.get("crew_results", []),
+	})
+	if not nested:
+		_to_lobby()
 
-func _client_match_over(_payload: Dictionary) -> void:
-	_to_lobby()
+## CLIENT only. Standalone: back to the lobby. Nested: the campaign is our parent and is awaiting
+## combat_finished — re-emit the host's verdict verbatim so it can carry HP out of the fight.
+func _client_match_over(payload: Dictionary) -> void:
+	if _match_done:
+		return
+	_match_done = true
+	if not nested:
+		_to_lobby()
+		return
+	var won: bool = bool(payload.get("won", false))
+	phase = "win" if won else "lose"
+	combat_finished.emit({"success": won, "crew_results": payload.get("crew_results", []), "payout_won": won})
 
 func _to_lobby() -> void:
 	get_tree().change_scene_to_file("res://scenes/menu/lobby.tscn")
