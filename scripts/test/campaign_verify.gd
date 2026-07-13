@@ -79,6 +79,35 @@ func _run() -> void:
 	_ck("client rendered CONTRACTS", client.state == "CONTRACTS")
 	_ck("client's intent was acked", client._pending_intent.is_empty())
 
+	print("\n--- 2b. the shop: yours alone, until it eats the rent -------------")
+	# Field Medic (25g) against 80g with 55g rent: 80-25 = 55, still covers rent -> instant, no vote.
+	var t0: int = host.treasury
+	var heal_i := _slot_of(host.shop_stock, "heal")
+	client._intent("shop", str(heal_i))
+	await _wait(1.0)
+	_ck("an affordable buy needs no vote", host.ring.is_empty(), str(host.ring))
+	_ck("the shared purse was charged", host.treasury == t0 - int(host.shop_stock[heal_i]["cost"]),
+		"%d -> %d" % [t0, host.treasury])
+	_ck("the slot sold on the client too", bool(client.shop_stock[heal_i].get("sold", false)))
+	# A card (35g) would now drop the purse UNDER the rent line -> the whole table has to agree.
+	var card_i := _slot_of(host.shop_stock, "card")
+	var deck0: int = (host.roster[1]["deck"] as Array).size()
+	var t1: int = host.treasury
+	client._intent("shop", str(card_i))
+	await _wait(1.0)
+	_ck("a buy under the rent line OPENS a ring", not host.ring.is_empty()
+		and str(host.ring.get("kind", "")) == "shop", str(host.ring))
+	_ck("nothing was spent on one vote", host.treasury == t1, str(host.treasury))
+	host._intent("shop", str(card_i))
+	await _wait(1.2)
+	_ck("the table agreed and the buy went through", host.treasury == t1 - int(host.shop_stock[card_i]["cost"]),
+		"%d -> %d" % [t1, host.treasury])
+	_ck("the card went to the BUYER's own dwarf (seat 1)",
+		(host.roster[1]["deck"] as Array).size() == deck0 + 1,
+		"%d -> %d" % [deck0, (host.roster[1]["deck"] as Array).size()])
+	_ck("the host's dwarf got nothing", (host.roster[0]["deck"] as Array).size() != deck0 + 1
+		or str(host.roster[0]["name"]) == "Hosty")
+
 	print("\n--- 3. RING: embark needs BOTH players ---------------------------")
 	client._intent("select", "2")
 	await _wait(0.8)
@@ -141,6 +170,24 @@ func _run() -> void:
 		and str(client.roster[1]["name"]) == str(host.roster[1]["name"]),
 		"%s / %s" % [str(client.roster[1]["name"]), str(host.roster[1]["name"])])
 	_ck("the client sees the wagon", client.carried.size() == 1)
+
+	print("\n--- 5c. loot is PERSONAL: first tap wins, for your own deck -------")
+	host.hex_loot = ["strike", "guard", "cleave"]
+	host.hex_loot_pick = -1
+	host.state = "HEXREWARD"
+	host._push()
+	await _wait(0.8)
+	_ck("client sees the spoils", client.state == "HEXREWARD" and client.hex_loot.size() == 3,
+		"%s %d" % [client.state, client.hex_loot.size()])
+	var cdeck0: int = (host.roster[1]["deck"] as Array).size()
+	var hdeck0: int = (host.roster[0]["deck"] as Array).size()
+	client._intent("loot", "0")
+	await _wait(1.5)
+	_ck("the claimer's own deck grew", (host.roster[1]["deck"] as Array).size() == cdeck0 + 1,
+		"%d -> %d" % [cdeck0, (host.roster[1]["deck"] as Array).size()])
+	_ck("nobody else got a card", (host.roster[0]["deck"] as Array).size() == hdeck0)
+	_ck("the tile resolved back to the map", host.state == "HEX", host.state)
+	_ck("client followed back to the map", client.state == "HEX", client.state)
 
 	print("\n--- 6. a shared fight: both peers enter the SAME combat -----------")
 	# Force the neighbouring tile to be a fight so the test is deterministic.
@@ -229,6 +276,12 @@ func _run() -> void:
 	_ck("a ring still closes with a player gone", host.ring.is_empty(), str(host.ring))
 	_ck("the absent seat did not freeze the company", host.month > 0 or host.state != before,
 		"month=%d state=%s" % [host.month, host.state])
+
+func _slot_of(stock: Array, k: String) -> int:
+	for i in range(stock.size()):
+		if str((stock[i] as Dictionary).get("kind", "")) == k:
+			return i
+	return -1
 
 func _has_kind(stock: Array, k: String) -> bool:
 	for s: Dictionary in stock:
