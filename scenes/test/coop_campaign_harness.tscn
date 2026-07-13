@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://b7qk2xvn8dcam"]
+
+[ext_resource type="Script" path="res://scripts/test/coop_campaign_harness.gd" id="1_camp0"]
+
+[node name="CoopCampaignHarness" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_camp0")

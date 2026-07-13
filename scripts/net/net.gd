@@ -35,6 +35,7 @@ var is_authority := false
 var my_peer_id := ""
 var my_seat := -1
 var combat_request: Dictionary = {}   # the request dict combat._start_combat() consumes
+var campaign_request: Dictionary = {} # the request dict overworld._ready() consumes (co-op campaign)
 
 ## Stable per-client id for seat ownership (assigned once, kept across reconnect).
 func ensure_peer_id() -> String:

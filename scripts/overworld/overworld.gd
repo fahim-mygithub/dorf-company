@@ -149,7 +149,58 @@ var hex_event: Dictionary = {}      # the active event tile
 var shop_stock: Array = []          # [{kind,...}] 3 slots, re-rolled each month
 var shop_sel := -1                  # selected shop slot awaiting a dwarf target
 
+# ============================================================ Co-op (CampaignNet)
+## The campaign replicates itself the way combat does, one layer up. The HOST is the only mutator
+## and the only die-roller; it broadcasts an ABSOLUTE snapshot after every change. A client renders
+## that snapshot and sends INTENTS — it never rolls, never runs a guarded coroutine, never writes.
+##
+## Two classes of intent:
+##   RING — shared risk (embark / move / extract / event / end-month / a buy that dips under rent).
+##          A proposal opens a ring and fires only when every PRESENT seat has said aye. Proposing
+##          IS your aye. This is combat's "everyone ends their own turn" grammar, one layer up.
+##   FREE — instant and yours alone (navigate, select, claim a loot card, an affordable buy).
+##
+## Wire events, chosen NOT to collide with combat's (submit_action / combat_ready / resync / ready /
+## apply_snapshot / match_over) — the nested fight shares this one Net autoload with us:
+##   camp_snapshot  host -> all   the whole company, absolute
+##   camp_intent    client -> host   {seat, kind, arg, iseq}
+##   camp_hello     client -> host   heartbeat; doubles as presence + "send me the board"
+enum Mode { SOLO, AUTHORITY, CLIENT }
+const PARTY_STEP := 0.34      # enemy_scale shifts this per crew member away from the 3 the sim tuned for
+const HEIR_HP_FRAC := 0.5     # an heir walks in at half health: a real cost, not a free respawn
+const STABLE_HP_FRAC := 0.25  # a dwarf who survives their death saves comes home on their last legs
+const HELLO_SEC := 3.0        # client heartbeat
+const ABSENT_SEC := 12.0      # silent this long and the seat stops blocking the ring (AFK escape hatch)
+const INTENT_RETRY_SEC := 1.2 # broadcast is fire-and-forget: keep knocking until the host acks
+const RING_KINDS := ["embark", "hex", "extract", "event", "endmonth"]
+
+var mode: int = Mode.SOLO
+var request: Dictionary = {}     # lobby/harness handoff; set BEFORE add_child (parsed in _ready)
+var my_seat := 0
+var seat_count := 1
+var seats: Array = []            # [{name, cls, present}] — seat i pilots roster[i], for the whole campaign
+var ring: Dictionary = {}        # the open proposal: {pid, kind, arg, by, required:[seat], ayes:[seat]}
+var carried: Array = []          # co-op: the fallen, riding the wagon, still rolling death saves
+var fight_req: Dictionary = {}   # non-empty = a fight is live; the host-rolled request EVERY peer runs
+var outcome: Dictionary = {}     # view-model for the OUTCOME screen (clients can't replay the beats)
+var over_kind := ""              # GAMEOVER reason, replicated
+var msg_text := ""               # the ticker, replicated
+var _pid := 0
+var _seq := 0
+var _last_seq := -1
+var _iseq := 0                   # client: my own intent counter
+var _seat_iseq: Array = []       # host: highest iseq applied per seat. Also the client's ACK channel.
+var _pending_intent: Dictionary = {}
+var _intent_accum := 0.0
+var _hello_accum := 0.0
+var _sweep_accum := 0.0
+var _last_seen: Array = []       # host-only: msec of each seat's last hello
+var _fight_node: Node = null
+var _fid := 0
+var _cur_fid := 0
+
 # ============================================================ UI refs
+var crew_bar: Control            # co-op: the seat pips + the open proposal (chrome; survives _clear_screen)
 var screen_root: Control
 var hud: Control
 var overlay: ColorRect
@@ -170,8 +221,38 @@ var hex_flag: Label                 # the current-tile 🚩 glyph; hidden while 
 # ============================================================ Lifecycle
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Co-op handoff from the lobby (consume-and-clear: a later SOLO run must not inherit it).
+	if request.is_empty() and not Net.campaign_request.is_empty():
+		request = Net.campaign_request
+		Net.campaign_request = {}
+	# Parse the net block ONCE. No request (the standalone overworld build) = SOLO, which never
+	# touches Net — the single-player campaign stays byte-identical.
+	var net: Dictionary = request.get("net", {})
+	var m: String = str(net.get("mode", ""))
+	mode = Mode.AUTHORITY if m == "authority" else (Mode.CLIENT if m == "client" else Mode.SOLO)
+	my_seat = int(net.get("seat", 0))
+	seat_count = int(net.get("seat_count", 1))
+	seats = (request.get("seats", []) as Array).duplicate(true)
 	_build_chrome()
-	_new_run()
+	if mode == Mode.SOLO:
+		_new_run()
+		return
+	Net.ensure_peer_id()
+	Net.message_received.connect(_on_net)
+	Net.realtime_joined.connect(_on_net_rejoined)
+	_seat_iseq = []
+	for i in range(seat_count):
+		_seat_iseq.append(0)
+	if mode == Mode.AUTHORITY:
+		_last_seen = []
+		for i in range(seat_count):
+			_last_seen.append(Time.get_ticks_msec())
+		_new_run()
+	else:
+		state = "BOOT"
+		_msg("Joining the company…")
+		_render()
+		_send_hello()   # the host answers with the whole board
 
 # ============================================================ UI helpers
 func _mklabel(text: String, pos: Vector2, sz: Vector2, font: int, parent: Node, center: bool = true, col: Color = Color.WHITE) -> Label:
@@ -209,6 +290,7 @@ func _rect(pos: Vector2, sz: Vector2, col: Color, parent: Node) -> ColorRect:
 	return r
 
 func _msg(s: String) -> void:
+	msg_text = s
 	if is_instance_valid(msg_label):
 		msg_label.text = s
 
@@ -253,9 +335,24 @@ func _build_chrome() -> void:
 	overlay_btn.add_theme_font_size_override("font_size", 22)
 	overlay_btn.position = Vector2(250, 760)
 	overlay_btn.size = Vector2(220, 64)
-	overlay_btn.pressed.connect(_new_run)
+	overlay_btn.pressed.connect(_on_overlay_btn)
 	overlay.add_child(overlay_btn)
 	overlay.visible = false
+
+	# Co-op crew bar: who is at the table, who has said aye, and what is on the floor. It is CHROME
+	# (a sibling of screen_root), so it survives every _clear_screen and shows on every screen.
+	crew_bar = Control.new()
+	crew_bar.position = Vector2(0, 1006)
+	crew_bar.size = Vector2(720, 74)
+	crew_bar.mouse_filter = Control.MOUSE_FILTER_PASS
+	crew_bar.visible = mode != Mode.SOLO
+	add_child(crew_bar)
+
+func _on_overlay_btn() -> void:
+	if mode == Mode.CLIENT:
+		_intent("restart", "")
+		return
+	_new_run()
 
 func _build_hud() -> void:
 	_rect(Vector2.ZERO, Vector2(720, 158), COL_HUD, hud)
@@ -307,6 +404,10 @@ func _refresh_hud() -> void:
 	for j in range(fee_pips.size()):
 		var p: ColorRect = fee_pips[j]
 		p.color = C_GREEN if j < campaigns_left else Color(0.25, 0.25, 0.3)
+	_refresh_ring()
+	# Every screen rebuild ends here, which makes this the one honest "the board changed" hook.
+	# _push() is a no-op unless we are the host.
+	_push()
 
 # ============================================================ Run setup
 func _new_run() -> void:
@@ -319,9 +420,22 @@ func _new_run() -> void:
 	months_survived = 0
 	campaigns_left = CAMPAIGNS_PER_MONTH
 	selected_contract = -1
+	ring = {}
+	carried = []
+	fight_req = {}
+	outcome = {}
+	over_kind = ""
 	roster = []
-	for s in STARTERS:
-		roster.append(_make_dwarf(s["name"], s["cls"]))
+	if mode == Mode.SOLO:
+		for s in STARTERS:
+			roster.append(_make_dwarf(s["name"], s["cls"]))
+	else:
+		# Co-op: the roster IS the table. One dwarf per seat, and it is yours for the whole campaign.
+		for i in range(seats.size()):
+			var sd: Dictionary = seats[i]
+			var d := _make_dwarf(str(sd.get("name", "Dorf")), str(sd.get("cls", "warrior")))
+			d["seat"] = i
+			roster.append(d)
 	_reroll_shop()
 	_regen_contracts()
 	overlay.visible = false
@@ -340,7 +454,9 @@ func _regen_contracts() -> void:
 	# Phase 1: the High job is a REAL fight, but only when a canonical W/C/S trio is fieldable
 	# (keeps combat's role-indexed logic valid until Phase 3 de-indexes it).
 	# Phase 3: combat is role-based (de-indexed), so ANY 3 ready dwarves can crew a fight.
-	if USE_REAL_COMBAT and _ready_count() >= 3:
+	# Co-op fields the whole table (2-4), so the "enough dwarves for a real fight" bar is the seat count.
+	var need: int = 3 if mode == Mode.SOLO else roster.size()
+	if USE_REAL_COMBAT and _ready_count() >= need:
 		contracts[1]["fight"] = true   # Med — the standard fight
 		contracts[2]["fight"] = true   # High — heavier comp + scaled (see Db.ENCOUNTERS_BY_TIER)
 		for i in [1, 2]:               # Phase 5: sometimes a modifier reshapes the fight contract
@@ -350,6 +466,11 @@ func _regen_contracts() -> void:
 func _make_contract(tier: String) -> Dictionary:
 	var titles: Array = TITLES[tier]
 	var loc: Dictionary = LOCATIONS[randi() % LOCATIONS.size()]
+	# Co-op: a fight contract fields EVERY seat (nobody sits a job out). Low stays the 1-dwarf
+	# dice lifeline it is in solo, so its risk/reward curve is unchanged.
+	var cs: int = int(CREW_SIZE[tier])
+	if mode != Mode.SOLO and tier != "low":
+		cs = roster.size()
 	return {
 		"tier": tier,
 		"title": titles[randi() % titles.size()],
@@ -358,7 +479,7 @@ func _make_contract(tier: String) -> Dictionary:
 		"payout": int(PAYOUT[tier]),
 		"duration": int(DURATION[tier]),
 		"danger": int(DANGER[tier]),
-		"crew_size": int(CREW_SIZE[tier]),
+		"crew_size": cs,
 		"crew": [],
 	}
 
@@ -395,11 +516,25 @@ func _enter_dashboard() -> void:
 func _on_view_contracts() -> void:
 	if busy:
 		return
+	if mode != Mode.SOLO:
+		_intent("nav", "contracts")
+		return
+	_do_view_contracts()
+
+func _do_view_contracts() -> void:
 	selected_contract = -1
 	state = "CONTRACTS"
 	_clear_screen()
 	_build_contracts()
 	_refresh_hud()
+
+func _on_back_dashboard() -> void:
+	if busy:
+		return
+	if mode != Mode.SOLO:
+		_intent("nav", "dashboard")
+		return
+	_enter_dashboard()
 
 # ============================================================ Screen: Dashboard
 func _build_dashboard() -> void:
@@ -473,7 +608,7 @@ func _build_contracts() -> void:
 	back.add_theme_font_size_override("font_size", 18)
 	back.position = Vector2(30, 1150)
 	back.size = Vector2(150, 64)
-	back.pressed.connect(_enter_dashboard)
+	back.pressed.connect(_on_back_dashboard)
 	screen_root.add_child(back)
 
 func _build_contract_card(i: int, x: int) -> void:
@@ -525,6 +660,13 @@ func _on_contract_input(event: InputEvent, i: int) -> void:
 		if _ready_count() < int(c["crew_size"]):
 			_msg("Not enough ready dwarves — need %d." % int(c["crew_size"]))
 			return
+		if mode != Mode.SOLO:
+			# First tap highlights it for the table (free); the second PROPOSES it (a ring).
+			if selected_contract != i:
+				_intent("select", str(i))
+			else:
+				_intent("embark", str(i))
+			return
 		if selected_contract != i:
 			selected_contract = i
 			_msg("%s — %dg, %s danger, %d month(s). Tap again to embark." % [c["title"], int(c["payout"]), String(TIER_LABEL[c["tier"]]).to_lower(), int(c["duration"])])
@@ -543,6 +685,10 @@ func _embark() -> void:
 		return
 	current = c
 	if USE_REAL_COMBAT and c.get("fight", false):
+		if mode != Mode.SOLO:
+			current["crew"] = roster.duplicate()   # co-op: the crew IS the table — no crew-select screen
+			_open_expedition(c)
+			return
 		if CREW_SELECT:
 			_open_crew_select(c)          # player picks the crew, then launches
 		elif EXPEDITIONS:
@@ -562,15 +708,22 @@ func _embark() -> void:
 	if e != run_epoch:
 		return
 	state = "OUTCOME"
+	_set_outcome("dice", current, result)
 	_clear_screen()
 	_build_outcome(current, result)
 	_refresh_hud()
 	await _outcome_beats(current, result, e)
 
 func _auto_assign_crew(c: Dictionary) -> Array:
-	var crew: Array = []
+	var pool: Array = []
 	for d in roster:
-		if d["status"] == "ready" and crew.size() < int(c["crew_size"]):
+		if d["status"] == "ready":
+			pool.append(d)
+	if mode != Mode.SOLO:
+		pool.shuffle()   # co-op: the short straw on a Low job is DRAWN, not always the host's dwarf
+	var crew: Array = []
+	for d in pool:
+		if crew.size() < int(c["crew_size"]):
 			crew.append(d)
 	return crew
 
@@ -814,27 +967,18 @@ func _embark_fight(c: Dictionary) -> void:
 	var e := run_epoch
 	selected_contract = -1
 	_msg("%s — into the fight!" % c["title"])
-	var fight = COMBAT_SCENE.instantiate()
 	var req: Dictionary = {"crew": _build_crew_specs(current["crew"])}
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition
 	var mscale: float = float(c["mod"]["scale"]) if c.has("mod") else 1.0   # Phase 5: modifier scales the fight
 	if not comp.is_empty():
 		req["enemies"] = _roll_encounter(c["tier"], comp)
-		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0)   # additive (see _hex_combat)
-	fight.request = req   # set BEFORE add_child (_ready runs on entry)
-	screen_root.visible = false
-	hud.visible = false
-	add_child(fight)
-	var result: Dictionary = await fight.combat_finished
-	if e != run_epoch:
-		if is_instance_valid(fight):
-			fight.queue_free()
+		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + _party_scale()   # additive (see _hex_combat)
+	var result: Dictionary = await _run_fight(req, e)
+	if result.is_empty():
 		return
-	fight.queue_free()
-	screen_root.visible = true
-	hud.visible = true
 	var shaped: Dictionary = _resolve_from_combat(result, current["tier"])
 	state = "OUTCOME"
+	_set_outcome("fight", current, shaped)
 	_clear_screen()
 	_build_outcome(current, shaped)
 	_refresh_hud()
@@ -954,6 +1098,13 @@ func _outcome_beats(_c: Dictionary, result: Dictionary, e: int) -> void:
 	# A campaign does NOT advance the clock now — wounds land immediately; rent waits for month-end.
 	for entry in result["pending"]:
 		var d: Dictionary = entry[0]
+		if mode != Mode.SOLO:
+			# Co-op: a benched dwarf is a benched PLAYER. Nobody sits out months of a campaign —
+			# they come back hurt instead. Death is already settled by the wagon rule (see
+			# _reseat_fallen / _finish_expedition), so "lost" needs nothing here.
+			if entry[1] != "lost":
+				d["hp"] = maxi(1, int(round(float(d["max_hp"]) * STABLE_HP_FRAC)))
+			continue
 		if entry[1] == "lost":
 			d["status"] = "lost"
 			d["recover"] = 0
@@ -1011,6 +1162,12 @@ func _drain_fee(e: int) -> void:
 func _on_continue() -> void:
 	if busy:
 		return
+	if mode != Mode.SOLO:
+		_intent("continue", "")
+		return
+	await _do_continue()
+
+func _do_continue() -> void:
 	if not pending_spoils.is_empty():
 		_open_spoils()
 		return
@@ -1048,6 +1205,10 @@ func _end_month() -> void:
 
 func _on_rest() -> void:
 	# "End Month": advance to the next month now, forgoing any remaining campaigns (crew mends, rent due).
+	# Co-op: burning the rest of the month is the table's call, not one player's.
+	if mode != Mode.SOLO:
+		_intent("endmonth", "")
+		return
 	await _end_month()
 
 # ============================================================ Coin VFX
@@ -1073,7 +1234,12 @@ func _spawn_coins(from: Vector2, to: Vector2, n: int) -> void:
 func _game_over(kind: String) -> void:
 	busy = false
 	state = "GAMEOVER"
+	over_kind = kind
 	_clear_screen()
+	_game_over_ui(kind)
+	_refresh_hud()
+
+func _game_over_ui(kind: String) -> void:
 	var msg := ""
 	match kind:
 		"victory":
@@ -1085,7 +1251,6 @@ func _game_over(kind: String) -> void:
 	overlay_label.text = msg
 	overlay_btn.text = "New Company"
 	overlay.visible = true
-	_refresh_hud()
 
 # ============================================================ Hex-crawl expedition (2026-07-01 spec)
 ## An expedition = a small run-within-a-contract: a fogged hex map, per-hex combat via the SAME seam,
@@ -1096,6 +1261,7 @@ func _game_over(kind: String) -> void:
 func _open_expedition(c: Dictionary) -> void:
 	exp_contract = c
 	exp_crew = c["crew"].duplicate()   # shallow: elements are the roster dicts (carried HP/status persists)
+	carried = []
 	exp_loot_gold = 0
 	for d in exp_crew:                 # reset per-expedition death-save state; carried HP stays as-is
 		d["downed"] = false
@@ -1371,6 +1537,9 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if hexes[key]["kind"] != "wall" and _hex_neighbors(hex_cur).has(key):
+			if mode != Mode.SOLO:
+				_intent("hex", key)   # pushing deeper risks everyone — the whole crew has to agree
+				return
 			await _enter_hex(key)
 
 func _enter_hex(key: String) -> void:
@@ -1424,6 +1593,7 @@ func _resume_hex(e: int) -> void:
 	if _living_up().is_empty():
 		await _finish_expedition("wipe", e)
 		return
+	_reseat_fallen()   # co-op: nobody spectates the next tile
 	busy = false
 	state = "HEX"
 	_clear_screen()
@@ -1431,7 +1601,10 @@ func _resume_hex(e: int) -> void:
 	_refresh_hud()
 
 func _roll_death_saves() -> void:
-	for d in exp_crew:
+	# Co-op: the downed are on the WAGON (their seat is already back in the fight with an heir),
+	# so it is the wagon that rolls, not the walking crew.
+	var pool: Array = carried if mode != Mode.SOLO else exp_crew
+	for d in pool:
 		if d["status"] == "lost" or bool(d["stable"]) or not bool(d["downed"]):
 			continue
 		if randf() < DS_SUCCESS_CHANCE:
@@ -1448,7 +1621,6 @@ func _roll_death_saves() -> void:
 
 ## Enemy scale = tier base x contract modifier x the tile's telegraphed DANGER (not distance).
 func _hex_combat(danger: int, e: int) -> void:
-	var fight = COMBAT_SCENE.instantiate()
 	var req: Dictionary = {"crew": _build_crew_specs(exp_crew)}   # downed dwarves ride in at 0 HP (benched slot)
 	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})
 	var mscale: float = float(exp_contract["mod"]["scale"]) if exp_contract.has("mod") else 1.0
@@ -1456,19 +1628,11 @@ func _hex_combat(danger: int, e: int) -> void:
 		req["enemies"] = _roll_encounter(exp_contract["tier"], comp)
 		# Scaling audit (2026-07-01): threat factors compose ADDITIVELY — multiplying tier x mod x
 		# danger grew ~quadratically (worst 2.688 was 0% winnable in sim). Single-factor cells unchanged.
-		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + (_danger_scale(danger) - 1.0)
-	fight.request = req                  # BEFORE add_child
-	screen_root.visible = false
-	hud.visible = false
-	add_child(fight)
-	var result: Dictionary = await fight.combat_finished
-	if e != run_epoch:
-		if is_instance_valid(fight):
-			fight.queue_free()
+		# _party_scale() is the co-op term: the encounters were tuned for a crew of 3.
+		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + (_danger_scale(danger) - 1.0) + _party_scale()
+	var result: Dictionary = await _run_fight(req, e)
+	if result.is_empty():
 		return
-	fight.queue_free()
-	screen_root.visible = true
-	hud.visible = true
 	var crew_results: Array = result["crew_results"]
 	for i in range(crew_results.size()):
 		var cr: Dictionary = crew_results[i]
@@ -1519,8 +1683,22 @@ func _roll_hex_loot() -> Array:
 
 func _build_hex_reward() -> void:
 	_mklabel("— SPOILS —", Vector2(0, 200), Vector2(720, 28), 22, screen_root)
-	_mklabel("Take a card for the company — then the dwarf who learns it.", Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	var xs := [40, 268, 496]
+	if mode != Mode.SOLO:
+		# Co-op: one card leaves this tile. Tap it and it is YOURS — first claim wins, so talk fast.
+		_mklabel("One card leaves this room. Claim it and it joins YOUR deck — first tap wins.",
+			Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+		for i in range(hex_loot.size()):
+			_build_hex_loot_card(i, xs[i])
+		var skip2 := Button.new()
+		skip2.text = "Leave it"
+		skip2.add_theme_font_size_override("font_size", 18)
+		skip2.position = Vector2(285, 1150)
+		skip2.size = Vector2(150, 62)
+		skip2.pressed.connect(_on_hexloot_skip)
+		screen_root.add_child(skip2)
+		return
+	_mklabel("Take a card for the company — then the dwarf who learns it.", Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	for i in range(hex_loot.size()):
 		_build_hex_loot_card(i, xs[i])
 	_mklabel("give to:", Vector2(0, 720), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
@@ -1579,6 +1757,9 @@ func _on_hexloot_card_input(event: InputEvent, i: int) -> void:
 	if state != "HEXREWARD":
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if mode != Mode.SOLO:
+			_intent("loot", str(i))   # claims it for MY dwarf
+			return
 		hex_loot_pick = i
 		_msg("%s — now tap the dwarf who learns it." % Db.CARDS[hex_loot[i]]["name"])
 		_clear_screen()
@@ -1601,6 +1782,12 @@ func _on_hexloot_target_input(event: InputEvent, d: Dictionary) -> void:
 func _on_hexloot_skip() -> void:
 	if state != "HEXREWARD":   # guard parity with the other loot handlers (no double-fire after rebuild)
 		return
+	if mode != Mode.SOLO:
+		_intent("loot_skip", "")
+		return
+	await _do_hexloot_skip()
+
+func _do_hexloot_skip() -> void:
 	hex_loot = []
 	hex_loot_pick = -1
 	_msg("Left the spoils behind.")
@@ -1634,6 +1821,12 @@ func _build_hex_event() -> void:
 func _on_event_choice(risky: bool) -> void:
 	if state != "HEXEVENT":
 		return
+	if mode != Mode.SOLO:
+		_intent("event", "risky" if risky else "safe")
+		return
+	await _do_event_choice(risky)
+
+func _do_event_choice(risky: bool) -> void:
 	var e := run_epoch
 	state = "HEX"   # lock out double taps
 	if not risky:
@@ -1662,30 +1855,23 @@ func _on_event_choice(risky: bool) -> void:
 func _on_extract() -> void:
 	if busy or state != "HEX":
 		return
+	if mode != Mode.SOLO:
+		_intent("extract", "")   # walking out with the loot is the table's call
+		return
 	await _finish_expedition("extract", run_epoch)
 
 ## mode: "objective" (rescue: loot + big pay) | "extract" (keep loot only) | "wipe" (lose everything).
-func _finish_expedition(mode: String, e: int) -> void:
+func _finish_expedition(kind: String, e: int) -> void:
 	busy = true
-	if mode == "wipe":                      # the downed who never stabilised finish their saves on the way out
+	if kind == "wipe":                      # the downed who never stabilised finish their saves on the way out
 		for d in exp_crew:
-			while d["status"] != "lost" and bool(d["downed"]) and not bool(d["stable"]) \
-					and int(d["ds_success"]) < DS_SUCCESS_NEEDED and int(d["ds_fail"]) < DS_FAIL_NEEDED:
-				if randf() < DS_SUCCESS_CHANCE:
-					d["ds_success"] = int(d["ds_success"]) + 1
-					if int(d["ds_success"]) >= DS_SUCCESS_NEEDED:
-						d["stable"] = true
-				else:
-					d["ds_fail"] = int(d["ds_fail"]) + 1
-					if int(d["ds_fail"]) >= DS_FAIL_NEEDED:
-						d["status"] = "lost"
-						d["downed"] = false
-	var success := mode == "objective"
+			_finish_saves(d)
+	var success := kind == "objective"
 	var mpay: float = float(exp_contract["mod"]["pay"]) if exp_contract.has("mod") else 1.0
 	var obj_pay: int = int(round(float(int(PAYOUT[exp_contract["tier"]])) * mpay)) if success else 0
 	var loot: int = exp_loot_gold
 	var payout: int = loot + obj_pay
-	if mode == "wipe":
+	if kind == "wipe":
 		payout = 0                          # a wipe loses the loot bag too
 		loot = 0
 	var pending: Array = []
@@ -1698,21 +1884,24 @@ func _finish_expedition(mode: String, e: int) -> void:
 		d["stable"] = false
 		d["ds_success"] = 0
 		d["ds_fail"] = 0
+	if mode != Mode.SOLO:
+		_wagon_home(kind)
 	var shaped: Dictionary = {"success": success, "payout": payout, "pending": pending,
 		"loot": loot, "obj": obj_pay, "roll": 0, "strength": 0}
 	current = exp_contract
 	state = "OUTCOME"
 	busy = false
+	_set_outcome(kind, exp_contract, shaped)
 	_clear_screen()
-	_build_expedition_outcome(exp_contract, shaped, mode)
+	_build_expedition_outcome(exp_contract, shaped, kind)
 	_refresh_hud()
 	await _outcome_beats(exp_contract, shaped, e)
 
-func _build_expedition_outcome(c: Dictionary, result: Dictionary, mode: String) -> void:
+func _build_expedition_outcome(c: Dictionary, result: Dictionary, kind: String) -> void:
 	_mklabel("— OUTCOME —", Vector2(0, 210), Vector2(720, 28), 22, screen_root)
 	var big := ""
 	var col := C_GREEN
-	match mode:
+	match kind:
 		"objective":
 			big = "✅  CAPTIVE RESCUED"
 			col = C_GREEN
@@ -1724,9 +1913,9 @@ func _build_expedition_outcome(c: Dictionary, result: Dictionary, mode: String) 
 			col = C_RED
 	_mklabel(big, Vector2(0, 300), Vector2(720, 44), 30, screen_root, true, col)
 	var sub := ""
-	if mode == "objective":
+	if kind == "objective":
 		sub = "🏁 rescue %dg  +  loot %dg" % [int(result["obj"]), int(result["loot"])]
-	elif mode == "extract":
+	elif kind == "extract":
 		sub = "loot bag %dg  ·  captive left behind" % int(result["loot"])
 	else:
 		sub = "everything lost in the dark"
@@ -1749,15 +1938,23 @@ func _reroll_shop() -> void:
 	pool.shuffle()
 	shop_stock.append({"kind": "card", "cid": pool[0], "cost": SHOP_CARD_COST})
 	shop_stock.append({"kind": "heal", "cost": SHOP_HEAL_COST})
-	var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
-	var rc: String = Db.PARTY_ORDER[randi() % Db.PARTY_ORDER.size()]
-	shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
+	if mode == Mode.SOLO:
+		var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
+		var rc: String = Db.PARTY_ORDER[randi() % Db.PARTY_ORDER.size()]
+		shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
+	else:
+		# Co-op has no Recruit: seats are fixed and the wagon rule already refills a dead dwarf.
+		shop_stock.append({"kind": "card", "cid": pool[1], "cost": SHOP_CARD_COST})
 
 func _build_shop_panel() -> void:
 	_mklabel("— SHOP —  buying trades against the rent clock", Vector2(0, 866), Vector2(720, 20), 14, screen_root, true, C_COIN)
 	var xs := [24, 264, 504]
 	for i in range(shop_stock.size()):
 		_build_shop_slot(i, xs[i])
+	if mode != Mode.SOLO:
+		_mklabel("you buy for YOUR OWN dwarf · a buy that dips under the rent needs the whole crew",
+			Vector2(0, 1010), Vector2(720, 16), 12, screen_root, true, Color(0.7, 0.7, 0.76))
+		return
 	if shop_sel >= 0 and shop_stock[shop_sel]["kind"] != "recruit":
 		_build_shop_targets()
 
@@ -1806,6 +2003,9 @@ func _on_shop_input(event: InputEvent, i: int) -> void:
 			return
 		if treasury < int(s["cost"]):
 			_msg("Not enough gold — the rent comes first.")
+			return
+		if mode != Mode.SOLO:
+			_intent("shop", str(i))   # buys for MY dwarf; below the rent line it becomes a ring
 			return
 		if s["kind"] == "recruit":
 			_buy_recruit(i)
@@ -1884,3 +2084,656 @@ func _on_shop_target_input(event: InputEvent, d: Dictionary) -> void:
 		_clear_screen()
 		_build_contracts()
 		_refresh_hud()
+
+
+# ============================================================================================
+# ============================  CO-OP CAMPAIGN (CampaignNet)  ================================
+# ============================================================================================
+# Everything below is INERT in SOLO: every entry point returns immediately when mode == Mode.SOLO,
+# and nothing above calls into here without that guard. The single-player campaign never touches Net.
+
+# ---------------------------------------------------------------- Snapshot (host -> everyone)
+## Absolute state, every time. There is no delta and no ordering requirement: a client that misses
+## three snapshots is repaired by the fourth. Campaign state is pure data (no live node refs live
+## inside these dicts), so unlike combat's board this needs no "poison key" stripping — only the
+## contract's "crew" is dropped, because it aliases roster dicts we already send.
+func _push() -> void:
+	if mode != Mode.AUTHORITY:
+		return
+	_seq += 1
+	Net.send_message("camp_snapshot", _build_snap())
+
+func _strip_crew(c: Dictionary) -> Dictionary:
+	var d: Dictionary = c.duplicate()
+	d.erase("crew")   # aliases roster dicts — they ride the snapshot once, under "roster"
+	return d
+
+func _build_snap() -> Dictionary:
+	var cs: Array = []
+	for c: Dictionary in contracts:
+		cs.append(_strip_crew(c))
+	return {
+		"seq": _seq,
+		"treasury": treasury, "fee": fee, "month": month, "months_survived": months_survived,
+		"campaigns_left": campaigns_left, "busy": busy, "state": state, "over": over_kind,
+		"roster": roster, "carried": carried, "contracts": cs, "selected_contract": selected_contract,
+		"shop_stock": shop_stock,
+		"hexes": hexes, "hex_cur": hex_cur, "exp_contract": _strip_crew(exp_contract),
+		"exp_loot_gold": exp_loot_gold, "hex_loot": hex_loot,
+		"ring": ring, "seats": seats, "seat_iseq": _seat_iseq,
+		"fight": fight_req, "outcome": outcome, "msg": msg_text,
+	}
+
+## The OUTCOME screen is drawn from locals on the host (and the dice cinematic is pure animation),
+## so a client has nothing to rebuild it from. Ship a small view-model instead of replaying beats.
+func _set_outcome(kind: String, c: Dictionary, result: Dictionary) -> void:
+	if mode == Mode.SOLO:
+		return
+	var r: Dictionary = result.duplicate()
+	r.erase("pending")   # holds dwarf refs; the roster already carries the truth
+	outcome = {"kind": kind, "contract": _strip_crew(c), "result": r}
+
+## JSON has ONE number type: every int comes back a float. Read sites here use int()/float(), but a
+## whole-number float assigned into a statically-typed int var is a hard error — so coerce on entry.
+func _norm(v: Variant) -> Variant:
+	match typeof(v):
+		TYPE_FLOAT:
+			var f: float = v
+			return int(f) if is_equal_approx(f, floor(f)) and absf(f) < 1.0e15 else f
+		TYPE_ARRAY:
+			var a: Array = []
+			for x: Variant in (v as Array):
+				a.append(_norm(x))
+			return a
+		TYPE_DICTIONARY:
+			var d: Dictionary = {}
+			var sd: Dictionary = v
+			for k: Variant in sd:
+				d[k] = _norm(sd[k])
+			return d
+	return v
+
+func _apply_snap(s: Dictionary) -> void:
+	if mode != Mode.CLIENT:
+		return
+	var seq: int = int(s.get("seq", 0))
+	if seq <= _last_seq:
+		return   # a stale or duplicated broadcast; absolute state means we can just drop it
+	_last_seq = seq
+	treasury = int(s.get("treasury", 0))
+	_tre_shown = treasury
+	fee = int(s.get("fee", 0))
+	month = int(s.get("month", 0))
+	months_survived = int(s.get("months_survived", 0))
+	campaigns_left = int(s.get("campaigns_left", 0))
+	busy = bool(s.get("busy", false))
+	state = str(s.get("state", ""))
+	over_kind = str(s.get("over", ""))
+	roster = _norm(s.get("roster", []))
+	carried = _norm(s.get("carried", []))
+	contracts = _norm(s.get("contracts", []))
+	selected_contract = int(s.get("selected_contract", -1))
+	shop_stock = _norm(s.get("shop_stock", []))
+	hexes = _norm(s.get("hexes", {}))
+	hex_cur = str(s.get("hex_cur", ""))
+	exp_contract = _norm(s.get("exp_contract", {}))
+	exp_loot_gold = int(s.get("exp_loot_gold", 0))
+	hex_loot = _norm(s.get("hex_loot", []))
+	ring = _norm(s.get("ring", {}))
+	seats = _norm(s.get("seats", []))
+	_seat_iseq = _norm(s.get("seat_iseq", []))
+	outcome = _norm(s.get("outcome", {}))
+	fight_req = _norm(s.get("fight", {}))
+	current = exp_contract
+	exp_crew = roster          # co-op: the crew IS the table, in seat order
+	_msg(str(s.get("msg", "")))
+	# The host echoes each seat's applied iseq: that IS the ack, and it is in every snapshot — so a
+	# client can see it even if the one snapshot that first carried it was the one that dropped.
+	if not _pending_intent.is_empty() and my_seat < _seat_iseq.size() \
+			and int(_seat_iseq[my_seat]) >= int(_pending_intent.get("iseq", 0)):
+		_pending_intent = {}
+	# The fight rides the snapshot. Joining and leaving it are both driven by the host.
+	if not fight_req.is_empty() and int(fight_req.get("fid", 0)) != _cur_fid and _fight_node == null:
+		_client_join_fight()
+		return
+	if fight_req.is_empty() and _fight_node != null:
+		_exit_fight()   # the host says the fight is over; our own match_over must have been lost
+	if _fight_node != null:
+		return          # a fight owns the screen — the board can wait
+	_render()
+
+# ---------------------------------------------------------------- Wire
+func _on_net(event: String, p: Dictionary) -> void:
+	match event:
+		"camp_snapshot":
+			if mode == Mode.CLIENT:
+				_apply_snap(p)
+		"camp_intent":
+			if mode == Mode.AUTHORITY:
+				_authority_intent(p)
+		"camp_hello":
+			if mode == Mode.AUTHORITY:
+				_mark_seen(int(p.get("seat", -1)))
+				_push()   # a hello is also "send me the board" — this is the whole resync path
+
+## The socket dropped and Net re-dialed. One absolute snapshot repairs whatever we missed.
+func _on_net_rejoined() -> void:
+	if mode == Mode.AUTHORITY:
+		_push()
+	elif mode == Mode.CLIENT:
+		_send_hello()
+
+func _send_hello() -> void:
+	if mode == Mode.CLIENT:
+		Net.send_message("camp_hello", {"seat": my_seat})
+
+func _process(delta: float) -> void:
+	if mode == Mode.SOLO:
+		return
+	if mode == Mode.AUTHORITY:
+		_sweep_accum += delta
+		if _sweep_accum >= 1.0:
+			_sweep_accum = 0.0
+			_sweep_absent()
+		return
+	_hello_accum += delta
+	if _hello_accum >= HELLO_SEC:
+		_hello_accum = 0.0
+		_send_hello()
+	# Broadcast is fire-and-forget: keep re-sending the SAME iseq until the host acks it. The host's
+	# per-seat high-water mark makes the retry idempotent, so this can never double-apply.
+	if not _pending_intent.is_empty():
+		_intent_accum += delta
+		if _intent_accum >= INTENT_RETRY_SEC:
+			_intent_accum = 0.0
+			Net.send_message("camp_intent", _pending_intent)
+
+# ---------------------------------------------------------------- Intents
+func _intent(kind: String, arg: String) -> void:
+	if mode == Mode.SOLO:
+		return
+	_iseq += 1
+	var p: Dictionary = {"seat": my_seat, "kind": kind, "arg": arg, "iseq": _iseq}
+	if mode == Mode.AUTHORITY:
+		_authority_intent(p)   # the host taps through the same validator as everyone else
+		return
+	_pending_intent = p
+	_intent_accum = 0.0
+	Net.send_message("camp_intent", p)
+
+func _authority_intent(p: Dictionary) -> void:
+	if mode != Mode.AUTHORITY:
+		return
+	var seat: int = int(p.get("seat", -1))
+	if seat < 0 or seat >= seat_count or seat >= _seat_iseq.size():
+		return
+	var iseq: int = int(p.get("iseq", 0))
+	if iseq <= int(_seat_iseq[seat]):
+		return   # a retry of something already applied — ack again by snapshot, but never re-apply
+	_seat_iseq[seat] = iseq
+	_mark_seen(seat)
+	var kind: String = str(p.get("kind", ""))
+	var arg: String = str(p.get("arg", ""))
+	if _is_ring(kind, arg):
+		_ring_intent(seat, kind, arg)
+		return
+	_apply_free(seat, kind, arg)
+	_push()
+
+## Is this decision the whole table's to make? Consequence decides, not the name: a shop buy is
+## yours alone until it eats the rent money, and then it is everybody's problem.
+func _is_ring(kind: String, arg: String) -> bool:
+	if RING_KINDS.has(kind):
+		return true
+	if kind == "shop":
+		var i: int = int(arg)
+		if i < 0 or i >= shop_stock.size():
+			return false
+		return treasury - int(shop_stock[i]["cost"]) < fee
+	return false
+
+func _apply_free(seat: int, kind: String, arg: String) -> void:
+	match kind:
+		"nav":
+			if busy:
+				return
+			if arg == "contracts":
+				_do_view_contracts()
+			else:
+				_enter_dashboard()
+		"select":
+			if busy or state != "CONTRACTS":
+				return
+			var i: int = int(arg)
+			if i < 0 or i >= contracts.size():
+				return
+			selected_contract = i
+			var c: Dictionary = contracts[i]
+			_msg("%s eyes %s — tap it again to put it to the crew." % [_seat_name(seat), c["title"]])
+			_clear_screen()
+			_build_contracts()
+		"continue":
+			if busy:
+				return
+			_do_continue()
+		"loot":
+			_claim_loot(seat, int(arg))
+		"loot_skip":
+			if state == "HEXREWARD":
+				_do_hexloot_skip()
+		"shop":
+			_buy_shop(seat, int(arg))
+		"restart":
+			if state == "GAMEOVER":
+				_new_run()
+
+# ---------------------------------------------------------------- The ring
+## A proposal lights a pip beside every seat and fires only when they are all lit. Proposing IS your
+## aye — the same grammar as "everyone ends their own turn" in combat, applied to the map.
+func _ring_intent(seat: int, kind: String, arg: String) -> void:
+	if busy:
+		return
+	if not ring.is_empty() and str(ring["kind"]) == kind and str(ring["arg"]) == arg:
+		var ayes: Array = ring["ayes"]
+		if not ayes.has(seat):
+			ayes.append(seat)
+	else:
+		# A different proposal REPLACES the open one and resets the ayes — you can always change
+		# the plan, you just cannot bank the agreement someone gave to a different plan.
+		_pid += 1
+		ring = {"pid": _pid, "kind": kind, "arg": arg, "by": seat,
+			"required": _present_seats(), "ayes": [seat]}
+		_msg("%s proposes: %s" % [_seat_name(seat), _ring_label(kind, arg)])
+	_try_close_ring()
+
+func _ring_closed() -> bool:
+	if ring.is_empty():
+		return false
+	var ayes: Array = ring["ayes"]
+	for s: Variant in (ring["required"] as Array):
+		if not ayes.has(int(s)):
+			return false
+	return true
+
+func _try_close_ring() -> void:
+	if not _ring_closed():
+		_push()
+		return
+	var k: String = str(ring["kind"])
+	var a: String = str(ring["arg"])
+	var by: int = int(ring["by"])
+	ring = {}
+	_push()
+	await _resolve_ring(k, a, by)
+
+func _resolve_ring(kind: String, arg: String, by: int) -> void:
+	match kind:
+		"embark":
+			if state != "CONTRACTS" or busy:
+				return
+			var i: int = int(arg)
+			if i < 0 or i >= contracts.size():
+				return
+			selected_contract = i
+			await _embark()
+		"hex":
+			if state != "HEX" or busy or not hexes.has(arg):
+				return
+			await _enter_hex(arg)
+		"extract":
+			if state != "HEX" or busy:
+				return
+			await _finish_expedition("extract", run_epoch)
+		"event":
+			if state != "HEXEVENT":
+				return
+			await _do_event_choice(arg == "risky")
+		"endmonth":
+			if busy:
+				return
+			await _end_month()
+		"shop":
+			_buy_shop(by, int(arg))
+			_push()
+
+func _ring_label(kind: String, arg: String) -> String:
+	match kind:
+		"embark":
+			var i: int = int(arg)
+			return "take %s" % str(contracts[i]["title"]) if i >= 0 and i < contracts.size() else "take the job"
+		"hex":
+			var h: Dictionary = hexes.get(arg, {})
+			var k: String = str(h.get("kind", "?"))
+			var icon: String = {"combat": "⚔", "reward": "💰", "event": "❓", "objective": "🏁"}.get(k, "·")
+			return "push into %s  (☠ %d)" % [icon, int(h.get("danger", 1))]
+		"extract":
+			return "extract with %dg" % exp_loot_gold
+		"event":
+			return "force the door" if arg == "risky" else "play it safe"
+		"endmonth":
+			return "end the month (rent %dg)" % fee
+		"shop":
+			var i2: int = int(arg)
+			if i2 >= 0 and i2 < shop_stock.size():
+				return "spend %dg under the rent line" % int(shop_stock[i2]["cost"])
+			return "spend under the rent line"
+	return kind
+
+func _on_agree() -> void:
+	if ring.is_empty():
+		return
+	_intent(str(ring["kind"]), str(ring["arg"]))
+
+# ---------------------------------------------------------------- Presence (the AFK escape hatch)
+func _present_seats() -> Array:
+	var out: Array = []
+	for i in range(seats.size()):
+		if bool(seats[i].get("present", true)):
+			out.append(i)
+	return out
+
+func _seat_name(seat: int) -> String:
+	if seat >= 0 and seat < roster.size():
+		return str(roster[seat]["name"])
+	if seat >= 0 and seat < seats.size():
+		return str(seats[seat].get("name", "seat %d" % seat))
+	return "seat %d" % seat
+
+func _mark_seen(seat: int) -> void:
+	if mode != Mode.AUTHORITY or seat < 0 or seat >= _last_seen.size():
+		return
+	_last_seen[seat] = Time.get_ticks_msec()
+	if seat < seats.size() and not bool(seats[seat].get("present", true)):
+		seats[seat]["present"] = true
+		_msg("%s is back at the table." % _seat_name(seat))
+
+## A friend who wanders off must not freeze the company. Go quiet and your seat stops blocking the
+## ring; say anything and you are back in it. A seat is only ever REMOVED from an open ring, never
+## added to one — so someone returning can never re-block a vote that was about to pass.
+func _sweep_absent() -> void:
+	if mode != Mode.AUTHORITY:
+		return
+	var now: int = Time.get_ticks_msec()
+	var changed := false
+	for i in range(seats.size()):
+		if i == my_seat or i >= _last_seen.size():
+			continue
+		var gone: bool = (now - int(_last_seen[i])) > int(ABSENT_SEC * 1000.0)
+		if gone == (not bool(seats[i].get("present", true))):
+			continue
+		seats[i]["present"] = not gone
+		changed = true
+		if gone:
+			_msg("%s has gone quiet — the crew won't wait." % _seat_name(i))
+			if not ring.is_empty():
+				(ring["required"] as Array).erase(i)
+	if not changed:
+		return
+	_try_close_ring() if not ring.is_empty() else _push()
+
+# ---------------------------------------------------------------- The crew bar
+func _refresh_ring() -> void:
+	if mode == Mode.SOLO or not is_instance_valid(crew_bar):
+		return
+	crew_bar.visible = _fight_node == null
+	for c in crew_bar.get_children():
+		c.queue_free()
+	_rect(Vector2.ZERO, Vector2(720, 74), Color(0.10, 0.10, 0.14, 0.94), crew_bar)
+	_rect(Vector2.ZERO, Vector2(720, 2), Color(1, 1, 1, 0.07), crew_bar)
+	var open: bool = not ring.is_empty()
+	var head := "the crew — the company only commits when everyone agrees"
+	if open:
+		head = "%s proposes: %s   (%d/%d)" % [_seat_name(int(ring["by"])), _ring_label(str(ring["kind"]), str(ring["arg"])),
+			(ring["ayes"] as Array).size(), (ring["required"] as Array).size()]
+	_mklabel(head, Vector2(12, 5), Vector2(560, 18), 13, crew_bar, false, C_AMBER if open else Color(0.6, 0.6, 0.66))
+	for i in range(seats.size()):
+		var d: Dictionary = roster[i] if i < roster.size() else {}
+		var cls: String = str(d.get("cls", seats[i].get("cls", "warrior")))
+		var emo: String = str(Db.CLASSES.get(cls, {}).get("emoji", "?"))
+		var present: bool = bool(seats[i].get("present", true))
+		var ayed: bool = open and (ring["ayes"] as Array).has(i)
+		var mark := "•"
+		if not present:
+			mark = "💤"
+		elif open:
+			mark = "✅" if ayed else "⏳"
+		var col := Color(0.88, 0.88, 0.92)
+		if not present:
+			col = Color(0.45, 0.45, 0.5)
+		elif ayed:
+			col = C_GREEN
+		var tag: String = "  (you)" if i == my_seat else ""
+		_mklabel("%s %s %s%s" % [emo, str(d.get("name", _seat_name(i))), mark, tag],
+			Vector2(12 + i * 138, 28), Vector2(136, 22), 13, crew_bar, false, col)
+	if not open:
+		return
+	if (ring["ayes"] as Array).has(my_seat):
+		_mklabel("waiting…", Vector2(578, 30), Vector2(130, 20), 14, crew_bar, true, Color(0.85, 0.8, 0.5))
+		return
+	var b := Button.new()
+	b.text = "✅ Agree"
+	b.add_theme_font_size_override("font_size", 16)
+	b.position = Vector2(582, 8)
+	b.size = Vector2(126, 58)
+	b.pressed.connect(_on_agree)
+	crew_bar.add_child(b)
+
+# ---------------------------------------------------------------- Client rendering
+## A client never runs the campaign — it draws whatever the last snapshot said, using the SAME
+## _build_X() functions the host uses. That is the whole reason those functions read from state.
+func _render() -> void:
+	if mode != Mode.CLIENT:
+		return
+	_clear_screen()
+	overlay.visible = false
+	match state:
+		"DASHBOARD":
+			_build_dashboard()
+		"CONTRACTS":
+			_build_contracts()
+		"HEX":
+			_build_hexcrawl()
+		"HEXREWARD":
+			_build_hex_reward()
+		"HEXEVENT":
+			_build_hex_event()
+		"RESOLVE":
+			_mkemoji(Vector2(360, 580), Vector2(140, 140), 80, screen_root).text = "🎲"
+			_mklabel("The dice are rolling…", Vector2(0, 680), Vector2(720, 30), 20, screen_root, true, Color(0.85, 0.85, 0.9))
+		"OUTCOME":
+			var k: String = str(outcome.get("kind", ""))
+			var c: Dictionary = outcome.get("contract", {})
+			var r: Dictionary = outcome.get("result", {})
+			if c.is_empty() or r.is_empty():
+				_mklabel("…", Vector2(0, 600), Vector2(720, 40), 24, screen_root)
+			elif k == "objective" or k == "extract" or k == "wipe":
+				_build_expedition_outcome(c, r, k)
+			else:
+				_build_outcome(c, r)
+			if is_instance_valid(continue_btn):
+				continue_btn.disabled = busy
+		"GAMEOVER":
+			_game_over_ui(over_kind)
+		_:
+			_mklabel("Joining the company…", Vector2(0, 600), Vector2(720, 40), 22, screen_root)
+	_refresh_hud()
+
+# ---------------------------------------------------------------- The nested fight
+## ONE place a fight starts. The host rolls the encounter, publishes it in the snapshot, and every
+## peer instantiates the SAME combat scene as a child with its own net block. Clients never roll:
+## an identical board on every screen is the entire point of the exercise.
+func _run_fight(req: Dictionary, e: int) -> Dictionary:
+	if mode == Mode.AUTHORITY:
+		_fid += 1
+		req["fid"] = _fid
+		fight_req = req
+		_push()          # this is how the clients learn to join
+	var result: Dictionary = await _enter_fight(req)
+	if mode == Mode.AUTHORITY:
+		fight_req = {}   # and this is how they learn to leave
+	if e != run_epoch:
+		return {}
+	return result
+
+func _enter_fight(req: Dictionary) -> Dictionary:
+	_cur_fid = int(req.get("fid", 0))
+	var f: Node = COMBAT_SCENE.instantiate()
+	var r: Dictionary = req.duplicate(true)
+	r["nested"] = true   # combat must hand control BACK to us, not change_scene to the lobby
+	if mode != Mode.SOLO:
+		r["net"] = {
+			"mode": "authority" if mode == Mode.AUTHORITY else "client",
+			"seat": my_seat,
+			"seat_count": seat_count,
+		}
+	f.request = r        # BEFORE add_child: combat._ready() parses it on entry
+	_fight_node = f
+	screen_root.visible = false
+	hud.visible = false
+	if is_instance_valid(crew_bar):
+		crew_bar.visible = false
+	add_child(f)
+	var result: Dictionary = await f.combat_finished
+	_exit_fight()
+	return result
+
+func _exit_fight() -> void:
+	if is_instance_valid(_fight_node):
+		_fight_node.queue_free()
+	_fight_node = null
+	screen_root.visible = true
+	hud.visible = true
+	if is_instance_valid(crew_bar):
+		crew_bar.visible = mode != Mode.SOLO
+
+func _client_join_fight() -> void:
+	await _enter_fight(fight_req.duplicate(true))
+	# The host's snapshot carries the authoritative aftermath (HP, the fallen, the wagon). We only
+	# had to render the fight; we do not get a vote on how it came out.
+	_render()
+
+## The encounters were tuned by Monte Carlo for a crew of THREE. Co-op fields 2-4, so the party term
+## composes ADDITIVELY with the others (scaling audit 2026-07-01: multiplying them grew quadratically
+## and produced 0%-win cells).
+func _party_scale() -> float:
+	if mode == Mode.SOLO:
+		return 0.0
+	return float(roster.size() - 3) * PARTY_STEP
+
+# ---------------------------------------------------------------- Death without lockout
+## A dwarf that goes down is hauled onto the WAGON — it keeps rolling its death saves there — and the
+## player takes an HEIR at the same seat on the very next tile. Nobody watches the rest of an
+## expedition. If the original stabilises it takes its seat back at the end, deck and all; the heir
+## was only ever a stand-in. If it bleeds out, the heir keeps the seat and the DECK is what you lost.
+func _reseat_fallen() -> void:
+	if mode == Mode.SOLO:
+		return
+	var reseated := false
+	for i in range(roster.size()):
+		var d: Dictionary = roster[i]
+		if not bool(d.get("downed", false)) and str(d["status"]) != "lost":
+			continue
+		d["seat"] = i
+		carried.append(d)
+		roster[i] = _make_heir(i)
+		reseated = true
+		_msg("%s is dragged onto the wagon — %s takes up their axe." % [d["name"], roster[i]["name"]])
+	if reseated:
+		exp_crew = roster
+
+func _make_heir(i: int) -> Dictionary:
+	var cls: String = str(seats[i].get("cls", "warrior")) if i < seats.size() else "warrior"
+	var d: Dictionary = _make_dwarf(RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()], cls)
+	d["seat"] = i
+	d["hp"] = maxi(1, int(round(float(d["max_hp"]) * HEIR_HP_FRAC)))   # a cost, not a free respawn
+	return d
+
+func _finish_saves(d: Dictionary) -> void:
+	while str(d["status"]) != "lost" and bool(d["downed"]) and not bool(d["stable"]) \
+			and int(d["ds_success"]) < DS_SUCCESS_NEEDED and int(d["ds_fail"]) < DS_FAIL_NEEDED:
+		if randf() < DS_SUCCESS_CHANCE:
+			d["ds_success"] = int(d["ds_success"]) + 1
+			if int(d["ds_success"]) >= DS_SUCCESS_NEEDED:
+				d["stable"] = true
+		else:
+			d["ds_fail"] = int(d["ds_fail"]) + 1
+			if int(d["ds_fail"]) >= DS_FAIL_NEEDED:
+				d["status"] = "lost"
+				d["downed"] = false
+
+func _clear_ds(d: Dictionary) -> void:
+	d["downed"] = false
+	d["stable"] = false
+	d["ds_success"] = 0
+	d["ds_fail"] = 0
+
+## The expedition is over: the wagon comes home. Whoever survived their saves takes their seat back
+## from the stand-in. Whoever did not is gone — but their SEAT is never left with a corpse in it,
+## because a player staring at a corpse for the rest of the campaign is not playing the game.
+func _wagon_home(kind: String) -> void:
+	for d: Dictionary in carried:
+		if kind == "wipe":
+			_finish_saves(d)   # a wipe gives the dying no more time
+		var si: int = int(d.get("seat", -1))
+		if str(d["status"]) == "lost":
+			_msg("%s never came home. Their deck dies with them." % d["name"])
+			continue
+		if si < 0 or si >= roster.size():
+			continue
+		_clear_ds(d)
+		d["hp"] = maxi(1, int(round(float(d["max_hp"]) * STABLE_HP_FRAC)))
+		roster[si] = d   # back on their feet, deck intact — the heir steps aside
+		_msg("%s is patched up and back in the line." % d["name"])
+	carried = []
+	# A wipe never reseats (there was nobody left standing to do the dragging), so settle those seats
+	# here too: dead seats get an heir, downed-but-alive seats get up.
+	for i in range(roster.size()):
+		var d2: Dictionary = roster[i]
+		if str(d2["status"]) == "lost":
+			roster[i] = _make_heir(i)
+		elif bool(d2["downed"]) or bool(d2["stable"]):
+			_clear_ds(d2)
+			d2["hp"] = maxi(1, int(round(float(d2["max_hp"]) * STABLE_HP_FRAC)))
+	exp_crew = roster
+
+# ---------------------------------------------------------------- Personal claims (host-side)
+## Loot is PERSONAL: one card leaves the tile and it joins the claimer's own deck. First tap wins —
+## which is a conversation, not a mechanic, and that is the point.
+func _claim_loot(seat: int, i: int) -> void:
+	if state != "HEXREWARD" or i < 0 or i >= hex_loot.size():
+		return
+	if seat < 0 or seat >= roster.size():
+		return
+	var cid: String = hex_loot[i]
+	var d: Dictionary = roster[seat]
+	(d["deck"] as Array).append(cid)
+	_msg("%s claimed %s." % [d["name"], str(Db.CARDS[cid]["name"])])
+	hex_loot = []
+	hex_loot_pick = -1
+	await _resume_hex(run_epoch)
+
+## You buy for your OWN dwarf, out of the SHARED purse. Above the rent line that is nobody's business
+## but yours; below it, _is_ring() has already made the table agree before we ever get here.
+func _buy_shop(seat: int, i: int) -> void:
+	if i < 0 or i >= shop_stock.size() or seat < 0 or seat >= roster.size():
+		return
+	var s: Dictionary = shop_stock[i]
+	if bool(s.get("sold", false)) or treasury < int(s["cost"]):
+		return
+	var d: Dictionary = roster[seat]
+	match str(s["kind"]):
+		"card":
+			(d["deck"] as Array).append(s["cid"])
+			_msg("%s bought %s." % [d["name"], str(Db.CARDS[s["cid"]]["name"])])
+		"heal":
+			d["hp"] = int(d["max_hp"])
+			_msg("%s is patched up to full." % d["name"])
+		_:
+			return
+	treasury -= int(s["cost"])
+	_tween_treasury_to(treasury)
+	s["sold"] = true
+	if state == "CONTRACTS":
+		_clear_screen()
+		_build_contracts()
+	_refresh_hud()

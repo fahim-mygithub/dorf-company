@@ -79,7 +79,63 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-07-01) — TWO modes: combat / overworld hex-crawl
+## Current state (2026-07-12) — MULTIPLAYER: co-op combat + the co-op CAMPAIGN
+
+- **Entry is the MAIN MENU** (`scenes/menu/main_menu.tscn`, the Pages root): Solo Play · Host Room ·
+  Join Room. Host/Join dial **Supabase Realtime Broadcast** (`scripts/net/net.gd` — native
+  `WebSocketPeer` speaking Phoenix v2 array frames, so the SAME code runs in the editor and in wasm;
+  auto re-dials a dropped socket) and land in a room lobby keyed by a 4-char code. The lobby seats
+  2-4 players (seat 0 = host = AUTHORITY), each picks 1 of 4 random dorfs, then either **Start Fight**
+  (a skirmish) or **🏰 Start Campaign**.
+- **Host-authoritative everywhere.** The host is the sole RNG and sole mutator; it broadcasts
+  ABSOLUTE snapshots. Clients send intents and render. Every player pilots exactly ONE dwarf (their
+  seat) — in combat AND across the whole campaign. Hands are public (co-op with friends); the draw
+  pile is not. Everyone presses their own End Turn (✅ marker per seat).
+- **The CAMPAIGN is now co-op** (`scripts/overworld/overworld.gd`, `enum Mode {SOLO,AUTHORITY,CLIENT}`).
+  One company: one treasury, one rising rent, one contract board, one shop, one hex expedition.
+  Design doc: `docs/plans/2026-07-12-campaign-coop-spec.md` (agent-authored; the SHIPPED build
+  deliberately omits its ack ring-buffer, foreman hammer, seat-reclaim panel and autosave).
+  - **The ring of ayes** — shared-risk decisions (embark · move to a hex · extract · event choice ·
+    end month · a shop buy that dips *below the rent line*) are PROPOSALS that light a ✅ pip per seat
+    on the crew bar and fire only when every PRESENT seat agrees. Proposing IS your aye. Everything
+    else (navigate, select, claim a loot card, an affordable buy) is instant and yours alone.
+    `RING_KINDS` + `_is_ring()` — consequence decides the tier, not the name.
+  - **Wire events** (must never collide with combat's `submit_action`/`combat_ready`/`resync`/`ready`/
+    `apply_snapshot`/`match_over` — the nested fight shares the one `Net` autoload):
+    `camp_snapshot` · `camp_intent` · `camp_hello` · `camp_start`.
+  - **Intents carry a per-seat `iseq`**; the host keeps a high-water mark and echoes it back in every
+    snapshot. That one table is the dedupe AND the ack, so a fire-and-forget retry can never
+    double-apply. Snapshots are ABSOLUTE, so a dropped one needs no resync — the next repairs it.
+  - **The nested fight**: the host rolls the encounter, publishes it as `fight` inside the snapshot,
+    and every peer instantiates `combat.tscn` as a child with `request.nested = true` + its own net
+    block. `nested` makes combat hand control BACK to the campaign instead of `change_scene`-ing to
+    the lobby; `match_over` carries `crew_results` so a client's parent scene reads the same HP the
+    host does.
+  - **The wagon rule (anti-lockout)**: a downed dwarf is hauled onto the wagon (it keeps rolling death
+    saves there) and the player pilots an HEIR at the same seat on the NEXT tile — nobody spectates an
+    expedition. Stabilise and the original takes its seat back with its deck; bleed out and the deck
+    is what you lost. No `wounded` bench and no Recruit slot in co-op (a benched dwarf = a benched
+    *player*). `_reseat_fallen()` / `_wagon_home()`.
+  - **Party-size scaling**: encounters were sim-tuned for a crew of 3, so `_party_scale()` adds
+    `(n-3) * PARTY_STEP` (0.34) **additively** to `enemy_scale`. ⚠️ PARTY_STEP is an unvalidated first
+    guess — it has NOT been through `dorf_sim.py`.
+  - **AFK escape hatch**: a seat that goes quiet for `ABSENT_SEC` (12s) is marked absent and pruned
+    from the open ring, so one friend wandering off can't freeze the company. A seat is only ever
+    removed from an open ring, never added to one.
+- **VERIFY NETCODE HEADLESSLY — do not use browser tabs.** `scenes/test/campaign_verify.tscn` runs
+  BOTH peers in one process against live Supabase, drives a scripted session, and prints PASS/FAIL
+  (62 checks, all green as of 2026-07-12):
+  `Godot_v4.7-stable_win64_console.exe --headless --path . res://scenes/test/campaign_verify.tscn`
+  Sister scenes: `coop_harness.tscn` (combat) · `coop_campaign_harness.tscn` (campaign, visual).
+  Chrome only ticks the FOREGROUND tab, so two tabs can never verify a round-trip (see memory
+  `two-tab-multiplayer-testing-fails`). One `Net` autoload = one `peer_id`, which is exactly why the
+  campaign protocol identifies a sender by its injected **seat int**, never by peer_id.
+- **Known/deferred**: clients watch the enemy phase as numbers moving (no VFX replay — M3b); the
+  client rebuilds its whole screen per snapshot (flicker, lost hover); no authority migration — if
+  the HOST backgrounds its tab the company freezes (the 2s re-dial fixes the socket, not the frozen
+  resolver); PARTY_STEP unsimmed.
+
+## Prior state (2026-07-01) — TWO modes: combat / overworld hex-crawl
 
 - **Enemy variety + telegraphed intent (2026-07-01):** enemies now run MOVE ROTATIONS
   (`Db.ENEMIES[*].moves`, random start offset per instance; kinds attack/multi/attack_all/block/

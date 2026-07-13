@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://cq4mv7xn2pdb8"]
+
+[ext_resource type="Script" path="res://scripts/test/campaign_verify.gd" id="1_verif"]
+
+[node name="CampaignVerify" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_verif")
