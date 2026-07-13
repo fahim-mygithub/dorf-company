@@ -58,9 +58,13 @@ jobs:
           godot --headless --import 2>&1 || true
           godot --headless --import 2>&1 || true
 
-      - name: Export Web build
+      - name: Export Web build (main menu — solo / host / join)
         run: |
           set -euo pipefail
+          # The root build boots the MENU, not combat: it is the entry point for co-op
+          # (Host Room / Join Room), and Solo Play still reaches the same combat scene.
+          sed -i 's#^run/main_scene=.*#run/main_scene="res://scenes/menu/main_menu.tscn"#' project.godot
+          grep -q 'menu/main_menu.tscn' project.godot   # fail loud if the sed no-ops
           mkdir -p "${EXPORT_DIR}"
           godot --headless --export-release "Web" "${EXPORT_DIR}/index.html"
           ls -la "${EXPORT_DIR}"
