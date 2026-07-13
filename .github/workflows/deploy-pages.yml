@@ -53,6 +53,16 @@ jobs:
           # Remove godot-mcp-pro autoloads + plugin-enable so the web build is clean.
           sed -i '/addons\/godot_mcp/d' project.godot
 
+      # Stamp the build id into the menu so a player can report WHICH build they are running
+      # (a stale cached build and a real bug are indistinguishable without this).
+      - name: Stamp build id
+        run: |
+          set -euo pipefail
+          SHORT="${GITHUB_SHA::7}"
+          sed -i "s/^const BUILD := \".*\"/const BUILD := \"${SHORT}\"/" scripts/menu/build_info.gd
+          grep -q "const BUILD := \"${SHORT}\"" scripts/menu/build_info.gd
+          cat scripts/menu/build_info.gd
+
       - name: Import project (generate .godot)
         run: |
           godot --headless --import 2>&1 || true

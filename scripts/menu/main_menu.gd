@@ -4,6 +4,7 @@ extends Control
 
 const LOBBY := "res://scenes/menu/lobby.tscn"
 const COMBAT := "res://scenes/combat/combat.tscn"
+const BuildInfo := preload("res://scripts/menu/build_info.gd")
 const CODE_CHARS := "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no ambiguous 0/O/1/I/L
 
 var code_input: LineEdit
@@ -36,6 +37,9 @@ func _build() -> void:
 	code_input.text_submitted.connect(_do_join)
 	add_child(code_input)
 	status = _lbl("", Vector2(0, 908), Vector2(720, 28), 16, Color(0.9, 0.8, 0.45))
+	# So a player can tell us WHICH build they are on. A stale cached build and a real bug look
+	# exactly the same from the outside; this makes them tell themselves apart.
+	_lbl("build %s" % BuildInfo.BUILD, Vector2(0, 1224), Vector2(720, 22), 13, Color(0.42, 0.42, 0.48))
 
 func _lbl(text: String, pos: Vector2, sz: Vector2, font: int, col := Color.WHITE) -> Label:
 	var l := Label.new()
