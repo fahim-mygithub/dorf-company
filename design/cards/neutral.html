@@ -1,0 +1,68 @@
+<!-- @dsCard group="Cards" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Cards — Neutral</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Cards — Neutral</b><span>13 cards — the shared chassis + the universal reward pool</span><code>scripts/combat/card_db.gd · REWARD_POOL</code></div>
+<div class="note"><b>Neutral</b> = role-agnostic. The four chassis cards seed every deck; the nine pool cards are what a dwarf can <i>learn</i> from a spoils tile, regardless of class. Anything you add here must be castable by a Warrior, a Cleric and a Sorcerer without reading strangely.</div><h2>Chassis<span>in every starting deck · the unit everything is read against</span></h2><div class="row"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div><div class="why">enemy</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🛡️</div><div class="cname">Guard</div><div class="cbody">Gain 5 block</div></div><div class="why">self</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🪓</div><div class="cname">Cleave</div><div class="cbody">Deal 11 to ALL</div></div><div class="why">all enemies</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🧱</div><div class="cname">Wall</div><div class="cbody">Gain 12 block</div></div><div class="why">self</div></div></div><h2>Reward pool<span>any dwarf can learn these — REWARD_POOL, offered on loot tiles</span></h2><div class="row"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">💪</div><div class="cname">Power Through</div><div class="cbody">Gain 8 block<br>Draw 1</div></div><div class="why">self</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">0</div><div class="cemo">🗡️</div><div class="cname">Precise Jab</div><div class="cbody">Deal 4<br>Gain 1 ⚡</div></div><div class="why">enemy</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">0</div><div class="cemo">🪨</div><div class="cname">Whetstone</div><div class="cbody">Next attack +4</div></div><div class="why">self</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">💥</div><div class="cname">Guard Break</div><div class="cbody">Deal 7<br>Apply Vulnerable 💥 (+50%)</div></div><div class="why">enemy</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🩹</div><div class="cname">Field Dressing</div><div class="cbody">Heal yourself 7</div></div><div class="why">self</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🧱</div><div class="cname">Bracing Stance</div><div class="cbody">Gain 10 block<br>Block keeps next turn</div></div><div class="why">self</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🎯</div><div class="cname">Opportunist</div><div class="cbody">Deal 6<br>If 🎯 Marked: +6 dmg</div></div><div class="why">enemy</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">📣</div><div class="cname">Rally</div><div class="cbody">All allies +3 block<br>Draw 1</div></div><div class="why">party</div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🏆</div><div class="cname">Trophy Hunter</div><div class="cbody">Deal 12<br>On kill: +2 ⚡</div></div><div class="why">enemy</div></div></div>
+</div>
+</body></html>

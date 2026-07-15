@@ -1,0 +1,59 @@
+<!-- @dsCard group="Screens" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Lobby</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:1280px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Lobby</b><span>Room code · seats · dorf pick · Start Fight / Start Campaign</span><code>scenes/menu/lobby.tscn</code></div>
+<div class="stage"><div style="left:0px;top:0px;width:720px;height:1280px;background:#17171f;"></div>
+<div class="l c" style="left:0px;top:60px;width:720px;height:26px;font-size:18px;color:#b3b3c7;">ROOM</div>
+<div class="l c" style="left:0px;top:90px;width:720px;height:70px;font-size:60px;color:#fff;letter-spacing:.12em">K7QM</div>
+<div class="l" style="left:40px;top:200px;width:300px;height:24px;font-size:16px;color:#b3b3c7;">PLAYERS</div>
+<div style="left:40px;top:230px;width:640px;height:250px;background:#212129;border-radius:8px"></div>
+<div class="l" style="left:56px;top:242px;width:600px;height:40px;font-size:22px;color:#99ff99;">🛡️  Thrain  Warrior  (host)  (you)  ✅</div>
+<div class="l" style="left:56px;top:298px;width:600px;height:40px;font-size:22px;color:#99ff99;">⛑️  Bruni  Cleric  ✅</div>
+<div class="l" style="left:56px;top:354px;width:600px;height:40px;font-size:22px;color:#ffffff;">🧙  Vela  Sorcerer</div>
+<div class="l" style="left:40px;top:500px;width:400px;height:24px;font-size:16px;color:#b3b3c7;">YOUR DORFS  (pick one)</div>
+<div style="left:40px;top:530px;width:640px;height:220px;background:#212129;border-radius:8px"></div>
+<div class="btn on" style="left:56px;top:546px;width:146px;height:120px;font-size:17px;">🛡️ Thrain
+Warrior</div>
+<div class="btn" style="left:210px;top:546px;width:146px;height:120px;font-size:17px;">⛑️ Kael
+Cleric</div>
+<div class="btn" style="left:364px;top:546px;width:146px;height:120px;font-size:17px;">🧙 Torvi
+Sorcerer</div>
+<div class="btn" style="left:518px;top:546px;width:146px;height:120px;font-size:17px;">🛡️ Brom
+Warrior</div>
+<div class="btn" style="left:40px;top:800px;width:310px;height:60px;font-size:22px;">Unready</div>
+<div class="btn off" style="left:370px;top:800px;width:310px;height:60px;font-size:22px;">Start Fight</div>
+<div class="btn off" style="left:40px;top:876px;width:640px;height:64px;font-size:22px;">🏰  Start Campaign</div>
+<div class="l c" style="left:0px;top:944px;width:720px;height:22px;font-size:14px;color:#a8a8b8;">one company · one purse · one rising rent</div>
+<div class="l c" style="left:0px;top:976px;width:720px;height:26px;font-size:16px;color:#e6cc73;">waiting for everyone to ready up</div>
+<div class="btn" style="left:40px;top:1200px;width:140px;height:44px;font-size:16px;">Leave</div>
+</div>
+</div>
+</body></html>

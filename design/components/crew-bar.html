@@ -1,0 +1,99 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Crew bar — the ring of ayes</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+
+.bar{position:relative;width:720px;height:74px;margin-bottom:6px;border:1px solid #2c2c38}
+.bar *{position:absolute}
+.lead{font-size:12px;color:#7a7a88;margin:0 0 14px;max-width:900px;line-height:1.5}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Crew bar — the ring of ayes</b><span>Who is here · what is proposed · who still has to say yes</span><code>scripts/overworld/overworld.gd · _refresh_ring</code></div>
+<div class="note">The co-op conscience bar. It is <b>chrome</b> — a sibling of the screen root — so it survives every screen rebuild and is visible on the whole campaign. It answers three questions at once: <b>who is at the table</b>, <b>what is on the floor</b>, and <b>who still has to say yes</b>.</div><h2>Idle<span>nothing on the floor — navigate freely</span></h2><div class="bar"><div style="left:0px;top:0px;width:720px;height:74px;background:rgba(26,26,36,.94);"></div>
+<div style="left:0px;top:0px;width:720px;height:2px;background:rgba(255,255,255,.07);"></div>
+<div class="l" style="left:12px;top:5px;width:560px;height:18px;font-size:13px;color:#99999f;">the crew — the company only commits when everyone agrees</div>
+<div class="l" style="left:12px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🛡️ Thrain •  (you)</div>
+<div class="l" style="left:150px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">⛑️ Bruni •</div>
+<div class="l" style="left:288px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🧙 Vela •</div>
+</div><h2>Ring open<span>a shared-risk proposal — proposing IS your aye</span></h2><div class="bar"><div style="left:0px;top:0px;width:720px;height:74px;background:rgba(26,26,36,.94);"></div>
+<div style="left:0px;top:0px;width:720px;height:2px;background:rgba(255,255,255,.07);"></div>
+<div class="l" style="left:12px;top:5px;width:560px;height:18px;font-size:13px;color:#f2bd33;">Bruni proposes: move to ⚔️ a hex (☠☠)   (1/3)</div>
+<div class="l" style="left:12px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🛡️ Thrain ⏳  (you)</div>
+<div class="l" style="left:150px;top:28px;width:136px;height:22px;font-size:13px;color:#4dd16b;">⛑️ Bruni ✅</div>
+<div class="l" style="left:288px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🧙 Vela ⏳</div>
+<div class="btn" style="left:582px;top:8px;width:126px;height:58px;font-size:16px;">✅ Agree</div>
+</div><h2>You have agreed<span>the Agree button becomes “waiting…”</span></h2><div class="bar"><div style="left:0px;top:0px;width:720px;height:74px;background:rgba(26,26,36,.94);"></div>
+<div style="left:0px;top:0px;width:720px;height:2px;background:rgba(255,255,255,.07);"></div>
+<div class="l" style="left:12px;top:5px;width:560px;height:18px;font-size:13px;color:#f2bd33;">Bruni proposes: 🏳️ extract (+36g)   (2/3)</div>
+<div class="l" style="left:12px;top:28px;width:136px;height:22px;font-size:13px;color:#4dd16b;">🛡️ Thrain ✅  (you)</div>
+<div class="l" style="left:150px;top:28px;width:136px;height:22px;font-size:13px;color:#4dd16b;">⛑️ Bruni ✅</div>
+<div class="l" style="left:288px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🧙 Vela ⏳</div>
+<div class="l c" style="left:578px;top:30px;width:130px;height:20px;font-size:14px;color:#d9cc80;">waiting…</div>
+</div><h2>A seat went quiet<span>silent 12s → 💤 pruned from the ring, so nobody is locked out</span></h2><div class="bar"><div style="left:0px;top:0px;width:720px;height:74px;background:rgba(26,26,36,.94);"></div>
+<div style="left:0px;top:0px;width:720px;height:2px;background:rgba(255,255,255,.07);"></div>
+<div class="l" style="left:12px;top:5px;width:560px;height:18px;font-size:13px;color:#f2bd33;">Thrain proposes: end the month (rent 55g comes due)   (1/2)</div>
+<div class="l" style="left:12px;top:28px;width:136px;height:22px;font-size:13px;color:#4dd16b;">🛡️ Thrain ✅  (you)</div>
+<div class="l" style="left:150px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">⛑️ Bruni ⏳</div>
+<div class="l" style="left:288px;top:28px;width:136px;height:22px;font-size:13px;color:#73737f;">🧙 Vela 💤</div>
+<div class="l c" style="left:578px;top:30px;width:130px;height:20px;font-size:14px;color:#d9cc80;">waiting…</div>
+</div><h2>What needs a ring<span>consequence decides the tier — not the name</span></h2><table><tr><th>needs everyone</th><th>yours alone, instantly</th></tr><tr><td>embark on a contract<br>move to a hex<br>extract<br>an event choice<br>end the month<br>a shop buy that dips <i>below the rent line</i></td><td>navigating menus<br>selecting a contract to read it<br>claiming a loot card (first tap wins)<br>an affordable shop buy<br>playing a card in combat<br>ending your own turn</td></tr></table>
+</div>
+</body></html>

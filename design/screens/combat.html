@@ -1,0 +1,94 @@
+<!-- @dsCard group="Screens" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Combat</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:1280px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Combat</b><span>Co-op, simultaneous — Thrain ✅ has ended; Vela is mid-turn with Mark armed</span><code>scenes/combat/combat.tscn</code></div>
+<div class="stage"><div style="left:0px;top:0px;width:720px;height:1280px;background:#17171f;"></div>
+<div class="l c" style="left:60px;top:24px;width:600px;height:26px;font-size:18px;color:#ffffff;">— THE QUARTERLY RAID —</div>
+<div style="left:120px;top:40px;width:480px;height:92px;background:rgba(18,18,26,.97);border-bottom:1px solid rgba(255,255,255,.14)"></div>
+<div class="l" style="left:130px;top:44px;width:460px;height:20px;font-size:15px;color:#fff;">🔮 Caster — 🛡️ Ward 6</div>
+<div class="l" style="left:130px;top:67px;width:460px;height:18px;font-size:12px;color:#c7c7d1;">Shields itself — the ward soaks your next hits.</div>
+<div class="l" style="left:130px;top:87px;width:460px;height:18px;font-size:12px;color:#f2cc73;">Next: 💢 Bolt 10</div>
+<div class="l" style="left:130px;top:108px;width:460px;height:18px;font-size:11px;color:#9eb3cc;">Snipes the weakest — targets whoever has the lowest current HP.</div>
+<svg style="left:0;top:0;width:720px;height:1280px;pointer-events:none"><line x1="170" y1="246" x2="170" y2="640" stroke="rgba(242,77,77,.65)" stroke-width="3"/><polygon points="170,656 161,640 179,640" fill="rgba(242,77,77,.65)"/><line x1="360" y1="246" x2="360" y2="640" stroke="rgba(242,77,77,.65)" stroke-width="3"/><polygon points="360,656 351,640 369,640" fill="rgba(242,77,77,.65)"/><line x1="550" y1="246" x2="550" y2="640" stroke="rgba(242,77,77,.65)" stroke-width="3"/><polygon points="550,656 541,640 559,640" fill="rgba(242,77,77,.65)"/></svg><div class="l c" style="left:122px;top:162px;width:96px;height:76px;font-size:50px;line-height:76px;justify-content:center;align-items:center;">👹</div>
+<div class="l c" style="left:90px;top:126px;width:160px;height:20px;font-size:14px;color:#ffffff;">Brute</div>
+<div class="l c" style="left:90px;top:148px;width:160px;height:22px;font-size:18px;color:#ff8c80;">🗡️9>Thr</div>
+<div class="l c" style="left:90px;top:240px;width:160px;height:20px;font-size:16px;color:#ffffff;">45/45</div>
+<div class="l c" style="left:312px;top:162px;width:96px;height:76px;font-size:50px;line-height:76px;justify-content:center;align-items:center;">🥷</div>
+<div class="l c" style="left:280px;top:126px;width:160px;height:20px;font-size:14px;color:#ffffff;">Assassin</div>
+<div class="l c" style="left:280px;top:148px;width:160px;height:22px;font-size:18px;color:#d99eff;">💥>Bru</div>
+<div class="l c" style="left:280px;top:240px;width:160px;height:20px;font-size:16px;color:#ffffff;">30/30</div>
+<div class="l c" style="left:502px;top:162px;width:96px;height:76px;font-size:50px;line-height:76px;justify-content:center;align-items:center;">🔮</div>
+<div class="l c" style="left:470px;top:126px;width:160px;height:20px;font-size:14px;color:#ffffff;">🎯 Caster</div>
+<div class="l c" style="left:470px;top:148px;width:160px;height:22px;font-size:18px;color:#9ed9ff;">🛡️6</div>
+<div class="l c" style="left:470px;top:240px;width:160px;height:20px;font-size:16px;color:#ffffff;">18/28</div>
+<div class="l c" style="left:470px;top:260px;width:160px;height:18px;font-size:14px;color:#ffffff;">🛡️6 🔥</div>
+<div class="l c" style="left:115px;top:665px;width:110px;height:70px;font-size:50px;line-height:70px;justify-content:center;align-items:center;">🛡️</div>
+<div class="l c" style="left:90px;top:642px;width:160px;height:20px;font-size:14px;color:#ffffff;">✅ Thrain</div>
+<div class="l c" style="left:90px;top:738px;width:160px;height:20px;font-size:16px;color:#ffffff;">31/36</div>
+<div class="l c" style="left:90px;top:758px;width:160px;height:18px;font-size:14px;color:#ffffff;">🛡️5 🔁4</div>
+<div class="l c" style="left:90px;top:776px;width:160px;height:18px;font-size:14px;color:#ffffff;">⚡0/3</div>
+<div class="l c" style="left:305px;top:665px;width:110px;height:70px;font-size:50px;line-height:70px;justify-content:center;align-items:center;">⛑️</div>
+<div class="l c" style="left:280px;top:642px;width:160px;height:20px;font-size:14px;color:#ffffff;">Bruni</div>
+<div class="l c" style="left:280px;top:738px;width:160px;height:20px;font-size:16px;color:#ffffff;">28/28</div>
+<div class="l c" style="left:280px;top:758px;width:160px;height:18px;font-size:14px;color:#ffffff;">🔰3</div>
+<div class="l c" style="left:280px;top:776px;width:160px;height:18px;font-size:14px;color:#ffffff;">⚡2/3</div>
+<div style="left:486px;top:640px;width:128px;height:150px;background:rgba(255,217,51,.16);"></div>
+<div class="l c" style="left:495px;top:665px;width:110px;height:70px;font-size:50px;line-height:70px;justify-content:center;align-items:center;transform:scale(1.12)">🧙</div>
+<div class="l c" style="left:470px;top:642px;width:160px;height:20px;font-size:14px;color:#ffffff;">Vela</div>
+<div class="l c" style="left:470px;top:738px;width:160px;height:20px;font-size:16px;color:#ffffff;">22/22</div>
+<div class="l c" style="left:470px;top:758px;width:160px;height:18px;font-size:14px;color:#ffffff;">🌀2</div>
+<div class="l c" style="left:470px;top:776px;width:160px;height:18px;font-size:14px;color:#ffffff;">⚡1/3</div>
+<div style="left:81px;top:798px;width:38px;height:50px;background:#752424;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:125px;top:798px;width:38px;height:50px;background:#21426b;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:169px;top:798px;width:38px;height:50px;background:#752424;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:213px;top:798px;width:38px;height:50px;background:#21426b;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:271px;top:798px;width:38px;height:50px;background:#752424;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:315px;top:798px;width:38px;height:50px;background:#21426b;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:359px;top:798px;width:38px;height:50px;background:#752424;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div style="left:403px;top:798px;width:38px;height:50px;background:#21426b;border-radius:4px;border:1px solid rgba(255,255,255,.18);opacity:.72"></div>
+<div class="l c" style="left:20px;top:852px;width:680px;height:26px;font-size:20px;color:#fff;">VELA — ⚡ 1 / 3</div>
+<div class="l c" style="left:20px;top:880px;width:680px;height:22px;font-size:15px;color:#c7c7d1;">tap a card, then tap an enemy</div>
+<div style="left:0;top:905px;width:720px;height:220px"><div class="card" style="position:absolute;left:59px;top:8px;transform:rotate(-10deg) scale(1.18);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:4px solid #fff273;border-radius:12px;"><div class="orb">1</div><div class="cemo">🎯</div><div class="cname">Mark</div><div class="cbody">Mark: +25% dmg taken</div></div><div class="card" style="position:absolute;left:177px;top:33px;transform:rotate(-5deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#572b75;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🌀</div><div class="cname">Channel</div><div class="cbody">Next 2 attacks +3</div></div><div class="card" style="position:absolute;left:295px;top:26px;transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div><div class="card" style="position:absolute;left:413px;top:33px;transform:rotate(5deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div><div class="card" style="position:absolute;left:531px;top:54px;transform:rotate(10deg) scale(1);transform-origin:50% 100%;opacity:.72;width:130px;height:188px;background:color-mix(in srgb, #752424 50%, #000);border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">💥</div><div class="cname">Arcane Finisher</div><div class="cbody">Deal 5<br>(+3 per attack · 0 so far)</div></div></div><div class="tipp" style="left:8px;top:752px;z-index:9">Mark: +25% dmg taken<br>— Paint the target — it takes +25% from ALL sources this turn. Your whole party benefits.</div><div class="btn" style="left:540px;top:1184px;width:165px;height:52px;font-size:20px;">End Turn</div>
+<div class="l" style="left:16px;top:1244px;width:688px;height:30px;font-size:15px;color:#c7c7d1;">Thrain played Guard — +5 block.</div>
+</div>
+</div>
+</body></html>
