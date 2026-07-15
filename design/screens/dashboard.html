@@ -1,0 +1,85 @@
+<!-- @dsCard group="Screens" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Company Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:1280px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Company Dashboard</b><span>The roster — ready / wounded / lost, and the rent clock overhead</span><code>scripts/overworld/overworld.gd · _build_dashboard</code></div>
+<div class="stage"><div style="left:0px;top:0px;width:720px;height:1280px;background:#17171f;"></div>
+<div style="left:0px;top:0px;width:720px;height:158px;background:#1f1f29;"></div>
+<div style="left:0px;top:156px;width:720px;height:2px;background:rgba(255,255,255,.08);"></div>
+<div class="l c" style="left:16px;top:24px;width:80px;height:76px;font-size:44px;line-height:76px;justify-content:center;align-items:center;">💰</div>
+<div class="l" style="left:104px;top:30px;width:240px;height:60px;font-size:44px;color:#f2bd33;">80g</div>
+<div style="left:106px;top:100px;width:180px;height:10px;background:#f2bd33;"></div>
+<div class="l c" style="left:632px;top:16px;width:72px;height:64px;font-size:40px;line-height:64px;justify-content:center;align-items:center;">👹</div>
+<div class="l r" style="left:360px;top:24px;width:268px;height:28px;font-size:20px;color:#e6e6e6;">RENT  55g</div>
+<div class="l r" style="left:360px;top:56px;width:268px;height:20px;font-size:13px;color:#e6e6e6;">next  65g</div>
+<div style="left:500px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:526px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:552px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div class="l" style="left:490px;top:108px;width:140px;height:16px;font-size:11px;color:#b3b3bf;">jobs left</div>
+<div class="l c" style="left:260px;top:120px;width:200px;height:24px;font-size:15px;color:#ffffff;">Month 1 / 8</div>
+<div class="l c" style="left:0px;top:190px;width:720px;height:30px;font-size:24px;color:#ffffff;">— DORF & CO. —</div>
+<div class="l c" style="left:0px;top:226px;width:720px;height:20px;font-size:14px;color:#ccccd9;">Your crew. Send them to make rent — or lose them.</div>
+<div class="l c" style="left:0px;top:256px;width:720px;height:20px;font-size:14px;color:#b8d6f2;">3 campaigns left this month · rent 55g due at month end</div>
+<div style="left:38px;top:396px;width:116px;height:176px;background:color-mix(in srgb, #9ea3ad 22%, transparent);"></div>
+<div class="l c" style="left:41px;top:412px;width:110px;height:84px;font-size:54px;line-height:84px;justify-content:center;align-items:center;">🛡️</div>
+<div style="left:122px;top:410px;width:20px;height:20px;background:#4dd16b;"></div>
+<div class="l c" style="left:38px;top:512px;width:116px;height:22px;font-size:15px;color:#ffffff;">Thrain</div>
+<div class="l c" style="left:38px;top:534px;width:116px;height:18px;font-size:12px;color:#bfbfcc;">Warrior</div>
+<div style="left:54px;top:558px;width:84px;height:9px;background:#404050;"></div>
+<div style="left:54px;top:558px;width:84px;height:9px;background:#4dd16b;"></div>
+<div style="left:214px;top:396px;width:116px;height:176px;background:color-mix(in srgb, #f2cc4d 22%, transparent);"></div>
+<div class="l c" style="left:217px;top:412px;width:110px;height:84px;font-size:54px;line-height:84px;justify-content:center;align-items:center;">⛑️</div>
+<div style="left:298px;top:410px;width:20px;height:20px;background:#4dd16b;"></div>
+<div class="l c" style="left:214px;top:512px;width:116px;height:22px;font-size:15px;color:#ffffff;">Bruni</div>
+<div class="l c" style="left:214px;top:534px;width:116px;height:18px;font-size:12px;color:#bfbfcc;">Cleric</div>
+<div style="left:230px;top:558px;width:84px;height:9px;background:#404050;"></div>
+<div style="left:230px;top:558px;width:57px;height:9px;background:#4dd16b;"></div>
+<div class="l c" style="left:214px;top:570px;width:116px;height:16px;font-size:11px;color:#4dd16b;">19/28</div>
+<div style="left:390px;top:396px;width:116px;height:176px;background:color-mix(in srgb, #9e66d9 22%, transparent);"></div>
+<div class="l c" style="left:393px;top:412px;width:110px;height:84px;font-size:54px;line-height:84px;justify-content:center;align-items:center;filter:sepia(.5) brightness(.85)">🧙</div>
+<div style="left:474px;top:410px;width:20px;height:20px;background:#f2bd33;"></div>
+<div class="l c" style="left:390px;top:512px;width:116px;height:22px;font-size:15px;color:#ffffff;">Vela</div>
+<div class="l c" style="left:390px;top:534px;width:116px;height:18px;font-size:12px;color:#bfbfcc;">Sorcerer</div>
+<div class="l c" style="left:400px;top:408px;width:36px;height:36px;font-size:22px;line-height:36px;justify-content:center;align-items:center;">🩹</div>
+<div class="l c" style="left:390px;top:554px;width:116px;height:16px;font-size:11px;color:#f2bd33;">wounded</div>
+<div style="left:434px;top:574px;width:14px;height:14px;background:#f2bd33;"></div>
+<div style="left:452px;top:574px;width:14px;height:14px;background:#f2bd33;"></div>
+<div style="left:566px;top:396px;width:116px;height:176px;background:color-mix(in srgb, #9ea3ad 22%, transparent);"></div>
+<div class="l c" style="left:569px;top:412px;width:110px;height:84px;font-size:54px;line-height:84px;justify-content:center;align-items:center;filter:grayscale(1) brightness(.4)">🛡️</div>
+<div style="left:650px;top:410px;width:20px;height:20px;background:#66666f;"></div>
+<div class="l c" style="left:566px;top:512px;width:116px;height:22px;font-size:15px;color:#ffffff;">Gimli</div>
+<div class="l c" style="left:566px;top:534px;width:116px;height:18px;font-size:12px;color:#bfbfcc;">Warrior</div>
+<div class="l c" style="left:576px;top:408px;width:36px;height:36px;font-size:22px;line-height:36px;justify-content:center;align-items:center;">⚰️</div>
+<div class="l c" style="left:566px;top:554px;width:116px;height:16px;font-size:11px;color:#999;">lost</div>
+<div class="btn" style="left:24px;top:1150px;width:180px;height:70px;font-size:17px;">⏭️ End Month</div>
+<div class="btn" style="left:210px;top:1150px;width:320px;height:70px;font-size:22px;">📜  View Contracts</div>
+</div>
+</div>
+</body></html>

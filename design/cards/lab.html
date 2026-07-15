@@ -1,0 +1,68 @@
+<!-- @dsCard group="Card Lab" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Card Lab — blank workspace</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Card Lab — blank workspace</b><span>Bench + the full op vocabulary — build a card, add zero engine code</span><code>scripts/combat/card_db.gd</code></div>
+<div class="note">This is the bench. Drop a new card into a blank slot, then wire it from the vocabulary below — <b>every op here already exists</b> in <code>combat.gd::_run_ops</code>, so a card built only from these needs <i>zero</i> new engine code: it is a pure data addition to <code>card_db.gd::CARDS</code>.</div><h2>Blank slots<span>neutral — must read cleanly on all three classes</span></h2><div class="row"><div class="slot"><div class="blank">+</div><div class="why">neutral</div></div><div class="slot"><div class="blank">+</div><div class="why">neutral</div></div><div class="slot"><div class="blank">+</div><div class="why">neutral</div></div><div class="slot"><div class="blank">+</div><div class="why">neutral</div></div><div class="slot"><div class="blank">+</div><div class="why">neutral</div></div></div><h2>Blank slots<span>class — role-locked, must point at that class's pillar</span></h2><div class="row"><div class="slot"><div class="blank" style="border-color:#9ea3ad">🛡️</div><div class="why">bait &amp; punish</div></div><div class="slot"><div class="blank" style="border-color:#9ea3ad">🛡️</div><div class="why">bait &amp; punish</div></div><div class="slot"><div class="blank" style="border-color:#f2cc4d">⛑️</div><div class="why">keep them up</div></div><div class="slot"><div class="blank" style="border-color:#f2cc4d">⛑️</div><div class="why">keep them up</div></div><div class="slot"><div class="blank" style="border-color:#9e66d9">🧙</div><div class="why">multiply one hit</div></div><div class="slot"><div class="blank" style="border-color:#9e66d9">🧙</div><div class="why">multiply one hit</div></div></div><h2>Frame tint = card type<span>the tint IS the promise — never mix it</span></h2><div class="key"><span class="chip a">attack · #752424 · deals damage, feeds Channel/Aura/Momentum</span><span class="chip s">skill · #21426b · everything else, builds Devotion</span><span class="chip p">power · #572b75 · changes the rules of this turn</span></div><h2>Op vocabulary<span>combat.gd::_run_ops — the whole executable surface</span></h2><table><tr><th>op</th><th>args</th><th>what it does</th></tr><tr><td><code>dmg / damage</code></td><td><code>v</code></td><td>Deal v to the target enemy. Marks the card as an attack.</td></tr><tr><td><code>dmg_all</code></td><td><code>v</code></td><td>Deal v to EVERY enemy.</td></tr><tr><td><code>dmg_per_momentum</code></td><td><code>v</code></td><td>+v per attack already played by this dwarf this turn.</td></tr><tr><td><code>damage_scaling</code></td><td><code>attacks_this_turn, base, per</code></td><td>base + per × party-wide attacks this turn.</td></tr><tr><td><code>block</code></td><td><code>v</code></td><td>Active dwarf gains v block (+5 if Fortify is pending and the card is <code>fortifiable</code>).</td></tr><tr><td><code>party_block</code></td><td><code>v</code></td><td>Every ally gains v block.</td></tr><tr><td><code>retain_block</code></td><td><code>—</code></td><td>This block does NOT expire next turn.</td></tr><tr><td><code>heal_self / heal_ally</code></td><td><code>v</code></td><td>Restore v HP to self / a chosen ally.</td></tr><tr><td><code>heal_or_damage</code></td><td><code>v</code></td><td>Tap an ally → heal v; tap an enemy → deal v.</td></tr><tr><td><code>self_dmg / self_damage</code></td><td><code>v</code></td><td>Active dwarf loses v HP (Bloodied enabler).</td></tr><tr><td><code>draw</code></td><td><code>n</code></td><td>Active dwarf draws n.</td></tr><tr><td><code>gain_energy</code></td><td><code>n</code></td><td>Refund n energy.</td></tr><tr><td><code>apply</code></td><td><code>"burn", n</code></td><td>🔥 n Burn — ticks at enemy-turn start, ignores block, decays 1.</td></tr><tr><td><code>apply</code></td><td><code>"vulnerable", n</code></td><td>💥 Vulnerable — target takes ×1.5, decays 1/turn.</td></tr><tr><td><code>apply_status</code></td><td><code>"marked"</code></td><td>🎯 Mark — +25%. The ONLY multiplier. Stacks × with Vulnerable.</td></tr><tr><td><code>buff_next_attack</code></td><td><code>v</code></td><td>This dwarf's next attack this turn deals +v.</td></tr><tr><td><code>next_card_double</code></td><td><code>—</code></td><td>✨ The next card's numbers are doubled.</td></tr><tr><td><code>temp</code></td><td><code>"channel", per, charges</code></td><td>🌀 The next <i>charges</i> attacks deal +per each.</td></tr><tr><td><code>temp</code></td><td><code>"retaliate", v</code></td><td>🔁 Reflect v to anything that hits you (through the enemy phase).</td></tr><tr><td><code>temp</code></td><td><code>"fortify"</code></td><td>🔧 Next Guard +5 block; Retaliate +2 while active.</td></tr><tr><td><code>shield_ally</code></td><td><code>v</code></td><td>🔰 Chosen ally takes −v per hit (flat, through the enemy phase).</td></tr><tr><td><code>party_buff</code></td><td><code>"attack", v</code></td><td>📣 Every ally's attacks deal +v this turn.</td></tr><tr><td><code>force_target_all</code></td><td><code>"warrior"</code></td><td>😡 All enemies re-target the Warrior next enemy phase.</td></tr><tr><td><code>if_bloodied</code></td><td><code>[ops]</code></td><td>Run ops only if the dwarf is at or below half HP.</td></tr><tr><td><code>if_target_marked</code></td><td><code>[ops]</code></td><td>Run ops only if the target carries 🎯 Mark.</td></tr><tr><td><code>spend_devotion</code></td><td><code>[ops]</code></td><td>Run ops if 1 🙏 Devotion can be spent (built by playing skills).</td></tr><tr><td><code>on_kill</code></td><td><code>[ops]</code></td><td>Run ops only if this card killed the target.</td></tr></table><h2>House rules<span>break these and the card will not read</span></h2><div class="note"><b>1. Mark is the only multiplier.</b> 🎯 +25% (and enemy-side 💥 Vulnerable ×1.5). Everything else is flat, or the numbers stop being legible.<br><b>2. Resolution order is fixed:</b> base → +flat (Channel, Aura, Whetstone) → ×Mark → block → hp → Retaliate. Write the card so it reads correctly in that order.<br><b>3. Cost is the honest brake.</b> 0 = tempo, 1 = the norm, 2 = a real commitment. There is no 3.<br><b>4. Live numbers on the face.</b> <code>Db.describe()</code> renders the body — if your card's value changes with state, it must show the <i>current</i> value, in green, on the card.<br><b>5. Neutral must be class-blind.</b> If it only makes sense on one dwarf, it belongs in CLASS_REWARDS, not REWARD_POOL.</div>
+</div>
+</body></html>

@@ -1,0 +1,122 @@
+<!-- @dsCard group="Screens" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Contract Board + Shop</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:1280px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Contract Board + Shop</b><span>Three jobs, one shop — every buy trades against the rent</span><code>scripts/overworld/overworld.gd · _build_contracts</code></div>
+<div class="stage"><div style="left:0px;top:0px;width:720px;height:1280px;background:#17171f;"></div>
+<div style="left:0px;top:0px;width:720px;height:158px;background:#1f1f29;"></div>
+<div style="left:0px;top:156px;width:720px;height:2px;background:rgba(255,255,255,.08);"></div>
+<div class="l c" style="left:16px;top:24px;width:80px;height:76px;font-size:44px;line-height:76px;justify-content:center;align-items:center;">💰</div>
+<div class="l" style="left:104px;top:30px;width:240px;height:60px;font-size:44px;color:#f2bd33;">80g</div>
+<div style="left:106px;top:100px;width:180px;height:10px;background:#f2bd33;"></div>
+<div class="l c" style="left:632px;top:16px;width:72px;height:64px;font-size:40px;line-height:64px;justify-content:center;align-items:center;">👹</div>
+<div class="l r" style="left:360px;top:24px;width:268px;height:28px;font-size:20px;color:#e6e6e6;">RENT  55g</div>
+<div class="l r" style="left:360px;top:56px;width:268px;height:20px;font-size:13px;color:#e6e6e6;">next  65g</div>
+<div style="left:500px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:526px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:552px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div class="l" style="left:490px;top:108px;width:140px;height:16px;font-size:11px;color:#b3b3bf;">jobs left</div>
+<div class="l c" style="left:260px;top:120px;width:200px;height:24px;font-size:15px;color:#ffffff;">Month 1 / 8</div>
+<div class="l c" style="left:0px;top:176px;width:720px;height:26px;font-size:20px;color:#ffffff;">— CONTRACTS —</div>
+<div class="l c" style="left:0px;top:206px;width:720px;height:20px;font-size:14px;color:#ccccd9;">Pick one job. Weigh payout against danger and time.</div>
+<div style="left:12px;top:236px;width:216px;height:620px;background:#295733;"></div>
+<div style="left:12px;top:236px;width:216px;height:46px;background:#4dd16b;"></div>
+<div class="l c" style="left:12px;top:246px;width:216px;height:26px;font-size:18px;color:#1a1a1a;">LOW  💀</div>
+<div class="l c" style="left:60px;top:302px;width:120px;height:60px;font-size:40px;line-height:60px;justify-content:center;align-items:center;">🕳️</div>
+<div class="l c" style="left:18px;top:368px;width:204px;height:26px;font-size:17px;color:#ffffff;">Rat Cull</div>
+<div class="l c" style="left:18px;top:396px;width:204px;height:20px;font-size:13px;color:#ccccd9;">the Warrens</div>
+<div style="left:75px;top:566px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:75px;top:551px;width:90px;height:12px;background:#f5d142;"></div>
+<div class="l c" style="left:18px;top:576px;width:204px;height:30px;font-size:22px;color:#f5d142;">25g</div>
+<div class="l c" style="left:18px;top:628px;width:204px;height:18px;font-size:12px;color:#ccccd9;">crew</div>
+<div style="left:105px;top:650px;width:24px;height:24px;background:#1a1a21;"></div>
+<div class="l c" style="left:18px;top:696px;width:204px;height:18px;font-size:12px;color:#adadb8;">1 of 3 campaigns</div>
+<div class="l c" style="left:18px;top:776px;width:204px;height:22px;font-size:13px;color:#d9d9e6;">tap to select</div>
+<div style="left:248px;top:220px;width:224px;height:628px;background:#f2bd33;"></div>
+<div style="left:252px;top:224px;width:216px;height:620px;background:#66521a;"></div>
+<div style="left:252px;top:224px;width:216px;height:46px;background:#f2bd33;"></div>
+<div class="l c" style="left:252px;top:234px;width:216px;height:26px;font-size:18px;color:#1a1a1a;">MED  💀💀</div>
+<div class="l c" style="left:300px;top:290px;width:120px;height:60px;font-size:40px;line-height:60px;justify-content:center;align-items:center;">⛰️</div>
+<div class="l c" style="left:258px;top:356px;width:204px;height:26px;font-size:17px;color:#ffffff;">Haunted Mine</div>
+<div class="l c" style="left:258px;top:384px;width:204px;height:20px;font-size:13px;color:#ccccd9;">the Deeproads</div>
+<div class="l c" style="left:258px;top:418px;width:204px;height:22px;font-size:15px;color:#ffd966;">💰 Lucrative</div>
+<div style="left:315px;top:554px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:315px;top:539px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:315px;top:524px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:315px;top:509px;width:90px;height:12px;background:#f5d142;"></div>
+<div class="l c" style="left:258px;top:564px;width:204px;height:30px;font-size:22px;color:#f5d142;">136g</div>
+<div class="l c" style="left:258px;top:616px;width:204px;height:18px;font-size:12px;color:#ccccd9;">crew</div>
+<div style="left:315px;top:638px;width:24px;height:24px;background:#1a1a21;"></div>
+<div style="left:345px;top:638px;width:24px;height:24px;background:#1a1a21;"></div>
+<div style="left:375px;top:638px;width:24px;height:24px;background:#1a1a21;"></div>
+<div class="l c" style="left:258px;top:684px;width:204px;height:18px;font-size:12px;color:#adadb8;">1 of 3 campaigns</div>
+<div class="l c" style="left:258px;top:732px;width:204px;height:22px;font-size:15px;color:#ffd966;">⚔️ REAL FIGHT</div>
+<div class="l c" style="left:258px;top:764px;width:204px;height:22px;font-size:14px;color:#4dd16b;">tap again to FIGHT</div>
+<div style="left:492px;top:236px;width:216px;height:620px;background:#662121;"></div>
+<div style="left:492px;top:236px;width:216px;height:46px;background:#eb4242;"></div>
+<div class="l c" style="left:492px;top:246px;width:216px;height:26px;font-size:18px;color:#1a1a1a;">HIGH  💀💀💀</div>
+<div class="l c" style="left:540px;top:302px;width:120px;height:60px;font-size:40px;line-height:60px;justify-content:center;align-items:center;">🏰</div>
+<div class="l c" style="left:498px;top:368px;width:204px;height:26px;font-size:17px;color:#ffffff;">Lich's Ledger</div>
+<div class="l c" style="left:498px;top:396px;width:204px;height:20px;font-size:13px;color:#ccccd9;">the Keep</div>
+<div class="l c" style="left:498px;top:430px;width:204px;height:22px;font-size:15px;color:#ffd966;">👑 Elite</div>
+<div style="left:555px;top:566px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:555px;top:551px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:555px;top:536px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:555px;top:521px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:555px;top:506px;width:90px;height:12px;background:#f5d142;"></div>
+<div style="left:555px;top:491px;width:90px;height:12px;background:#f5d142;"></div>
+<div class="l c" style="left:498px;top:576px;width:204px;height:30px;font-size:22px;color:#f5d142;">130g</div>
+<div class="l c" style="left:498px;top:628px;width:204px;height:18px;font-size:12px;color:#ccccd9;">crew</div>
+<div style="left:555px;top:650px;width:24px;height:24px;background:#1a1a21;"></div>
+<div style="left:585px;top:650px;width:24px;height:24px;background:#1a1a21;"></div>
+<div style="left:615px;top:650px;width:24px;height:24px;background:#1a1a21;"></div>
+<div class="l c" style="left:498px;top:696px;width:204px;height:18px;font-size:12px;color:#adadb8;">1 of 3 campaigns</div>
+<div class="l c" style="left:498px;top:744px;width:204px;height:22px;font-size:15px;color:#ffd966;">⚔️ REAL FIGHT</div>
+<div class="l c" style="left:498px;top:776px;width:204px;height:22px;font-size:13px;color:#d9d9e6;">tap to select</div>
+<div class="l c" style="left:0px;top:866px;width:720px;height:20px;font-size:14px;color:#f5d142;">— SHOP —  buying trades against the rent clock</div>
+<div style="left:24px;top:896px;width:192px;height:108px;background:#3b473b;"></div>
+<div class="l c" style="left:80px;top:902px;width:80px;height:48px;font-size:28px;line-height:48px;justify-content:center;align-items:center;">🎯</div>
+<div class="l c" style="left:24px;top:950px;width:192px;height:18px;font-size:13px;color:#d9d9e6;">Card</div>
+<div class="l c" style="left:28px;top:968px;width:184px;height:16px;font-size:11px;color:#bfbfcc;">Opportunist</div>
+<div class="l c" style="left:24px;top:984px;width:192px;height:18px;font-size:14px;color:#f5d142;">35g</div>
+<div style="left:264px;top:896px;width:192px;height:108px;background:#292933;"></div>
+<div class="l c" style="left:320px;top:902px;width:80px;height:48px;font-size:28px;line-height:48px;justify-content:center;align-items:center;">🩹</div>
+<div class="l c" style="left:264px;top:950px;width:192px;height:18px;font-size:13px;color:#d9d9e6;">Field Medic</div>
+<div class="l c" style="left:268px;top:968px;width:184px;height:16px;font-size:11px;color:#bfbfcc;">a dwarf to full HP</div>
+<div class="l c" style="left:264px;top:984px;width:192px;height:18px;font-size:14px;color:#f5d142;">25g</div>
+<div style="left:504px;top:896px;width:192px;height:108px;background:#292933;"></div>
+<div class="l c" style="left:560px;top:902px;width:80px;height:48px;font-size:28px;line-height:48px;justify-content:center;align-items:center;">⛑️</div>
+<div class="l c" style="left:504px;top:950px;width:192px;height:18px;font-size:13px;color:#d9d9e6;">Recruit</div>
+<div class="l c" style="left:508px;top:968px;width:184px;height:16px;font-size:11px;color:#bfbfcc;">Hilda · Cleric</div>
+<div class="l c" style="left:504px;top:984px;width:192px;height:18px;font-size:14px;color:#f5d142;">50g</div>
+<div class="btn" style="left:30px;top:1150px;width:150px;height:64px;font-size:18px;">◀ Back</div>
+</div>
+</div>
+</body></html>

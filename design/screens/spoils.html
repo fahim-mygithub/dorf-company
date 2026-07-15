@@ -1,0 +1,77 @@
+<!-- @dsCard group="Screens" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Spoils (card claim)</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:1280px}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Spoils (card claim)</b><span>Co-op: one card leaves the room, first tap wins</span><code>scripts/overworld/overworld.gd · _build_hex_reward</code></div>
+<div class="stage"><div style="left:0px;top:0px;width:720px;height:1280px;background:#17171f;"></div>
+<div style="left:0px;top:0px;width:720px;height:158px;background:#1f1f29;"></div>
+<div style="left:0px;top:156px;width:720px;height:2px;background:rgba(255,255,255,.08);"></div>
+<div class="l c" style="left:16px;top:24px;width:80px;height:76px;font-size:44px;line-height:76px;justify-content:center;align-items:center;">💰</div>
+<div class="l" style="left:104px;top:30px;width:240px;height:60px;font-size:44px;color:#f2bd33;">104g</div>
+<div style="left:106px;top:100px;width:180px;height:10px;background:#f2bd33;"></div>
+<div class="l c" style="left:632px;top:16px;width:72px;height:64px;font-size:40px;line-height:64px;justify-content:center;align-items:center;">👹</div>
+<div class="l r" style="left:360px;top:24px;width:268px;height:28px;font-size:20px;color:#e6e6e6;">RENT  55g</div>
+<div class="l r" style="left:360px;top:56px;width:268px;height:20px;font-size:13px;color:#e6e6e6;">next  65g</div>
+<div style="left:500px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:526px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div style="left:552px;top:86px;width:20px;height:18px;background:#4dd16b;"></div>
+<div class="l" style="left:490px;top:108px;width:140px;height:16px;font-size:11px;color:#b3b3bf;">jobs left</div>
+<div class="l c" style="left:260px;top:120px;width:200px;height:24px;font-size:15px;color:#ffffff;">Month 1 / 8</div>
+<div class="l c" style="left:0px;top:200px;width:720px;height:28px;font-size:22px;color:#ffffff;">— SPOILS —</div>
+<div class="l c" style="left:0px;top:238px;width:720px;height:20px;font-size:14px;color:#ccccd9;">One card leaves this room. Claim it and it joins YOUR deck — first tap wins.</div>
+<div style="left:40px;top:300px;width:184px;height:300px;background:#752424;"></div>
+<div style="left:48px;top:308px;width:40px;height:40px;background:#f5d142;"></div>
+<div class="l c" style="left:48px;top:314px;width:40px;height:28px;font-size:22px;color:#1a1a1a;">1</div>
+<div class="l c" style="left:82px;top:346px;width:100px;height:76px;font-size:46px;line-height:76px;justify-content:center;align-items:center;">💥</div>
+<div class="l c" style="left:44px;top:438px;width:176px;height:26px;font-size:18px;color:#ffffff;">Guard Break</div>
+<div class="l c" style="left:48px;top:478px;width:168px;height:114px;font-size:13px;color:#e6e6eb;">Deal 7<br>Apply Vulnerable 💥 (+50%)</div>
+<div style="left:265px;top:285px;width:190px;height:306px;background:#4dd16b;"></div>
+<div style="left:268px;top:288px;width:184px;height:300px;background:#752424;"></div>
+<div style="left:276px;top:296px;width:40px;height:40px;background:#f5d142;"></div>
+<div class="l c" style="left:276px;top:302px;width:40px;height:28px;font-size:22px;color:#1a1a1a;">2</div>
+<div class="l c" style="left:310px;top:334px;width:100px;height:76px;font-size:46px;line-height:76px;justify-content:center;align-items:center;">🏆</div>
+<div class="l c" style="left:272px;top:426px;width:176px;height:26px;font-size:18px;color:#ffffff;">Trophy Hunter</div>
+<div class="l c" style="left:276px;top:466px;width:168px;height:114px;font-size:13px;color:#e6e6eb;">Deal 12<br>On kill: +2 ⚡</div>
+<div style="left:496px;top:300px;width:184px;height:300px;background:#752424;"></div>
+<div style="left:504px;top:308px;width:40px;height:40px;background:#f5d142;"></div>
+<div class="l c" style="left:504px;top:314px;width:40px;height:28px;font-size:22px;color:#1a1a1a;">1</div>
+<div class="l c" style="left:538px;top:346px;width:100px;height:76px;font-size:46px;line-height:76px;justify-content:center;align-items:center;">🔥</div>
+<div class="l c" style="left:500px;top:438px;width:176px;height:26px;font-size:18px;color:#ffffff;">Kindle</div>
+<div class="l c" style="left:504px;top:478px;width:168px;height:114px;font-size:13px;color:#e6e6eb;">Deal 5<br>Apply 3 🔥 Burn</div>
+<div style="left:0;top:1006px;width:720px;height:74px"><div style="left:0px;top:0px;width:720px;height:74px;background:rgba(26,26,36,.94);"></div>
+<div style="left:0px;top:0px;width:720px;height:2px;background:rgba(255,255,255,.07);"></div>
+<div class="l" style="left:12px;top:5px;width:560px;height:18px;font-size:13px;color:#99999f;">the crew — the company only commits when everyone agrees</div>
+<div class="l" style="left:12px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🛡️ Thrain •  (you)</div>
+<div class="l" style="left:150px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">⛑️ Bruni •</div>
+<div class="l" style="left:288px;top:28px;width:136px;height:22px;font-size:13px;color:#e0e0eb;">🧙 Vela •</div>
+</div><div class="btn" style="left:285px;top:1150px;width:150px;height:62px;font-size:18px;">Leave it</div>
+</div>
+</div>
+</body></html>

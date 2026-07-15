@@ -102,6 +102,17 @@ jobs:
           # Pages would otherwise strip files Jekyll dislikes.
           touch "${EXPORT_DIR}/.nojekyll"
 
+      # The design workspace is static HTML (screens/components/card sheets recreated from the
+      # Godot source). It is a subfolder of the game site, NOT part of the Godot build, so it just
+      # rides along in the artifact at /design/. Regenerate it with `python design/gen_design.py`.
+      - name: Copy design workspace into the site (/design/)
+        run: |
+          set -euo pipefail
+          cp -r design "${EXPORT_DIR}/design"
+          rm -f "${EXPORT_DIR}/design/gen_design.py"   # don't serve the generator source
+          test -f "${EXPORT_DIR}/design/index.html"
+          ls -la "${EXPORT_DIR}/design"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

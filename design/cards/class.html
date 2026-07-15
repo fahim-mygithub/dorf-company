@@ -1,0 +1,127 @@
+<!-- @dsCard group="Cards" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Cards — Class · class powers + skill trees</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+
+.sub{width:100%;max-width:1180px;margin:26px 0 4px;border-radius:12px;padding:16px 20px;
+  background:linear-gradient(135deg,#2a2620,#181820);border:1px solid #4a3f2a}
+.sub h3{font-size:17px;letter-spacing:.03em;color:#f2bd33;margin-bottom:5px}
+.sub p{font-size:12.5px;color:#c7c3b8;line-height:1.55;max-width:1010px}
+.sub code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b;font-size:11.5px}
+.sub .rk{display:inline-block;font-size:10.5px;letter-spacing:.08em;color:#e6c98a;
+  border:1px solid #6a5a38;border-radius:99px;padding:2px 10px;margin-top:9px}
+.cls{width:100%;max-width:1180px;background:#16161d;border:1px solid #2c2c38;border-radius:12px;
+  padding:16px 18px 18px;margin:12px 0;display:flex;flex-direction:column;gap:13px}
+.cls .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cls .hd .e{font-size:30px;position:relative;top:5px}
+.cls .hd b{font-size:19px;color:#fff}
+.cls .hd span{color:#8b8b99;font-size:12px}
+.res2{font-size:12.5px;color:#a8a8b8;line-height:1.5;max-width:1010px}
+.res2 b{color:#c7c7d1}
+.mid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.wg{width:252px;background:#12121a;border:1px solid #2c2c38;border-radius:8px;padding:11px 13px}
+.wgl{font-size:11px;letter-spacing:.10em;color:#8b8b99;margin-bottom:7px}
+.bar{height:14px;border-radius:7px;background:#2a2a34;overflow:hidden}
+.bar .fill{height:100%}
+.wgt{font-size:11.5px;color:#c7c7d1;margin-top:8px;line-height:1.45}
+.pips{font-size:20px;letter-spacing:4px}
+.soon{opacity:.62}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.cc{font-size:12px;padding:4px 11px;border-radius:99px;border:1px solid #34343f;color:#c7c7d1;background:#1c1c24}
+.cc b{color:#e6e7ea}
+/* the class ACTIVE (hero-power-style clickable) */
+.active{width:100%;border-radius:10px;padding:13px 15px;background:linear-gradient(135deg,#241d2e,#17131d);
+  border:1px solid #5a3f6a;display:flex;gap:15px;align-items:center}
+.aorb{width:58px;height:58px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  font-size:29px;background:radial-gradient(circle at 40% 33%,#43335a,#1a1420);border:2px solid #9a7ab8;
+  box-shadow:0 0 16px rgba(150,100,200,.4)}
+.ainfo{flex:1;min-width:0}
+.an{font-size:16px;color:#e9dcf7;font-weight:600}
+.an .lbl{font-size:10.5px;letter-spacing:.10em;color:#9a7ab8;margin-right:8px}
+.an .gate{font-size:11px;color:#c7a8dd;font-weight:400;margin-left:8px;border:1px solid #6a4f7a;
+  border-radius:99px;padding:2px 9px}
+.ae{font-size:12.5px;color:#c9bdd6;line-height:1.5;margin-top:5px}
+.fire{font-size:11px;color:#9a86b0;margin-top:6px}
+/* skill-tree teaser: the active is the root node */
+.tree{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.troot{font-size:12.5px;color:#e9dcf7;background:#2a2038;border:1px solid #7a5a90;border-radius:8px;
+  padding:7px 12px;font-weight:600}
+.tconn{width:24px;height:2px;background:#4a3f5a}
+.tbranch{display:flex;flex-direction:column;gap:6px}
+.tnode{font-size:11.5px;color:#a89ab8;background:#161320;border:1px dashed #4a3f5a;border-radius:8px;padding:6px 11px}
+.tnode .lk{margin-right:6px;opacity:.7}
+.tnode b{color:#cbb8e0;font-weight:600}
+.treelbl{font-size:10.5px;letter-spacing:.08em;color:#8b8b99;margin:2px 0 -2px}
+/* combat portrait mock with the Class Power orb */
+.combatrow{display:flex;gap:24px;flex-wrap:wrap;margin-top:11px}
+.port{width:152px;text-align:center;background:#12121a;border:1px solid #2c2c38;border-radius:10px;padding:13px 8px 11px;position:relative}
+.port .pe{font-size:44px;line-height:1}
+.port .pn{font-size:13px;color:#e6e7ea;margin-top:3px}
+.port .po{margin:9px auto 0;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:22px;background:radial-gradient(circle at 40% 33%,#43335a,#1a1420);border:2px solid #9a7ab8;
+  box-shadow:0 0 12px rgba(150,100,200,.45)}
+.port .pg{font-size:10.5px;color:#c0a0d8;margin-top:6px;line-height:1.4}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Cards — Class · class powers + skill trees</b><span>Each class a Class Power (Enrage / Action Surge / Divine Smite) + a skill-tree root</span><code>card_db.gd · STARTER_PACKS (draft)</code></div>
+<div class="note"><b>Draft direction (2026-07-15).</b> Every class has a <b>Class Power</b> — a clickable ability you fire by tapping your dwarf, separate from playing a card. Three layers: the <b>role</b> is a shared <i>substrate</i> (a resource), the <b>class</b> is one <i>Class Power</i> (gated by a <b>cooldown</b>) that spends or triggers it, and a <b>skill tree</b> (post-MVP) upgrades that power. Same engine per role, distinct verb per class. This is the <b>Tank</b> sheet — <b>Support</b> and <b>DPS</b> each have their own sheet now. Numbers are unsimmed placeholders.</div><div class="sub"><h3>🛡️ TANK — the Guard substrate</h3><p><b>Guard</b> is a stacking resource every tank builds by playing cards. It <b>soaks</b> like block and <b>pulls threat</b> — enemies already target the tankiest dwarf, so stacking Guard is how a tank volunteers to eat the hit. The cards <i>build</i> the resource; the <b>Class Power spends it</b>, differently per class: the Barbarian trades it for a rage stance (block → damage-resistance), the Fighter cashes a tempo burst, the Paladin discharges banked holy charge. Guard/Devotion live on the party dict, host-side, so both the meter and the power ride the snapshot.</p><span class="rk">BUILT — draft, unsimmed</span></div><div class="sub" style="background:#181622;border-color:#3a2f4a"><h3 style="color:#c295e0">🟣 In combat: the Class Power</h3><p>Each dwarf carries its <b>Class Power</b> as an orb on its portrait — a Hearthstone-style hero power. Tap your own dwarf to fire it; the orb shows the gate (its cooldown, or the resource it spends). This is a <b>second lever</b> beside the hand: cards build the resource, the Class Power spends it. In co-op you only ever fire your own.</p><div class="combatrow"><div class="port"><div class="pe">🪓</div><div class="pn">Barbarian</div><div class="po">😤</div><div class="pg">Enrage<br>stance · attack to keep</div></div><div class="port"><div class="pe">🛡️</div><div class="pn">Fighter</div><div class="po">⏱️</div><div class="pg">Action Surge<br>4-turn cooldown</div></div><div class="port"><div class="pe">🌟</div><div class="pn">Paladin</div><div class="po">🌟</div><div class="pg">Divine Smite<br>3-turn cooldown</div></div></div></div><div class="cls"><div class="hd"><span class="e">🪓</span><b>Barbarian</b><span>&nbsp;·&nbsp; Reaver's Kit &nbsp;·&nbsp; 34 hp · 3 energy</span></div><div class="active"><div class="aorb">😤</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Enrage<span class="gate">stance · attack each turn to hold · long cooldown if it drops</span></div><div class="ae">Enter a rage. While raging you take <b>HALF damage</b>, deal <b>+4 while Bloodied</b> (under half HP), and can <b>no longer gain Guard</b> — resistance replaces your block. Rage holds only while you attack at least once each turn; skip a turn and it drops, locked out for <b>4 turns</b>.</div><div class="fire">▸ tap your dwarf’s Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Guard, built by cards <b>when you’re not raging</b> — your turtle stance and threat-pull. Enrage flips to the fury stance: Guard is suspended, but half-damage resistance and the low-HP bonus take over. The game is bouncing between the two.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Enrage</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Unbridled</b> — half damage from ALL sources, not just attacks</div><div class="tnode"><span class="lk">🔒</span><b>Bloodthirst</b> — the low-HP bonus rises to +8; a kill re-arms the upkeep</div><div class="tnode"><span class="lk">🔒</span><b>Tireless Rage</b> — a missed attack no longer drops rage</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🪓</div><div class="cname">Reckless Swing</div><div class="cbody">Deal 12<br>Lose 3 HP</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🩸</div><div class="cname">Blood for Blood</div><div class="cbody">Deal 7<br>Bloodied: 14</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🐗</div><div class="cname">Thick Hide</div><div class="cbody">Gain 6 Guard<br>Bloodied: +6</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">📢</div><div class="cname">Bellow</div><div class="cbody">Enemies target you<br>Gain 4 Guard</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">👊</div><div class="cname">Rampage</div><div class="cbody">Deal 8 to ALL</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">CLASS POWER — ENRAGE</div><div class="pips" style="font-size:15px"><span style="color:#eb4242">🔥 RAGING</span></div><div class="wgt">½ damage taken · +4 while Bloodied · no Guard gain<br><span style="color:#f2bd33">⚠ attack each turn or it drops → 4-turn cooldown</span></div></div></div></div><div class="cls"><div class="hd"><span class="e">🛡️</span><b>Fighter</b><span>&nbsp;·&nbsp; Shieldwall Kit &nbsp;·&nbsp; 38 hp · 3 energy</span></div><div class="active"><div class="aorb">⏱️</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Action Surge<span class="gate">4-turn cooldown · free</span></div><div class="ae"><b>+2 energy this turn and draw 1</b> — the tempo burst that empties your hand in one turn and breaks a stall, then a 4-turn cooldown before the wall can surge again.</div><div class="fire">▸ tap your dwarf’s Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Guard, built by cards and <b>spent</b>, never hoarded — <b>Shield Bash</b> cashes it as damage, and <b>Reforge</b> turns it into mana for your next card (pour it into an <b>X-cost Whirlwind</b> to hit the whole board). Action Surge is the tempo release valve.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Action Surge</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Overdrive</b> — +3 energy instead of +2</div><div class="tnode"><span class="lk">🔒</span><b>Second Wind</b> — Surge also grants 8 Guard</div><div class="tnode"><span class="lk">🔒</span><b>Relentless</b> — dropping below half HP resets the cooldown</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🛡️</div><div class="cname">Shield Up</div><div class="cbody">Gain 8 Guard</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">↩️</div><div class="cname">Sidestep</div><div class="cbody">Gain 5 Guard<br>Draw 1</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">⚡</div><div class="cname">Riposte</div><div class="cbody">Reflect 5 when hit</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🔨</div><div class="cname">Shield Bash</div><div class="cbody">Deal 6<br>+1 / 4 Guard</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">0</div><div class="cemo">🔋</div><div class="cname">Reforge</div><div class="cbody">Next card: pay<br>with Guard, not ⚡</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">X</div><div class="cemo">🌪️</div><div class="cname">Whirlwind</div><div class="cbody">Deal X to ALL<br>X = ⚡ spent</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🧱</div><div class="cname">Hold the Line</div><div class="cbody">All allies +4 Guard</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">GUARD — spend it, don’t hoard</div><div class="bar"><div class="fill" style="width:74%;background:#5f8ad9"></div></div><div class="wgt">🛡️ soaks this turn · spend as damage (Shield Bash) or mana (Reforge → Whirlwind)<br><span style="color:#4dd16b">⏱️ Action Surge ready</span></div></div></div></div><div class="cls"><div class="hd"><span class="e">🌟</span><b>Paladin</b><span>&nbsp;·&nbsp; Oath Kit &nbsp;·&nbsp; 34 hp · 3 energy</span></div><div class="active"><div class="aorb">🌟</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Divine Smite<span class="gate">3-turn cooldown · spends banked 🙏 · target an enemy</span></div><div class="ae">Deal <b>6 + 4 per Devotion</b> spent to an enemy, and all allies gain 3 block. On a <b>3-turn cooldown</b> — so bank Devotion hard between casts and the smite you save up hits for more.</div><div class="fire">▸ tap your dwarf’s Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Devotion 🙏 — every skill banks 1. The <b>pips are your Smite charge</b>. The 3-turn cooldown sets the rhythm; how much you banked in between sets the size.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Divine Smite</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Radiant</b> — Smite also applies Vulnerable 💥</div><div class="tnode"><span class="lk">🔒</span><b>Zeal</b> — Smite also heals the party 4</div><div class="tnode"><span class="lk">🔒</span><b>Conviction</b> — every skill banks 2 🙏</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🙌</div><div class="cname">Lay on Hands</div><div class="cbody">Heal ally 8<br>Bank 🙏</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🕯️</div><div class="cname">Consecrate</div><div class="cbody">All allies +4 block<br>Bank 🙏</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#572b75;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">📣</div><div class="cname">Aura of Valor</div><div class="cbody">All allies +2 attack</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🔰</div><div class="cname">Shield of Faith</div><div class="cbody">Ally −3 / hit<br>Bank 🙏</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">⚔️</div><div class="cname">Vow of Wrath</div><div class="cbody">Gain 4 Guard<br>Next Smite +4</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">DEVOTION — Smite charge</div><div class="pips"><span style="color:#f2bd33">🙏🙏🙏</span><span style="color:#3a3a46">○○</span></div><div class="wgt">🌟 Divine Smite → spend 3 for 18 · then 3-turn cooldown</div></div></div></div><div class="sub" style="background:#181820;border-color:#34343f"><h3 style="color:#a8a8b8">📿 SUPPORT · ⚔️ DPS — now their own sheets</h3><p>The other two roles are built out on their own spec sheets, same shape as this one:</p><div class="chips"><span class="cc"><b>📿 Support</b> — Communion → Cleric <i>Channel Divinity</i> · Bard <i>Bardic Performance</i> · Druid <i>Wild Shape</i> &nbsp;→&nbsp; <code>cards/support.html</code></span><span class="cc"><b>⚔️ DPS</b> — Momentum → Sorcerer <i>Surge</i> · Rogue <i>Assassinate</i> · Monk <i>Flurry of Blows</i> &nbsp;→&nbsp; <code>cards/dps.html</code></span></div><p style="margin-top:9px;color:#8b8b99">Ranger (Hunter’s Mark) and Wizard are held as future signatures — the substrate carries them when they’re built.</p></div><div class="sub" style="background:#141821;border-color:#2c3340"><h3 style="color:#8fb4e0">The build cost — what Tank adds to combat</h3><p><b>The Class Power is the one genuinely new system:</b> a per-dwarf <code>power</code> + <code>power_cd</code> (turns remaining) on the party dict — it rides the snapshot, and the host ticks every cooldown down one at the start of each player phase. A tap-your-portrait input routes to a host-side <code>_fire_power(seat)</code> that checks the cooldown and resolves; in co-op the tap is an intent the host validates, exactly like a card play.<br><br><b>Enrage is a stance, so it needs a bit more:</b> a <code>raging</code> flag (halves incoming damage, blocks <code>gain_guard</code>, adds the Bloodied bonus) and an <b>upkeep check</b> at end of turn — if <code>attacked_this_turn</code> is false, rage drops and <code>power_cd</code> jumps to 4. Action Surge and Divine Smite just set <code>power_cd</code> on use (4 and 3).<br><br><b>New ops:</b> <code>gain_guard v</code> (Guard joins the threat/targeting read) · <code>dmg_per_guard</code> (Fighter Shield Bash) · <code>pay_with_guard</code> (Reforge: the next card’s cost is drawn from Guard, not energy) · <b>X-cost</b> support (cost <code>"X"</code> spends all energy — or all Guard, via Reforge — and Whirlwind deals that much to every enemy) · plus the three power effects (<code>enrage</code> / <code>action_surge</code> / <code>smite</code>). <b>Reused as-is:</b> dmg, block, self_dmg, if_bloodied, draw, gain_energy, temp/retaliate, party_block, party_buff, shield_ally, spend_devotion, force_target_all. Promoting Frenzy / Action Surge / Divine Smite from cards to powers kept the card packs lean.</p></div>
+</div>
+</body></html>

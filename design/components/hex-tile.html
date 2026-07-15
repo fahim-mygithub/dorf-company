@@ -1,0 +1,75 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Hex tile</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+
+.hg{display:flex;flex-wrap:wrap;gap:22px;width:100%;max-width:1180px}
+.h1{width:120px;text-align:center}
+.h1 .hh{position:relative;width:87px;height:100px;margin:0 auto}
+.h1 .hh>div{position:absolute}
+.h1 b{display:block;font-size:12px;color:#e0e0e8;margin-top:8px}
+.h1 i{display:block;font-size:11px;color:#8b8b99;font-style:normal;line-height:1.35}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Hex tile</b><span>Every tile kind — terrain fill, glyph, ring, bevel</span><code>scripts/ui/hex_tile.gd</code></div>
+<div class="note">A Civ-style board piece, drawn in <code>_draw()</code>: a dark side hexagon for thickness, a terrain-tinted top face, a lit rim on the two upper edges, and a pulsing ring for affordance. Pointy-top, R=50 → 87×100. Picking is hexagon-precise, so a corner never steals a neighbour's click.</div><div class="hg"><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#3b423b;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">·</div></div></div><b>empty</b><i>quiet passage</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#57362b;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:-8px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">⚔️</div><div class="l c" style="left:0;top:62px;width:86.6025px;height:16px;font-size:12px;color:#f28080">☠☠</div></div></div><b>combat</b><i>a fight · ☠ = how tough</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#334f2b;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">🎁</div></div></div><b>reward</b><i>a card leaves the room</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#453654;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">❓</div></div></div><b>event</b><i>a shared-risk choice</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#755c21;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div style="left:2px;top:2px;width:82.6025px;height:96px;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);background:#f5d142;opacity:.85"></div><div style="left:5px;top:5px;width:76.6025px;height:90px;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);background:#755c21"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">🏁</div></div></div><b>objective</b><i>🏁 the captive — pays the real money</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#4d7094;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">🚩</div></div></div><b>entry</b><i>where the crew stands</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#57362b;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div style="left:2px;top:2px;width:82.6025px;height:96px;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);background:#f2bd33;opacity:.85"></div><div style="left:5px;top:5px;width:76.6025px;height:90px;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);background:#57362b"></div><div class="l c" style="left:0;top:-8px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">⚔️</div><div class="l c" style="left:0;top:62px;width:86.6025px;height:16px;font-size:12px;color:#f28080">☠</div></div></div><b>combat</b><i>reachable — amber ring pulses</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:6px;width:86.6025px;height:100px;background:#17171c;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)"></div><div style="left:0;top:0;width:86.6025px;height:100px;background:#2b362e;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:1"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:1">✔️</div></div></div><b>resolved</b><i>resolved — desaturates into the board</i></div><div class="h1"><div class="hh"><div style="left:0;top:0;width:86.6025px;height:100px"><div style="left:0;top:0;width:86.6025px;height:100px;background:#1c1f24;clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);opacity:.55"></div><div class="l c" style="left:0;top:0px;width:86.6025px;height:100px;font-size:26px;align-items:center;justify-content:center;opacity:.55">🏔️</div></div></div><b>wall</b><i>impassable ridge · sits IN the board</i></div></div>
+</div>
+</body></html>

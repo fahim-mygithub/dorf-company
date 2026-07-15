@@ -1,0 +1,124 @@
+<!-- @dsCard group="Cards" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Cards — DPS role · class powers</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0b0b0e;color:#e6e7ea;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif}
+.wrap{padding:20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{width:720px;display:flex;align-items:baseline;gap:10px;font-size:13px;color:#8b8b99}
+.cap b{color:#e6e7ea;font-size:15px;font-weight:600;letter-spacing:.02em}
+.cap code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#6b6b7a;margin-left:auto}
+.stage{position:relative;width:720px;height:1280px;background:#17171f;overflow:hidden;
+  border:1px solid #2c2c38;border-radius:4px}
+.stage *{position:absolute}
+.l{display:flex;align-items:flex-start;line-height:1.15;white-space:pre-wrap}
+.c{justify-content:center;text-align:center}
+.r{justify-content:flex-end;text-align:right}
+/* Godot 4 default Button, approximated */
+.btn{display:flex;align-items:center;justify-content:center;text-align:center;
+  background:#33373f;border:1px solid #4a4f5a;border-radius:3px;color:#e4e6ea;
+  line-height:1.2;white-space:pre-line}
+.btn.on{background:#3f5a46;border-color:#5f8a6b}
+.btn.off{background:#26282e;border-color:#34363d;color:#6e7078}
+.le{display:flex;align-items:center;justify-content:center;background:#2a2c33;
+  border:1px solid #43464f;border-radius:3px;color:#7c7f88}
+
+.stage{height:0px}
+
+.card{position:relative;flex:0 0 auto;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.card>*{position:absolute}
+.orb{left:6px;top:6px;width:34px;height:34px;border-radius:17px;background:#f5d640;color:#1f190d;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700}
+.cemo{left:0;top:24px;width:130px;height:58px;display:flex;align-items:center;justify-content:center;font-size:38px}
+.cname{left:4px;top:88px;width:122px;height:22px;text-align:center;font-size:15px;color:#fff}
+.cbody{left:6px;top:112px;width:118px;height:74px;text-align:center;font-size:12px;
+  color:#e6ebf5;line-height:1.25}
+.tipp{width:236px;background:rgba(13,13,20,.97);border:1px solid rgba(255,255,255,.30);
+  border-radius:8px;padding:6px 8px;font-size:12px;color:#e6e7ea;line-height:1.3}
+
+.wrap{align-items:flex-start;padding:28px 32px}
+.cap{width:auto}
+h2{font-size:15px;font-weight:600;letter-spacing:.10em;text-transform:uppercase;color:#8b8b99;
+  margin:26px 0 4px;width:100%}
+h2 span{color:#5c5c68;letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px}
+.row{display:flex;flex-wrap:wrap;gap:16px;width:100%;max-width:1180px}
+.slot{width:130px}
+.slot .why{font-size:11px;color:#7a7a88;line-height:1.35;margin-top:6px;text-align:center}
+.blank{width:130px;height:188px;border:2px dashed #3d3d4a;border-radius:12px;background:#1a1a22;
+  display:flex;align-items:center;justify-content:center;color:#43434f;font-size:26px}
+.key{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{font-size:11px;padding:3px 9px;border-radius:99px;border:1px solid #34343f;color:#a8a8b8;
+  background:#1c1c24}
+.chip.a{border-color:#752424;color:#e08f8f}
+.chip.s{border-color:#21426b;color:#8fb4e0}
+.chip.p{border-color:#572b75;color:#c295e0}
+table{border-collapse:collapse;font-size:12px;margin-top:8px;width:100%;max-width:1180px}
+td,th{border:1px solid #2c2c38;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#1c1c24;color:#a8a8b8;font-weight:600}
+td code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b}
+.note{font-size:12px;color:#7a7a88;line-height:1.5;max-width:900px;margin-top:6px}
+
+.sub{width:100%;max-width:1180px;margin:26px 0 4px;border-radius:12px;padding:16px 20px;
+  background:linear-gradient(135deg,#2a2620,#181820);border:1px solid #4a3f2a}
+.sub h3{font-size:17px;letter-spacing:.03em;color:#f2bd33;margin-bottom:5px}
+.sub p{font-size:12.5px;color:#c7c3b8;line-height:1.55;max-width:1010px}
+.sub code{font-family:ui-monospace,Consolas,monospace;color:#e0b96b;font-size:11.5px}
+.sub .rk{display:inline-block;font-size:10.5px;letter-spacing:.08em;color:#e6c98a;
+  border:1px solid #6a5a38;border-radius:99px;padding:2px 10px;margin-top:9px}
+.cls{width:100%;max-width:1180px;background:#16161d;border:1px solid #2c2c38;border-radius:12px;
+  padding:16px 18px 18px;margin:12px 0;display:flex;flex-direction:column;gap:13px}
+.cls .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cls .hd .e{font-size:30px;position:relative;top:5px}
+.cls .hd b{font-size:19px;color:#fff}
+.cls .hd span{color:#8b8b99;font-size:12px}
+.res2{font-size:12.5px;color:#a8a8b8;line-height:1.5;max-width:1010px}
+.res2 b{color:#c7c7d1}
+.mid{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}
+.wg{width:252px;background:#12121a;border:1px solid #2c2c38;border-radius:8px;padding:11px 13px}
+.wgl{font-size:11px;letter-spacing:.10em;color:#8b8b99;margin-bottom:7px}
+.bar{height:14px;border-radius:7px;background:#2a2a34;overflow:hidden}
+.bar .fill{height:100%}
+.wgt{font-size:11.5px;color:#c7c7d1;margin-top:8px;line-height:1.45}
+.pips{font-size:20px;letter-spacing:4px}
+.soon{opacity:.62}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.cc{font-size:12px;padding:4px 11px;border-radius:99px;border:1px solid #34343f;color:#c7c7d1;background:#1c1c24}
+.cc b{color:#e6e7ea}
+.active{width:100%;border-radius:10px;padding:13px 15px;background:linear-gradient(135deg,#241d2e,#17131d);
+  border:1px solid #5a3f6a;display:flex;gap:15px;align-items:center}
+.aorb{width:58px;height:58px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  font-size:29px;background:radial-gradient(circle at 40% 33%,#43335a,#1a1420);border:2px solid #9a7ab8;
+  box-shadow:0 0 16px rgba(150,100,200,.4)}
+.ainfo{flex:1;min-width:0}
+.an{font-size:16px;color:#e9dcf7;font-weight:600}
+.an .lbl{font-size:10.5px;letter-spacing:.10em;color:#9a7ab8;margin-right:8px}
+.an .gate{font-size:11px;color:#c7a8dd;font-weight:400;margin-left:8px;border:1px solid #6a4f7a;
+  border-radius:99px;padding:2px 9px}
+.ae{font-size:12.5px;color:#c9bdd6;line-height:1.5;margin-top:5px}
+.fire{font-size:11px;color:#9a86b0;margin-top:6px}
+.tree{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.troot{font-size:12.5px;color:#e9dcf7;background:#2a2038;border:1px solid #7a5a90;border-radius:8px;
+  padding:7px 12px;font-weight:600}
+.tconn{width:24px;height:2px;background:#4a3f5a}
+.tbranch{display:flex;flex-direction:column;gap:6px}
+.tnode{font-size:11.5px;color:#a89ab8;background:#161320;border:1px dashed #4a3f5a;border-radius:8px;padding:6px 11px}
+.tnode .lk{margin-right:6px;opacity:.7}
+.tnode b{color:#cbb8e0;font-weight:600}
+.treelbl{font-size:10.5px;letter-spacing:.08em;color:#8b8b99;margin:2px 0 -2px}
+.combatrow{display:flex;gap:24px;flex-wrap:wrap;margin-top:11px}
+.port{width:152px;text-align:center;background:#12121a;border:1px solid #2c2c38;border-radius:10px;padding:13px 8px 11px;position:relative}
+.port .pe{font-size:44px;line-height:1}
+.port .pn{font-size:13px;color:#e6e7ea;margin-top:3px}
+.port .po{margin:9px auto 0;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:22px;background:radial-gradient(circle at 40% 33%,#43335a,#1a1420);border:2px solid #9a7ab8;
+  box-shadow:0 0 12px rgba(150,100,200,.45)}
+.port .pg{font-size:10.5px;color:#c0a0d8;margin-top:6px;line-height:1.4}
+</style></head>
+<body>
+<div class="wrap">
+<div class="cap"><b>Cards — DPS role · class powers</b><span>DPS: Momentum → Surge / Assassinate / Flurry of Blows</span><code>card_db.gd · STARTER_PACKS (draft)</code></div>
+<div class="note"><b>Draft direction (2026-07-15).</b> The <b>DPS</b> role, same three-layer shape as the Tank sheet: the <b>role</b> is a shared <i>substrate</i> (Momentum), each <b>class</b> is one <b>Class Power</b> that spends it, and a <b>skill tree</b> (post-MVP) upgrades that power. The Sorcerer’s kit already ships today; Rogue and Monk are new. Numbers are unsimmed placeholders.</div><div class="sub" style="background:linear-gradient(135deg,#2a1e1e,#1c1618);border-color:#4a2f2f"><h3 style="color:#eb6b6b">⚔️ DPS — the Momentum substrate</h3><p><b>Momentum</b> ramps your damage as the turn builds: <b>+1 for every attack you play</b>, reset each turn. Sequence the turn right and the last hit is the biggest. The cards <i>build</i> Momentum; the <b>Class Power spends ALL of it</b>, and the SHAPE of the spend is the class — the Sorcerer dumps it into <b>one enormous hit</b>, the Rogue into <b>one execute</b> that ignores the block of the weak, the Monk into <b>many small blows</b> that each re-trigger on-hit. Momentum already ships (<code>dmg_per_momentum</code>) and lives on the party dict, so it rides the snapshot.</p><span class="rk">DRAFT — unsimmed</span></div><div class="sub" style="background:#181622;border-color:#3a2f4a"><h3 style="color:#eb9a9a">🟣 In combat: the Class Power</h3><p>Each dwarf carries its <b>Class Power</b> as an orb on its portrait — a Hearthstone-style hero power. Tap your own dwarf to fire it; the orb shows the gate (its cooldown, or the resource it spends). Cards build the resource, the Class Power spends it. In co-op you only ever fire your own.</p><div class="combatrow"><div class="port"><div class="pe">🧙</div><div class="pn">Sorcerer</div><div class="po">🌀</div><div class="pg">Surge<br>3-turn cooldown</div></div><div class="port"><div class="pe">🗡️</div><div class="pn">Rogue</div><div class="po">🗡️</div><div class="pg">Assassinate<br>3-turn cooldown</div></div><div class="port"><div class="pe">👊</div><div class="pn">Monk</div><div class="po">👊</div><div class="pg">Flurry<br>3-turn cooldown</div></div></div></div><div class="cls"><div class="hd"><span class="e">🧙</span><b>Sorcerer</b><span>&nbsp;·&nbsp; Metamagic Kit &nbsp;·&nbsp; 22 hp · 3 energy</span></div><div class="active"><div class="aorb">🌀</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Surge<span class="gate">3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy</span></div><div class="ae">Overchannel. Pour all your <b>Momentum</b> into one hit: your next attack this turn deals <b>+5 per ⚔️</b> spent — a single enormous strike. On a <b>3-turn cooldown</b>. The multiply-one-hit pillar, weaponised.</div><div class="fire">▸ tap your dwarf's Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Momentum ⚔️ — +1 per attack you play this turn. The Sorcerer stacks Channel/Mark first, then Surges the finisher. Play it <b>last</b>, when Momentum is highest.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Surge</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Twin</b> — Surge also strikes a second enemy for half</div><div class="tnode"><span class="lk">🔒</span><b>Wild Magic</b> — a kill under Surge refunds the cooldown</div><div class="tnode"><span class="lk">🔒</span><b>Empowered</b> — Mark 🎯 counts double on the Surged hit</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🎯</div><div class="cname">Mark</div><div class="cbody">Mark: +25% dmg taken</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#572b75;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🌀</div><div class="cname">Channel</div><div class="cbody">Next 2 attacks +3</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">⚡</div><div class="cname">Bolt</div><div class="cbody">Deal 6<br>+2 per ⚔️</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🌩️</div><div class="cname">Arc Lightning</div><div class="cbody">Deal 9<br>Deal 4 to ALL</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">💥</div><div class="cname">Arcane Finisher</div><div class="cbody">Deal 5<br>+3 per attack</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">MOMENTUM — Surge fuel</div><div class="bar"><div class="fill" style="width:66%;background:#eb6b6b"></div></div><div class="wgt">🌀 next attack +5 per ⚔️ · one huge hit · then reset</div></div></div></div><div class="cls"><div class="hd"><span class="e">🗡️</span><b>Rogue</b><span>&nbsp;·&nbsp; Sneak Attack Kit &nbsp;·&nbsp; 24 hp · 3 energy</span></div><div class="active"><div class="aorb">🗡️</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Assassinate<span class="gate">3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy</span></div><div class="ae">A killing blow. Deal <b>6 + 4 per ⚔️</b> Momentum to one target — and if it is <b>Marked or Bloodied, ignore its block entirely</b>. The execute: soften it, then delete it. <b>3-turn cooldown</b>.</div><div class="fire">▸ tap your dwarf's Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Momentum ⚔️ — the Rogue ramps it fastest by drilling <b>exposed</b> targets (a hit on a Marked enemy banks 2). <i>Practiced</i>: precision is the ramp.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Assassinate</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Deadly</b> — +6 per ⚔️ instead of +4</div><div class="tnode"><span class="lk">🔒</span><b>Vanish</b> — a kill with Assassinate refunds the cooldown</div><div class="tnode"><span class="lk">🔒</span><b>Exploit</b> — also ignores block on ANY target under half HP</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Backstab</div><div class="cbody">Deal 6<br>Marked/Bloodied: +6</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🎯</div><div class="cname">Expose</div><div class="cbody">Mark target<br>Gain ⚔️</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">0</div><div class="cemo">💨</div><div class="cname">Shadowstep</div><div class="cbody">Gain 1 ⚡<br>Next attack +4</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🧪</div><div class="cname">Poison Blade</div><div class="cbody">Deal 4<br>Apply 3 🔥</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">🔪</div><div class="cname">Fan of Knives</div><div class="cbody">Deal 6 to ALL</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">MOMENTUM — Assassinate fuel</div><div class="bar"><div class="fill" style="width:80%;background:#eb6b6b"></div></div><div class="wgt">🗡️ 6 +4 per ⚔️ · ignores block on the Marked / Bloodied</div></div></div></div><div class="cls"><div class="hd"><span class="e">👊</span><b>Monk</b><span>&nbsp;·&nbsp; Flurry Kit &nbsp;·&nbsp; 24 hp · 3 energy</span></div><div class="active"><div class="aorb">👊</div><div class="ainfo"><div class="an"><span class="lbl">CLASS POWER</span>Flurry of Blows<span class="gate">3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy</span></div><div class="ae">Unleash a torrent — strike the target <b>once per ⚔️</b> Momentum for <b>4 each</b>, and <b>every hit</b> fires your on-hit effects (Burn, the Mark payoff, energy refunds). Many small blows, not one big one. <b>3-turn cooldown</b>.</div><div class="fire">▸ tap your dwarf's Class Power in combat to fire it</div></div></div><div class="res2"><b>Feeds it:</b> Momentum ⚔️ — the Monk ramps by <b>not repeating</b> (<i>Cadence</i>: a distinct attack banks 2). Each blow re-triggers on-hit, so a wide setup pays off many times over.</div><div class="treelbl">SKILL TREE (post-MVP) — the Class Power is the root node</div><div class="tree"><div class="troot">✦ Flurry of Blows</div><div class="tconn"></div><div class="tbranch"><div class="tnode"><span class="lk">🔒</span><b>Iron Fist</b> — 5 per hit instead of 4</div><div class="tnode"><span class="lk">🔒</span><b>Ki Flow</b> — each hit that kills refunds 1 ⚡</div><div class="tnode"><span class="lk">🔒</span><b>Endless</b> — Flurry throws one extra blow</div></div></div><div class="mid"><div class="row" style="max-width:770px"><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">0</div><div class="cemo">👊</div><div class="cname">Jab</div><div class="cbody">Deal 3<br>Gain 1 ⚡</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🦵</div><div class="cname">Crane Kick</div><div class="cbody">Deal 5<br>+2 per ⚔️</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#21426b;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🌀</div><div class="cname">Deflect</div><div class="cbody">Gain 5 block<br>Reflect 4</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#572b75;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🧘</div><div class="cname">Meditate</div><div class="cbody">Draw 1<br>Next attack repeats</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">2</div><div class="cemo">☝️</div><div class="cname">Quivering Palm</div><div class="cbody">Deal 8<br>On kill: +2 ⚡</div></div></div><div class="slot"><div class="card" style="transform:rotate(0deg) scale(1);transform-origin:50% 100%;width:130px;height:188px;background:#752424;border:2px solid rgba(255,255,255,.22);border-radius:12px;"><div class="orb">1</div><div class="cemo">🗡️</div><div class="cname">Strike</div><div class="cbody">Deal 6</div></div></div></div><div class="wg"><div class="wgl">MOMENTUM — Flurry fuel</div><div class="bar"><div class="fill" style="width:72%;background:#eb6b6b"></div></div><div class="wgt">👊 4 damage × ⚔️ hits · each blow re-triggers on-hit</div></div></div></div><div class="sub" style="background:#141821;border-color:#2c3340"><h3 style="color:#8fb4e0">The build cost — what DPS adds</h3><p>DPS is the <b>lightest</b> role to add: Momentum already exists (<code>dmg_per_momentum</code> ships today on Momentum Strike), so the substrate is <i>free</i>. It reuses the same <code>power</code> / <code>power_cd</code> Class Power plumbing as Tank and Support.<br><br>All three powers are <b>one-shot discharges</b> — no stance, no upkeep: each reads the dwarf’s Momentum, applies its shape, resets Momentum, and sets a 3-turn cooldown. The differences are pure op composition — <b>Surge</b> = <code>buff_next_attack</code> scaled by Momentum; <b>Assassinate</b> = one hit + a <code>pierce_block</code> flag when the target is Marked/Bloodied; <b>Flurry</b> = a loop of N single hits, each running the normal on-hit pipeline.<br><br><b>New ops:</b> <code>surge</code> / <code>assassinate</code> / <code>flurry</code> (all Momentum-scaled) · <code>pierce_block</code> (ignore block for this hit). <b>Reused as-is:</b> dmg, dmg_all, dmg_per_momentum, buff_next_attack, apply_status/marked, apply/vulnerable+burn, if_bloodied, if_target_marked, on_kill, gain_energy, draw. The Sorcerer’s whole kit (Mark/Channel/Finisher) is already shipped.</p></div>
+</div>
+</body></html>
