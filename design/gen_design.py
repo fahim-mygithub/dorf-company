@@ -1128,11 +1128,13 @@ def combat_row_box(portraits, accent="#c295e0"):
 
 # ---- Support card kits (Communion substrate) ----
 S_CLERIC = [
-    C("mend", "Mend", 1, "\U0001f64c", "skill", "ally", ["Heal ally 8", "Bank \U0001f4ff"], ""),
-    C("bless", "Bless", 1, "✨", "skill", "party", ["All allies +3 block", "Bank \U0001f4ff"], ""),
-    C("sanctuary", "Sanctuary", 1, "\U0001f530", "skill", "ally", ["Ally −3 / hit", "Bank \U0001f4ff"], ""),
-    C("litany", "Litany", 0, "\U0001f4ff", "power", "self", ["Draw 1", "Bank \U0001f4ff\U0001f4ff"], ""),
-    C("smite_s", "Smite", 2, "\U0001f31f", "attack", "enemy", ["Deal 8", "+3 per \U0001f4ff spent"], ""),
+    # heal-side casts (skills/powers feed the aura's MERCY charge)
+    C("mend", "Mend", 1, "\U0001f64c", "skill", "ally", ["Heal ally 8", "\U0001f64f mercy cast"], ""),
+    C("bless", "Bless", 1, "✨", "skill", "party", ["All allies +3 block", "\U0001f64f mercy cast"], ""),
+    C("sanctuary", "Sanctuary", 1, "\U0001f530", "skill", "ally", ["Ally −3 / hit", "\U0001f64f mercy cast"], ""),
+    # smite-side casts (attacks feed the aura's SMITE charge)
+    C("censure", "Censure", 1, "\U0001f4a5", "attack", "enemy", ["Deal 6", "\U0001f525 smite cast"], ""),
+    C("searing_word", "Searing Word", 1, "☀️", "attack", "enemy", ["Deal 5", "Apply 2 \U0001f525"], ""),
     STRIKE,
 ]
 S_BARD = [
@@ -1188,35 +1190,44 @@ def s_cards_support():
           "<p><b>Communion</b> is the party’s shared reserve of faith and morale. Every support builds it by "
           "<b>helping an ally</b> — a heal, a shield, a buff banks 1 \U0001f4ff — and support cards read off "
           "it. The cards <i>build</i> the resource; the <b>Class Power channels it</b>, differently per class: "
-          "the Cleric <b>discharges</b> it in one burst (heal all or smite all), the Bard <b>burns</b> it "
-          "slowly to sustain a party-wide song, the Druid <b>spends a lump</b> to shift into a front-line "
-          "beast. Communion lives on the party dict, host-side, so both the meter and the power ride the "
+          "the Cleric runs a <b>passive aura</b> that auto-discharges every 5 casts (heal-all + smite-all, "
+          "scaled by your cast streak), the Bard <b>burns</b> it slowly to sustain a party-wide song, the "
+          "Druid <b>spends a lump</b> to shift into a front-line beast. <i>(The Cleric’s aura reads cast "
+          "types directly instead of banking Communion — it’s the always-on member of the trio.)</i> "
+          "Communion lives on the party dict, host-side, so both the meter and the power ride the "
           "snapshot.</p><span class=\"rk\">DRAFT — unsimmed</span></div>")
 
     b += combat_row_box([
-        ("⛑️", "Cleric", "✨", "Channel Divinity<br>3-turn cooldown"),
+        ("⛑️", "Cleric", "✨", "Channel Divinity<br>passive · auto every 5"),
         ("\U0001f3bb", "Bard", "\U0001f3b6", "Bardic Performance<br>stance · sustain"),
         ("\U0001f43b", "Druid", "\U0001f43e", "Wild Shape<br>stance · beast"),
     ], accent="#7ad19a")
 
     b += role_block(
-        "⛑️", "Cleric", "Communion Kit", "28 hp · 3 energy",
+        "⛑️", "Cleric", "Channel Kit", "28 hp · 3 energy",
         {"icon": "✨", "name": "Channel Divinity",
-         "gate": "3-turn cooldown · spends ALL \U0001f4ff · choose heal or smite",
-         "effect": "Discharge your Communion. <b>Mercy</b>: heal ALL allies <b>3 per \U0001f4ff</b>. "
-                   "<b>Judgment</b>: deal <b>3 per \U0001f4ff</b> to ALL enemies. Then Communion resets and "
-                   "the power goes on a <b>3-turn cooldown</b> — bank between casts and the discharge lands "
-                   "harder.",
-         "tree": ["<b>Radiant</b> — Judgment also applies Vulnerable \U0001f4a5 to all",
-                  "<b>Devout</b> — every ally-skill banks 2 \U0001f4ff instead of 1",
-                  "<b>Intervention</b> — once per fight, Channel does BOTH mercy and judgment"]},
-        "Communion \U0001f4ff — every skill that helps an ally banks 1. The <b>pips are your Channel "
-        "charge</b>: how much you banked sets the size, the cooldown sets the rhythm.",
+         "gate": "passive aura · no tap · auto-discharges every 5 casts",
+         "effect": "A channelled aura that fires <b>itself</b> — no tap. Every card the Cleric plays charges "
+                   "it, read by <b>type</b>: attacks feed the <b>\U0001f525 smite</b> side, heals &amp; "
+                   "shields feed the <b>\U0001f64f mercy</b> side. Cast the same type back-to-back and the "
+                   "aura <b>intensifies</b> — each repeat in a streak adds more than the last. On <b>every "
+                   "5th cast it discharges automatically</b>: heal ALL allies for the mercy charge, damage "
+                   "ALL enemies for the smite charge. A pure run (5 attacks, or 5 heals) pays out far more "
+                   "than alternating — <b>commit to a line</b>.",
+         "tree": ["<b>Overflow</b> — mercy that overheals lands as Guard on the party",
+                  "<b>Zealotry</b> — a pure 5-streak also applies Vulnerable \U0001f4a5 (smite) or cleanses a debuff (mercy)",
+                  "<b>Deeper Faith</b> — the aura discharges every 4 casts instead of 5"]},
+        "Its own casts — the aura reads the Cleric’s card <b>types</b> as they’re played; there’s no "
+        "resource to bank or button to press. The <b>streak</b> is the skill: "
+        "\U0001f525\U0001f525\U0001f525 in a row builds a bigger smite than \U0001f525\U0001f64f"
+        "\U0001f525\U0001f64f ever could, and \U0001f64f\U0001f64f\U0001f64f a bigger heal. Pick a side, "
+        "stay on it.",
         S_CLERIC,
-        '<div class="wg"><div class="wgl">COMMUNION — Channel charge</div>'
-        '<div class="pips"><span style="color:#4dd16b">\U0001f4ff\U0001f4ff\U0001f4ff\U0001f4ff</span>'
-        '<span style="color:#3a3a46">○</span></div>'
-        '<div class="wgt">✨ heal ALL 3/\U0001f4ff · or smite ALL 3/\U0001f4ff · then 3-turn cooldown</div></div>')
+        '<div class="wg"><div class="wgl">CHANNEL — auto every 5 casts</div>'
+        '<div class="pips"><span style="color:#eb6b6b">\U0001f525\U0001f525\U0001f525</span>'
+        '<span style="color:#3a3a46">○○</span></div>'
+        '<div class="wgt">3 / 5 · streak \U0001f525×3 → smite building · the 5th cast discharges: '
+        'heal allies &amp; hit all enemies</div></div>')
 
     b += role_block(
         "\U0001f3bb", "Bard", "Performance Kit", "26 hp · 3 energy",
@@ -1261,16 +1272,20 @@ def s_cards_support():
           "<code>power</code> + <code>power_cd</code> on the party dict, ticked host-side, fired by a "
           "validated tap intent. Communion is <b>one new counter</b> (<code>communion</code> on the party "
           "dict, +1 when a card that helps an ally resolves).<br><br>"
-          "<b>Two of the three powers are stances</b> (like Enrage), so they reuse that upkeep hook: the "
+          "<b>The Bard and Druid powers are stances</b> (like Enrage), so they reuse that upkeep hook: the "
           "<b>Bard’s song</b> drains 1 Communion at end of turn and ends at 0; <b>Wild Shape</b> sets a "
           "<code>shifted</code> flag (Guard/turn, +5 Strikes, support skills locked) for 3 turns. The "
-          "<b>Cleric’s Channel</b> just reads Communion, applies a party heal or <code>dmg_all</code>, and "
-          "sets the cooldown.<br><br>"
-          "<b>New ops:</b> <code>bank_communion v</code> · <code>spend_communion [ops]</code> (scale by "
+          "<b>Cleric’s Channel is passive</b> — the simplest of the three: a per-cast hook tags each play "
+          "\U0001f525 (attack) or \U0001f64f (skill/power), bumps a same-type <code>streak</code> (reset on "
+          "switch) and a <code>casts</code> counter, and adds <code>streak</code> to the matching charge; on "
+          "every 5th cast it fires a party heal + <code>dmg_all</code> sized by the two charges, then clears. "
+          "No tap, no cooldown.<br><br>"
+          "<b>New ops:</b> <code>channel_aura</code> (the Cleric per-cast hook: tag + streak + 5-cast "
+          "discharge) · <code>bank_communion v</code> · <code>spend_communion [ops]</code> (scale by "
           "Communion, exactly like the shipped <code>spend_devotion</code>) · <code>buff_ally_next v</code> "
-          "(Bard Inspiration) · the three powers (<code>channel_divinity</code> / <code>perform</code> / "
-          "<code>wild_shape</code>). <b>Reused as-is:</b> heal_ally, party_block, party_buff, shield_ally, "
-          "dmg_all, apply/vulnerable, temp/retaliate, draw. Everything else is pure data.</p></div>")
+          "(Bard Inspiration) · the two stance powers (<code>perform</code> / <code>wild_shape</code>). "
+          "<b>Reused as-is:</b> heal_ally, party_block, party_buff, shield_ally, "
+          "dmg_all, apply/vulnerable+burn, temp/retaliate, draw. Everything else is pure data.</p></div>")
 
     return page("Cards — Support role · class powers", "card_db.gd · STARTER_PACKS (draft)", "Cards", b,
                 ROLE_CSS, stage_h=0,
