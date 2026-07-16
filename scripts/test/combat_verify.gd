@@ -162,6 +162,36 @@ func _run() -> void:
 	_ck("the enemy phase ran and handed back a new player phase",
 		str(host.phase) == "playerTurn" or str(host.phase) == "win" or str(host.phase) == "lose",
 		str(host.phase))
+
+	print("\n--- 6b. M3b: the client REPLAYS the host's enemy-phase VFX --------")
+	# A client never calls _flash/_impact on its own — _try_play returns before resolving and the
+	# enemy phase runs only on the host. So a non-empty _fx_seen on the CLIENT can only have come
+	# off the wire. That is the whole proof, and it is why _fx_seen exists.
+	_ck("the host animated its own beats", int(host._fx_played) > 0, str(host._fx_seen))
+	_ck("the client replayed the host's fx", int(client._fx_played) > 0, str(client._fx_seen))
+	_ck("the bundle DRAINED after shipping", host._fx.is_empty(), str(host._fx))
+	# The resync/hello/rejoin paths re-broadcast a whole board with a fresh seq. If fx rode those,
+	# a client waking from a backgrounded tab would replay a beat from a minute ago.
+	var seen0: int = int(client._fx_played)
+	host._authority_on_resync({})
+	await _wait(1.0)
+	_ck("a resync replays NO stale fx", int(client._fx_played) == seen0,
+		"%d -> %d" % [seen0, int(client._fx_played)])
+	# fx cross the wire as JSON, where every int comes back a float. Round-trip a real event so a
+	# coercion bug surfaces here and not as a silent no-op in a live fight.
+	var wire: Variant = JSON.parse_string(JSON.stringify({"k": "i", "s": "enemy", "i": 0, "m": 7}))
+	var seen1: int = int(client._fx_played)
+	client._replay_fx(wire)
+	_ck("an fx survives the JSON float round-trip", int(client._fx_played) == seen1 + 1,
+		"%d -> %d" % [seen1, int(client._fx_played)])
+	# Forward-compat + hostile input: a newer host's unknown kind, a bad address and a non-dict must
+	# each drop quietly. If any of them is fatal, the harness process dies and this never prints.
+	client._replay_fx({"k": "kind_from_a_newer_host", "s": "enemy", "i": 0, "m": 1})
+	client._replay_fx({"k": "f", "s": "enemy", "i": 99})
+	client._replay_fx({"k": "f", "s": "nonsense", "i": 0})
+	client._replay_fx("not even a dictionary")
+	_ck("unknown + malformed fx are dropped, never fatal", true)
+
 	if str(host.phase) == "playerTurn":
 		_ck("the turn advanced", int(host.turn) > turn0, "%d -> %d" % [turn0, int(host.turn)])
 		_ck("the ready flags reset for the new turn", host._seat_ready == [false, false],

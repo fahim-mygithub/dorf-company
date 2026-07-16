@@ -171,6 +171,33 @@ func _run() -> void:
 		"%s / %s" % [str(client.roster[1]["name"]), str(host.roster[1]["name"])])
 	_ck("the client sees the wagon", client.carried.size() == 1)
 
+	print("\n--- 5b2. M3b: the client REPLAYS the flag march + counts the purse -")
+	# A client never runs _enter_hex (it returns at _on_hex_input / _intent), so it can only have
+	# marched because the host's fx arrived. That is the proof.
+	_ck("the host marched its own flag", int(host._fx_played) > 0, str(host._fx_seen))
+	_ck("the client replayed the march", int(client._fx_played) > 0, str(client._fx_seen))
+	_ck("the bundle DRAINED after shipping", host._fx.is_empty(), str(host._fx))
+	# _push() fires on every HUD refresh and on every client's 3s camp_hello. Without the drain one
+	# march would replay on every heartbeat forever, so this is the check that matters most here.
+	var m0: int = int(client._fx_played)
+	host._push()
+	host._push()
+	await _wait(1.0)
+	_ck("re-pushing the board replays NO stale fx", int(client._fx_played) == m0,
+		"%d -> %d" % [m0, int(client._fx_played)])
+	# The purse COUNTS on a client instead of snapping: treasury is state, so the snapshot delta is
+	# the animation. _tre_shown lands on the new value either way — assert it tracks, not that it
+	# tweened (a headless tween has no frames to observe).
+	_ck("the client's purse tracks the host's", int(client._tre_shown) == host.treasury,
+		"%d vs %d" % [int(client._tre_shown), host.treasury])
+	# Forward-compat + hostile input: each of these must drop quietly. If any is fatal the harness
+	# process dies and this line never prints.
+	client._replay_fx({"k": "kind_from_a_newer_host", "d": {}})
+	client._replay_fx({"k": "march", "d": {"a": "nowhere", "b": "nohow"}})
+	client._replay_fx({"k": "march"})
+	client._replay_fx("not even a dictionary")
+	_ck("unknown + malformed fx are dropped, never fatal", true)
+
 	print("\n--- 5c. loot is PERSONAL: first tap wins, for your own deck -------")
 	host.hex_loot = ["strike", "guard", "cleave"]
 	host.hex_loot_pick = -1

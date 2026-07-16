@@ -349,7 +349,9 @@ func _start_combat() -> void:
 			"vulnerable": 0,   # enemy Expose/Hex: takes x1.5 from enemy hits, decays 1/player-phase
 			"temp": _fresh_temp(), "shield": 0, "attacks_this_turn": 0,
 			"momentum": 0, "devotion": 0,   # Warrior/Cleric signature counters (reset each player phase)
-			"node": pc_emoji[i], "slot": i,
+			# side+slot is the entity's WIRE ADDRESS: the pair every fx event is aimed with. Static
+			# for the life of the fight, so unlike an event it is safe riding an entity dict.
+			"node": pc_emoji[i], "slot": i, "side": "party",
 		})
 
 	enemies = []
@@ -380,7 +382,7 @@ func _start_combat() -> void:
 			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
 			"moves": mvs, "move_i": (randi() % mvs.size()) if not mvs.is_empty() else 0,   # random offset desyncs duplicates
 			"rage": 0,                    # permanent +atk from Howl (rage_all)
-			"intent_target": -1, "node": en_emoji[i], "slot": i,
+			"intent_target": -1, "node": en_emoji[i], "slot": i, "side": "enemy",
 		})
 
 	turn = 0
@@ -699,6 +701,77 @@ const _INT_KEYS := ["slot", "hp", "max_hp", "block", "shield", "energy", "max_en
 	"atk", "burn", "move_i", "rage", "intent_target"]
 const _INT_KEYS_TEMP := ["retaliate", "channel_charges", "channel_bonus", "next_attack_bonus"]
 
+# ---------------------------------------------------------------- The FX rider (M3b)
+## Absolute snapshots tell a client WHAT the board is; they cannot tell it what just HAPPENED.
+## A hit that lands and a hit that was fully blocked leave the same hp, and a 3-hit flurry collapses
+## into one number — so the client saw the enemy phase as digits changing. These are the events.
+##
+## THE CONTRACT — fx are ADVISORY:
+##   * They never mutate state. Nothing a peer reads as truth comes from one.
+##   * They ride the board snapshot as a TOP-LEVEL array. Never inside an entity dict: _merge_into
+##     (below) copies unknown keys in and never erases them, so an event welded to a dwarf would
+##     replay forever.
+##   * They are DRAINED on every build, so they ship exactly once. That is what makes the resync /
+##     hello / rejoin re-sends — which re-broadcast a whole board with a fresh seq — carry no fx:
+##     the beat that filled the buffer already spent it. Without the drain a client waking from a
+##     backgrounded tab would replay a beat from a minute ago.
+##   * A dropped snapshot loses its fx forever. That is the accepted price: a lost fx is a missed
+##     animation, never a desync, because the next absolute snapshot repairs the board anyway.
+##
+## WHY THIS IS A BUS AND NOT A PATCH: recording happens INSIDE _flash/_impact — the only two VFX
+## primitives combat has. So every one of today's call sites, and every future card, class or enemy
+## move that flashes anything, is networked the moment it is written. There is no second code path
+## to remember. Adding a new KIND of effect is: emit it from a primitive, handle it in _replay_fx.
+const FX_MAX := 64      # a bundle that never stops growing is a bug, not a light show
+const FX_TAIL := 16
+var _fx: Array = []        # AUTHORITY: the pending wire bundle, drained by _build_snapshot
+var _fx_seen: Array = []   # EVERY peer: a TAIL of what played here (capped) — for eyeballing kinds
+var _fx_played := 0        # EVERY peer: how many played, monotonic — the assertable count
+
+## Record one event. Called from inside the primitives, so it covers every call site by construction.
+## No-op unless authoritative: SOLO needs no wire, and a CLIENT replaying through _flash must never
+## re-record what it was just told. That one guard closes the loop.
+func _fx_push(kind: String, c: Dictionary, mag: int) -> void:
+	if mode != Mode.AUTHORITY or _fx.size() >= FX_MAX:
+		return
+	# side is stamped on the dict at construction (_start_combat), NOT sniffed: _do_enemy_move's
+	# "expose" branch flashes a PARTY slot from an enemy's move, and enemy slot 0 and party slot 0
+	# both exist — a slot int alone would silently animate the wrong dwarf.
+	_fx.append({"k": kind, "s": str(c.get("side", "")), "i": int(c.get("slot", -1)), "m": mag})
+
+## What played on THIS peer. Cosmetics leave no trace in the board state, so without this a test
+## cannot tell "the client replayed the host's beat" from "the client did nothing".
+## _fx_played is the number to assert on: _fx_seen is a capped ring, so once it is full its size
+## stops growing and "did one more play?" cannot be read from it.
+func _fx_mark(kind: String) -> void:
+	_fx_played += 1
+	_fx_seen.append(kind)
+	if _fx_seen.size() > FX_TAIL:
+		_fx_seen.remove_at(0)
+
+## Aim an event at this peer's live node. Returns {} for an address it cannot resolve, so a
+## malformed or future-versioned event is dropped rather than crashing the replay.
+func _fx_target(side: String, slot: int) -> Dictionary:
+	var pool: Array = party if side == "party" else (enemies if side == "enemy" else [])
+	if slot < 0 or slot >= pool.size():
+		return {}
+	return pool[slot]
+
+## CLIENT: play one event the host recorded. Unknown kinds are ignored on purpose — an older client
+## meeting a newer host should miss an animation, not break.
+func _replay_fx(f: Variant) -> void:
+	if typeof(f) != TYPE_DICTIONARY:
+		return
+	var d: Dictionary = f
+	var c: Dictionary = _fx_target(str(d.get("s", "")), int(d.get("i", -1)))
+	if c.is_empty():
+		return
+	match str(d.get("k", "")):
+		"f":
+			_flash(c)
+		"i":
+			_impact(c, int(d.get("m", 0)))
+
 func _build_snapshot() -> Dictionary:
 	var ps: Array = []
 	for a: Dictionary in party:
@@ -715,6 +788,12 @@ func _build_snapshot() -> Dictionary:
 		d.erase("node")
 		d.erase("moves")   # every peer rebuilds identical pre-scaled moves from request.enemy_scale
 		es.append(d)
+	# DRAIN, not read: fx are events, so they ship exactly once. Reassigning (rather than clearing)
+	# means the dict we hand back can never alias the live buffer.
+	# ⚠ This function MUST keep exactly ONE caller (_net_board). A second caller would silently eat
+	# a bundle — the next peer's beat would simply never animate. combat_verify asserts the drain.
+	var fx: Array = _fx
+	_fx = []
 	return {
 		"seq": _next_seq(), "party": ps, "enemies": es,
 		"globals": {
@@ -723,6 +802,7 @@ func _build_snapshot() -> Dictionary:
 			"combat_epoch": combat_epoch,
 		},
 		"ready": _seat_ready.duplicate(),
+		"fx": fx,   # top level ONLY — see the FX rider contract above
 	}
 
 ## Merge, never replace. `incoming` carries no hand/hand_uids/deck/discard/node, so it
@@ -768,6 +848,12 @@ func _apply_snapshot(snap: Dictionary, force := false) -> void:
 		_merge_into(party[cslot], c)
 		party[cslot]["node"] = pc_emoji[cslot]
 	_refresh()
+	# Replay LAST: _impact reads the node's global_position, which _refresh has just settled.
+	# CLIENT-only. _flash/_impact carry no mode guard, so the host ALREADY animated inline inside
+	# its own primitives as it resolved the beat — replaying here would double-animate every hit.
+	if mode == Mode.CLIENT:
+		for f: Variant in (snap.get("fx", []) as Array):
+			_replay_fx(f)
 
 func _request_resync() -> void:
 	if mode == Mode.CLIENT:
@@ -1716,7 +1802,14 @@ func _plot(img: Image, p: Vector2, col: Color) -> void:
 		img.set_pixel(x, y, col)
 
 # ================================================================ VFX
+## The two primitives below are the WHOLE of combat's visual vocabulary, which is exactly why the
+## fx rider taps them here instead of at their ~11 call sites: a new card, class or enemy move gets
+## co-op replay for free, and cannot be written in a way that forgets to network itself.
+## Recording happens before the null-node guard on purpose — the event is the host's INTENT, not a
+## report that the host's own render succeeded.
 func _flash(c: Dictionary) -> void:
+	_fx_push("f", c, 0)
+	_fx_mark("f")
 	var n: Label = c.get("node")
 	if n == null:
 		return
@@ -1728,7 +1821,13 @@ func _flash(c: Dictionary) -> void:
 	var t2: Tween = create_tween()
 	t2.tween_property(n, "modulate", Color.WHITE, 0.18).from(Color(1.6, 1.6, 1.6, 1))
 
+## mag is deliberately NOT derivable from the snapshot: on an enemy it is the pre-block damage
+## (a fully-blocked hit still sparks), on a dwarf it is the post-mitigation hp lost, and a flurry
+## folds several mags into one hp delta. It has to ride the event.
 func _impact(c: Dictionary, mag: int) -> void:
+	if mag > 0:
+		_fx_push("i", c, mag)   # a 0-mag impact draws nothing; don't spend wire on it
+		_fx_mark("i")
 	var n: Label = c.get("node")
 	if n == null or mag <= 0:
 		return

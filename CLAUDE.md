@@ -128,19 +128,41 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   note the host's own taps apply locally, so it wins a genuine tie). Ending is per-seat in any order
   (a client may end before the host); the enemy phase fires only when EVERY living seat has ended
   (`_all_alive_ended()`), and an ended seat can't sneak in another card. Locked down by
-  `scenes/test/combat_verify.tscn` (33 checks).
+  `scenes/test/combat_verify.tscn` (39 checks).
+- **M3b — THE FX RIDER: cosmetics replay on every peer** (2026-07-16). Snapshots say what the board
+  IS; they cannot say what just HAPPENED (a landed hit and a fully-blocked one leave the same HP; a
+  flurry folds into one number; a flag march happens BETWEEN two boards). So transient VFX ride the
+  EXISTING snapshot as a top-level `fx` array — no new wire event, no autoload.
+  - **The contract: fx are ADVISORY.** They never mutate state; a lost/duplicated/malformed fx costs
+    an ANIMATION, never a desync, because the next absolute snapshot repairs the board anyway.
+  - **The drain is the load-bearing part.** `_build_snapshot`/`_build_snap` DRAIN the buffer, so a
+    beat ships exactly once — which is what makes the resync/hello/rejoin re-sends (a whole board
+    with a fresh seq) carry no fx. ⚠ Both builders MUST keep exactly ONE caller (`_net_board` /
+    `_push`); a second caller would silently eat a bundle. Both suites assert the drain.
+  - **Why it's a bus, not a patch:** recording lives INSIDE the primitives (`_flash`/`_impact` — the
+    whole of combat's visual vocabulary), so every existing call site and every FUTURE card, class or
+    enemy move is networked the moment it's written. There is no second path to forget. A new *kind*
+    of effect = emit it from a primitive + one case in `_replay_fx`. Entities carry a static
+    `"side"`+`"slot"` wire address (`side` is load-bearing: Expose flashes a PARTY slot from an
+    enemy move). Replay is CLIENT-only — the host already animates inline, so it would double-hit.
+  - **Derive state, event only transients.** The treasury counts up on a client from the snapshot
+    delta (`_tween_treasury_from`), no event spent. Only what no board can describe gets an fx.
 - **VERIFY NETCODE HEADLESSLY — do not use browser tabs.** `scenes/test/campaign_verify.tscn` runs
   BOTH peers in one process against live Supabase, drives a scripted session, and prints PASS/FAIL
-  (62 checks, all green as of 2026-07-12):
+  (81 checks, all green as of 2026-07-16):
   `Godot_v4.7-stable_win64_console.exe --headless --path . res://scenes/test/campaign_verify.tscn`
   Sister scenes: `coop_harness.tscn` (combat) · `coop_campaign_harness.tscn` (campaign, visual).
   Chrome only ticks the FOREGROUND tab, so two tabs can never verify a round-trip (see memory
   `two-tab-multiplayer-testing-fails`). One `Net` autoload = one `peer_id`, which is exactly why the
   campaign protocol identifies a sender by its injected **seat int**, never by peer_id.
-- **Known/deferred**: clients watch the enemy phase as numbers moving (no VFX replay — M3b); the
-  client rebuilds its whole screen per snapshot (flicker, lost hover); no authority migration — if
-  the HOST backgrounds its tab the company freezes (the 2s re-dial fixes the socket, not the frozen
-  resolver); PARTY_STEP unsimmed.
+  ⚠ **`combat_verify` is TIMING-FLAKY against live Supabase** — a single red run is not proof of a
+  regression. Re-run before believing one. Cosmetics leave no trace in board state, so the fx checks
+  assert on `_fx_played` (a monotonic counter); `_fx_seen` is a capped ring whose size stops growing.
+- **Known/deferred**: the client rebuilds its whole screen per snapshot (flicker, lost hover); no
+  authority migration — if the HOST backgrounds its tab the company freezes (the 2s re-dial fixes the
+  socket, not the frozen resolver); PARTY_STEP unsimmed. Campaign fx currently carry the flag march
+  only — the dice cinematic and the coin bursts still don't replay (both fire on host-only paths;
+  the coin burst's push lands 0.7s late, so it needs its own beat before it's worth shipping).
 
 ## Prior state (2026-07-01) — TWO modes: combat / overworld hex-crawl
 
