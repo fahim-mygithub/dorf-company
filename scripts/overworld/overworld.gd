@@ -1214,9 +1214,15 @@ func _on_rest() -> void:
 
 # ============================================================ Coin VFX
 func _tween_treasury_to(target: int) -> void:
-	var tw := create_tween()
-	tw.tween_method(Callable(self, "_apply_treasury_label"), float(_tre_shown), float(target), 0.5)
+	_tween_treasury_from(_tre_shown, target)
+
+## Count the purse from one value to another. The host calls this as it mutates; a CLIENT calls it
+## from _apply_snap with the previous snapshot's value, because treasury is STATE — the delta
+## between two snapshots is the whole animation, so unlike a flag march it needs no event.
+func _tween_treasury_from(from_v: int, target: int) -> void:
 	_tre_shown = target
+	var tw := create_tween()
+	tw.tween_method(Callable(self, "_apply_treasury_label"), float(from_v), float(target), 0.5)
 
 func _spawn_coins(from: Vector2, to: Vector2, n: int) -> void:
 	for i in range(n):
@@ -1543,21 +1549,41 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 				return
 			await _enter_hex(key)
 
-func _enter_hex(key: String) -> void:
-	busy = true
-	var e := run_epoch
-	# the flag marches to the new hex before it resolves, so movement reads spatially
-	var from := _hex_px(int(hexes[hex_cur]["q"]), int(hexes[hex_cur]["r"]))
-	var to := _hex_px(int(hexes[key]["q"]), int(hexes[key]["r"]))
+## The 🚩 marching between two tiles. PURE cosmetic: it moves a throwaway token and never touches
+## hex_cur, which is exactly what lets a client replay it against a board it has already rendered.
+## Awaitable — the host waits for the march before resolving the tile; a client just lets it play.
+const MARCH_SEC := 0.28
+func _fx_march(from_key: String, to_key: String) -> void:
+	_fx_mark("march")
+	if not hexes.has(from_key) or not hexes.has(to_key) or not is_instance_valid(screen_root):
+		return
+	var from := _hex_px(int(hexes[from_key]["q"]), int(hexes[from_key]["r"]))
+	var to := _hex_px(int(hexes[to_key]["q"]), int(hexes[to_key]["r"]))
 	if is_instance_valid(hex_flag):
 		hex_flag.visible = false
 	var tok := _mkemoji(from, Vector2(60, 60), 26, screen_root)
 	tok.text = "🚩"
-	var tw := create_tween()
-	tw.tween_property(tok, "position", to - tok.size * 0.5, 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
-	await tw.finished
+	# bind_node: a client rebuilds its entire screen on the next snapshot, which frees this token
+	# mid-march. Binding kills the tween along with it instead of leaving it writing to a dead node.
+	var tw := create_tween().bind_node(tok)
+	tw.tween_property(tok, "position", to - tok.size * 0.5, MARCH_SEC).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	# Wait on a TIMER, never on tw.finished: bind_node means a freed token kills the tween, and a
+	# killed tween never emits finished — the host would hang here with busy stuck true and the
+	# whole company frozen. The timer fires whatever happens to the token.
+	await get_tree().create_timer(MARCH_SEC).timeout
 	if is_instance_valid(tok):
 		tok.queue_free()
+
+func _enter_hex(key: String) -> void:
+	busy = true
+	var e := run_epoch
+	# The flag marches to the new hex before it resolves, so movement reads spatially.
+	# Ship the beat BEFORE we block on it: this tile may be a fight, and a fight takes the screen
+	# away from the board — a march replayed after that lands on a client that has already left.
+	# Emitting up front also means every peer marches at the same moment instead of trailing us.
+	_fx_push("march", {"a": hex_cur, "b": key})
+	_push()
+	await _fx_march(hex_cur, key)
 	if e != run_epoch:
 		return
 	hex_cur = key
@@ -2104,6 +2130,51 @@ func _push() -> void:
 	_seq += 1
 	Net.send_message("camp_snapshot", _build_snap())
 
+# ---------------------------------------------------------------- The FX rider (M3b)
+## Same contract as combat's rider (see scripts/combat/combat.gd): cosmetics are ADVISORY, ride the
+## snapshot as a TOP-LEVEL array, are DRAINED on every build so they ship exactly once, and never
+## mutate state. A lost fx is a missed animation, never a desync.
+##
+## The drain matters more here than in combat: _push() fires on every incidental HUD refresh
+## (_refresh_hud) and on every client's 3s camp_hello. Without the drain, one flag march would
+## replay on every heartbeat, forever.
+##
+## Not everything visual belongs here. An fx is for a TRANSIENT the snapshot cannot carry — the
+## flag march happens BETWEEN two boards, so no board describes it. The treasury count-up, by
+## contrast, is pure state: the delta between two snapshots IS the animation (see
+## _tween_treasury_from). If a client can derive it, derive it — don't spend an event on it.
+const FX_MAX := 32
+const FX_TAIL := 16
+var _fx: Array = []        # AUTHORITY: the pending wire bundle, drained by _build_snap
+var _fx_seen: Array = []   # EVERY peer: a TAIL of what played here (capped) — for eyeballing kinds
+var _fx_played := 0        # EVERY peer: how many played, monotonic — the assertable count
+
+## Record one event. No-op unless authoritative: SOLO needs no wire, and a CLIENT replaying through
+## the players below must never re-record what it was just told.
+func _fx_push(kind: String, d: Dictionary) -> void:
+	if mode != Mode.AUTHORITY or _fx.size() >= FX_MAX:
+		return
+	_fx.append({"k": kind, "d": d})
+
+## What played on THIS peer. Assert on _fx_played: _fx_seen is a capped ring, so once it is full
+## its size stops growing and "did one more play?" cannot be read from it.
+func _fx_mark(kind: String) -> void:
+	_fx_played += 1
+	_fx_seen.append(kind)
+	if _fx_seen.size() > FX_TAIL:
+		_fx_seen.remove_at(0)
+
+## CLIENT: play one event the host recorded. Unknown kinds are ignored on purpose — an older client
+## meeting a newer host should miss an animation, not break.
+func _replay_fx(f: Variant) -> void:
+	if typeof(f) != TYPE_DICTIONARY:
+		return
+	var ev: Dictionary = f
+	var d: Dictionary = ev.get("d", {}) if typeof(ev.get("d")) == TYPE_DICTIONARY else {}
+	match str(ev.get("k", "")):
+		"march":
+			_fx_march(str(d.get("a", "")), str(d.get("b", "")))
+
 func _strip_crew(c: Dictionary) -> Dictionary:
 	var d: Dictionary = c.duplicate()
 	d.erase("crew")   # aliases roster dicts — they ride the snapshot once, under "roster"
@@ -2113,7 +2184,14 @@ func _build_snap() -> Dictionary:
 	var cs: Array = []
 	for c: Dictionary in contracts:
 		cs.append(_strip_crew(c))
+	# DRAIN, not read: fx are events, so they ship exactly once. Reassigning (rather than clearing)
+	# means the dict we hand back can never alias the live buffer.
+	# ⚠ This function MUST keep exactly ONE caller (_push). A second caller would silently eat a
+	# bundle — the beat would simply never animate anywhere. campaign_verify asserts the drain.
+	var fx: Array = _fx
+	_fx = []
 	return {
+		"fx": fx,   # top level ONLY — an event welded to a roster dict would replay forever
 		"seq": _seq,
 		"treasury": treasury, "fee": fee, "month": month, "months_survived": months_survived,
 		"campaigns_left": campaigns_left, "busy": busy, "state": state, "over": over_kind,
@@ -2160,7 +2238,9 @@ func _apply_snap(s: Dictionary) -> void:
 	var seq: int = int(s.get("seq", 0))
 	if seq <= _last_seq:
 		return   # a stale or duplicated broadcast; absolute state means we can just drop it
+	var had_board: bool = _last_seq > 0   # the first snapshot FILLS the board; it changes nothing
 	_last_seq = seq
+	var tre_prev: int = _tre_shown
 	treasury = int(s.get("treasury", 0))
 	_tre_shown = treasury
 	fee = int(s.get("fee", 0))
@@ -2202,6 +2282,13 @@ func _apply_snap(s: Dictionary) -> void:
 	if _fight_node != null:
 		return          # a fight owns the screen — the board can wait
 	_render()
+	# Everything below is COSMETIC and must come after _render(): it clears screen_root (so a token
+	# spawned earlier would be freed on the spot) and ends in _refresh_hud(), which snaps the purse
+	# label — this has to be the last writer to animate it.
+	if had_board and tre_prev != treasury:
+		_tween_treasury_from(tre_prev, treasury)
+	for f: Variant in (s.get("fx", []) as Array):
+		_replay_fx(f)
 
 # ---------------------------------------------------------------- Wire
 func _on_net(event: String, p: Dictionary) -> void:
