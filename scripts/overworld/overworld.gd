@@ -1219,10 +1219,16 @@ func _tween_treasury_to(target: int) -> void:
 ## Count the purse from one value to another. The host calls this as it mutates; a CLIENT calls it
 ## from _apply_snap with the previous snapshot's value, because treasury is STATE — the delta
 ## between two snapshots is the whole animation, so unlike a flag march it needs no event.
+var _tre_tween: Tween = null
 func _tween_treasury_from(from_v: int, target: int) -> void:
 	_tre_shown = target
-	var tw := create_tween()
-	tw.tween_method(Callable(self, "_apply_treasury_label"), float(from_v), float(target), 0.5)
+	# One counter at a time. The host's own call sites are spaced out by awaits, but a client calls
+	# this from _apply_snap on every snapshot carrying a delta — and snapshots are not rate-limited,
+	# so two buys inside 0.5s would leave two tweens fighting over the same label.
+	if _tre_tween != null and _tre_tween.is_valid():
+		_tre_tween.kill()
+	_tre_tween = create_tween()
+	_tre_tween.tween_method(Callable(self, "_apply_treasury_label"), float(from_v), float(target), 0.5)
 
 func _spawn_coins(from: Vector2, to: Vector2, n: int) -> void:
 	for i in range(n):
