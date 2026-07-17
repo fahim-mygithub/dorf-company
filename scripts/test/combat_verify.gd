@@ -147,6 +147,16 @@ func _run() -> void:
 	host._on_action(stale)
 	await _wait(0.4)
 	_ck("an ended seat cannot sneak in another card", int(host.party[1]["energy"]) == ce1)
+	# ...and NOT for the reason it looks like. _on_action has no _seat_ended check at all: ending
+	# discards your hand, so _hand_index_of returns -1 and the play dies by accident. A POWER has no
+	# card, so nothing would stop an ended seat firing one — _on_power needs the gate explicitly.
+	host.party[1]["meta_charge"] = 3
+	host.party[1]["meta_pick"] = ""
+	host.party[1]["power_cd"] = 0
+	host._on_power({"seat": 1, "peer_id": "x", "choice": "quicken", "target_idx": -1, "nonce": "n2"})
+	await _wait(0.4)
+	_ck("an ended seat cannot fire a POWER either", str(host.party[1]["meta_pick"]) == "",
+		str(host.party[1]["meta_pick"]))
 	var he1: int = int(host.party[0]["energy"])
 	var still: bool = _play(host, 0)
 	await _wait(1.0)
@@ -217,3 +227,57 @@ func _run() -> void:
 		_ck("the round resolved once BOTH had ended (host-first order)",
 			int(host.turn) > turn1 or str(host.phase) in ["win", "lose"],
 			"turn=%d phase=%s" % [int(host.turn), str(host.phase)])
+
+	print("\n--- 8. CLASS POWERS cross the wire ------------------------------")
+	# This section is about the POWER WIRE, not about surviving a fight — and the 22-HP Sorcerer this
+	# crew hands the client is a magnet for both the Caster (lowest HP) and the Assassin (no healer
+	# here, so it dives the DPS). Left to the dice it dies often enough to redden the section for a
+	# reason that has nothing to do with what is under test. So: force a known board first.
+	for a: Dictionary in host.party:
+		a["hp"] = int(a["max_hp"])
+		a["alive"] = true
+	host._start_player_phase()
+	host._net_board()
+	await _wait(1.2)
+	_ck("a clean player phase to test powers in", str(host.phase) == "playerTurn"
+		and host.party[1]["alive"], str(host.phase))
+	if true:
+		# The client pilots the Sorcerer (seat 1). Charge its Metamagic HOST-side and let the absolute
+		# snapshot carry it — a client never computes power state, it renders it.
+		host.party[1]["meta_charge"] = 3
+		host.party[1]["meta_pick"] = ""
+		host.party[1]["power_cd"] = 0
+		host._net_board()
+		await _wait(1.2)
+		_ck("power state rides the snapshot", int(client.party[1]["meta_charge"]) == 3,
+			str(client.party[1]["meta_charge"]))
+		# JSON hands every int back a FLOAT. 3.0 == 3 is true in GDScript, so a missing _INT_KEYS entry
+		# hides until a %d or a match — assert the TYPE, which is the only thing that shows it.
+		_ck("a power int survives the JSON round trip AS AN INT",
+			typeof(client.party[1]["meta_charge"]) == TYPE_INT,
+			type_string(typeof(client.party[1]["meta_charge"])))
+		client._try_power(1, "quicken", -1)
+		await _wait(1.5)
+		_ck("a CLIENT's power tap resolved on the host", str(host.party[1]["meta_pick"]) == "quicken",
+			str(host.party[1]["meta_pick"]))
+		_ck("...and the result came back to the client", str(client.party[1]["meta_pick"]) == "quicken",
+			str(client.party[1]["meta_pick"]))
+		_ck("firing spent the charge", int(host.party[1]["meta_charge"]) == 0)
+		# Nothing here trusts the client: the pick is validated against the power's OWN option list.
+		host.party[1]["meta_charge"] = 3
+		host.party[1]["meta_pick"] = ""
+		host._on_power({"seat": 1, "peer_id": "x", "choice": "not_a_metamagic", "target_idx": -1})
+		await _wait(0.4)
+		_ck("a choice the power does not offer is REJECTED", str(host.party[1]["meta_pick"]) == "",
+			str(host.party[1]["meta_pick"]))
+		# The host's Warrior (seat 0) carries Action Surge — a seat can only ever fire its own.
+		host.party[0]["power_cd"] = 0
+		var he: int = int(host.party[0]["energy"])
+		host._on_power({"seat": 0, "peer_id": "x", "choice": "", "target_idx": -1})
+		await _wait(0.4)
+		_ck("the host's own power fires through the same validated path",
+			int(host.party[0]["energy"]) > he, "%d -> %d" % [he, int(host.party[0]["energy"])])
+		_ck("a fired power leaves its cooldown on the wire", int(host.party[0]["power_cd"]) > 0)
+		await _wait(1.0)
+		_ck("the client sees the cooldown too", int(client.party[0]["power_cd"]) > 0,
+			str(client.party[0]["power_cd"]))

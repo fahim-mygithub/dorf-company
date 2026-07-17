@@ -29,121 +29,313 @@ extends RefCounted
 
 const CARDS := {
 	# --- shared chassis ---
-	"strike":  {"name":"Strike",  "cost":1, "emoji":"🗡️", "target":"enemy",       "type":"attack", "is_attack":true, "range":1,
+	"strike":  {"name":"Strike",  "cost":1, "emoji":"🗡️", "target":"enemy",       "type":"attack", "school":"physical", "is_attack":true, "range":1,
 				"effect":[["damage",6]],
 				"tip":"Your bread-and-butter swing — the unit everything else is read against."},
-	"guard":   {"name":"Guard",   "cost":1, "emoji":"🛡️", "target":"self",        "type":"skill", "fortifiable":true, "range":0,
+	"guard":   {"name":"Guard",   "cost":1, "emoji":"🛡️", "target":"self",        "type":"skill", "school":"block", "fortifiable":true, "range":0,
 				"effect":[["block",5]],
 				"tip":"Raise your shield. Block soaks the next hits this turn, then it's gone."},
-	"cleave":  {"name":"Cleave",  "cost":2, "emoji":"🪓", "target":"all_enemies", "type":"attack", "is_attack":true, "range":1,
+	"cleave":  {"name":"Cleave",  "cost":2, "emoji":"🪓", "target":"all_enemies", "type":"attack", "school":"physical", "is_attack":true, "range":1,
 				"effect":[["damage",11]],
 				"tip":"A heavy swing that catches every enemy at once."},
-	"wall":    {"name":"Wall",    "cost":2, "emoji":"🧱", "target":"self",        "type":"skill", "range":0,
+	"wall":    {"name":"Wall",    "cost":2, "emoji":"🧱", "target":"self",        "type":"skill", "school":"block", "range":0,
 				"effect":[["block",12]],
 				"tip":"Brace hard — a wall of block to weather a big incoming turn."},
 	# --- Warrior signatures ---
-	"taunt":   {"name":"Taunt",   "cost":1, "emoji":"😡", "target":"self",        "type":"skill", "limiter":"no_repeat", "range":2, "area":true, "area_affects":"enemy",
-				"effect":[["force_target_all","warrior"],["block",8]],
+	"taunt":   {"name":"Taunt",   "cost":1, "emoji":"😡", "target":"self",        "type":"skill", "school":"block", "limiter":"no_repeat", "range":2, "area":true, "area_affects":"enemy",
+				"effect":[["force_target_all","tank"],["block",8]],
 				"tip":"Force enemies within range to swing at you next turn, and gain 8 block to survive it. Can't be played two turns in a row."},
-	"retaliate":{"name":"Retaliate","cost":1,"emoji":"⚡", "target":"self",        "type":"skill", "range":0,
+	"retaliate":{"name":"Retaliate","cost":1,"emoji":"⚡", "target":"self",        "type":"skill", "school":"block", "range":0,
 				"effect":[["temp","retaliate",4]],
 				"tip":"Punish them for taking the bait — every hit you eat this turn hits back for 4."},
-	"fortify": {"name":"Fortify", "cost":1, "emoji":"🔧", "target":"self",        "type":"skill", "range":0,
+	"fortify": {"name":"Fortify", "cost":1, "emoji":"🔧", "target":"self",        "type":"skill", "school":"block", "range":0,
 				"effect":[["temp","fortify"]],
 				"tip":"Reinforce — your NEXT Guard this turn grants +5 block, and Retaliate deals +2 while active."},
 	# --- Cleric signatures ---
-	"channel_shield":{"name":"Channel Shield","cost":1,"emoji":"🔰","target":"ally","type":"skill", "range":2,
+	"channel_shield":{"name":"Channel Shield","cost":1,"emoji":"🔰","target":"ally","type":"skill", "school":"block", "range":2,
 				"effect":[["shield_ally",3]],
 				"tip":"Wrap an ally in protection — every blow against them this turn is softened by 3."},
-	"mend_or_smite":{"name":"Mend or Smite","cost":1,"emoji":"⚖️","target":"ally_or_enemy","type":"skill", "range":2,
+	"mend_or_smite":{"name":"Mend or Smite","cost":1,"emoji":"⚖️","target":"ally_or_enemy","type":"skill", "school":"spell", "range":2,
 				"effect":[["heal_or_damage",5]],
 				"tip":"Mercy or judgment — tap an ally to heal 5, or an enemy to deal 5."},
-	"aura_of_valor":{"name":"Aura of Valor","cost":2,"emoji":"📣","target":"self","type":"power", "range":2, "area":true, "area_affects":"ally",
+	"aura_of_valor":{"name":"Aura of Valor","cost":2,"emoji":"📣","target":"self","type":"power", "school":"spell", "range":2, "area":true, "area_affects":"ally",
 				"effect":[["party_buff","attack",2]],
 				"tip":"Inspire the company — allies within range deal +2 attack this turn. A real commitment (2 energy)."},
 	# --- Sorcerer signatures ---
-	"mark":    {"name":"Mark",    "cost":1, "emoji":"🎯", "target":"enemy",       "type":"skill", "range":2,
+	"mark":    {"name":"Mark",    "cost":1, "emoji":"🎯", "target":"enemy",       "type":"skill", "school":"spell", "range":2,
 				"effect":[["apply_status","marked"]],
 				"tip":"Paint the target — it takes +25% from ALL sources this turn. Your whole party benefits."},
-	"channel": {"name":"Channel", "cost":1, "emoji":"🌀", "target":"self",        "type":"power", "range":0,
+	"channel": {"name":"Channel", "cost":1, "emoji":"🌀", "target":"self",        "type":"power", "school":"spell", "range":0,
 				"effect":[["temp","channel",3,2]],
 				"tip":"Gather power — your next 2 attack cards this turn deal +3 each."},
-	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack","is_attack":true, "range":2,
+	"arcane_finisher":{"name":"Arcane Finisher","cost":2,"emoji":"💥","target":"enemy","type":"attack", "school":"spell","is_attack":true, "range":2,
 				"effect":[["damage_scaling","attacks_this_turn",5,3]],
 				"tip":"Unleash everything — deal 5 +3 per attack already played this turn. Play it LAST."},
 
 	# ============================================================ EXPANSION (hex-crawl spec, 2026-07-01)
 	# Class cards stay OUT of REWARD_POOL (role-locked); generic cards join it. New ops live in combat.gd.
 	# --- Warrior (Momentum) ---
-	"reckless_swing": {"name":"Reckless Swing","cost":1,"emoji":"🪓","target":"enemy","type":"attack","is_attack":true,
+	"reckless_swing": {"name":"Reckless Swing","cost":1,"emoji":"🪓","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",14],["self_dmg",3]],
 				"tip":"Deal 14. Take 3. Leans you Bloodied — pairs with cards that reward it."},
-	"second_wind": {"name":"Second Wind","cost":1,"emoji":"🛡️","target":"self","type":"skill",
+	"second_wind": {"name":"Second Wind","cost":1,"emoji":"🛡️","target":"self","type":"skill", "school":"block",
 				"effect":[["block",6],["if_bloodied",[["block",6]]]],
 				"tip":"Gain 6 Block. +6 more while Bloodied (at or below half HP)."},
-	"momentum_strike": {"name":"Momentum Strike","cost":1,"emoji":"⚔️","target":"enemy","type":"attack","is_attack":true,
+	"momentum_strike": {"name":"Momentum Strike","cost":1,"emoji":"⚔️","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",6],["dmg_per_momentum",3]],
 				"tip":"Deal 6, +3 per Momentum (attacks you've already played this turn). Play it late."},
 	# --- Sorcerer (Surge / Wild Magic) ---
-	"arc_lightning": {"name":"Arc Lightning","cost":2,"emoji":"⚡","target":"enemy","type":"attack","is_attack":true,
+	"arc_lightning": {"name":"Arc Lightning","cost":2,"emoji":"⚡","target":"enemy","type":"attack", "school":"spell","is_attack":true,
 				"effect":[["dmg",9],["dmg_all",4]],
 				"tip":"Deal 9 to the target, then 4 to ALL enemies."},
-	"empower": {"name":"Empower","cost":0,"emoji":"✨","target":"self","type":"power",
+	"empower": {"name":"Empower","cost":0,"emoji":"✨","target":"self","type":"power", "school":"spell",
 				"effect":[["next_card_double"]],
 				"tip":"Your next card's numbers are doubled. Set up a big hit."},
-	"kindle": {"name":"Kindle","cost":1,"emoji":"🔥","target":"enemy","type":"attack","is_attack":true,
+	"kindle": {"name":"Kindle","cost":1,"emoji":"🔥","target":"enemy","type":"attack", "school":"spell","is_attack":true,
 				"effect":[["dmg",5],["apply","burn",3]],
 				"tip":"Deal 5, then apply 3 Burn (ticks at the start of each enemy turn, ignores block)."},
 	# --- Cleric / Paladin (Devotion / Oath) — gated to the cleric role until a Paladin class lands ---
-	"lay_on_hands": {"name":"Lay on Hands","cost":1,"emoji":"🙌","target":"ally","type":"skill",
+	"lay_on_hands": {"name":"Lay on Hands","cost":1,"emoji":"🙌","target":"ally","type":"skill", "school":"spell",
 				"effect":[["heal_ally",10]],
 				"tip":"Heal a chosen ally 10."},
-	"consecrate": {"name":"Consecrate","cost":1,"emoji":"🕯️","target":"party","type":"skill",
+	"consecrate": {"name":"Consecrate","cost":1,"emoji":"🕯️","target":"party","type":"skill", "school":"block",
 				"effect":[["party_block",4]],
 				"tip":"All allies gain 4 Block."},
-	"divine_smite": {"name":"Divine Smite","cost":2,"emoji":"🌟","target":"enemy","type":"attack","is_attack":true,
+	"divine_smite": {"name":"Divine Smite","cost":2,"emoji":"🌟","target":"enemy","type":"attack", "school":"spell","is_attack":true,
 				"effect":[["dmg",10],["spend_devotion",[["dmg",8]]]],
 				"tip":"Deal 10, +8 more if you spend 1 Devotion (built by playing skills)."},
 	# --- Generic (universal chassis; these join REWARD_POOL) ---
-	"power_through": {"name":"Power Through","cost":1,"emoji":"💪","target":"self","type":"skill",
+	"power_through": {"name":"Power Through","cost":1,"emoji":"💪","target":"self","type":"skill", "school":"block",
 				"effect":[["block",8],["draw",1]],
 				"tip":"Gain 8 Block. Draw 1."},
-	"precise_jab": {"name":"Precise Jab","cost":0,"emoji":"🗡️","target":"enemy","type":"attack","is_attack":true,
+	"precise_jab": {"name":"Precise Jab","cost":0,"emoji":"🗡️","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",4],["gain_energy",1]],
 				"tip":"Deal 4, then refund 1 Energy — nearly free tempo."},
-	"whetstone": {"name":"Whetstone","cost":0,"emoji":"🪨","target":"self","type":"skill",
+	"whetstone": {"name":"Whetstone","cost":0,"emoji":"🪨","target":"self","type":"skill", "school":"physical",
 				"effect":[["buff_next_attack",4]],
 				"tip":"Your next attack this turn deals +4."},
-	"guard_break": {"name":"Guard Break","cost":1,"emoji":"💥","target":"enemy","type":"attack","is_attack":true,
+	"guard_break": {"name":"Guard Break","cost":1,"emoji":"💥","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",7],["apply","vulnerable",1]],
 				"tip":"Deal 7 and apply Vulnerable (target takes +50% for a turn). Applies AFTER this hit."},
-	"field_dressing": {"name":"Field Dressing","cost":1,"emoji":"🩹","target":"self","type":"skill",
+	"field_dressing": {"name":"Field Dressing","cost":1,"emoji":"🩹","target":"self","type":"skill", "school":"spell",
 				"effect":[["heal_self",7]],
 				"tip":"Heal yourself 7."},
-	"bracing_stance": {"name":"Bracing Stance","cost":1,"emoji":"🧱","target":"self","type":"skill",
+	"bracing_stance": {"name":"Bracing Stance","cost":1,"emoji":"🧱","target":"self","type":"skill", "school":"block",
 				"effect":[["block",10],["retain_block"]],
 				"tip":"Gain 10 Block that does NOT expire on your next turn."},
-	"opportunist": {"name":"Opportunist","cost":1,"emoji":"🎯","target":"enemy","type":"attack","is_attack":true,
+	"opportunist": {"name":"Opportunist","cost":1,"emoji":"🎯","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",6],["if_target_marked",[["dmg",6]]]],
 				"tip":"Deal 6, +6 more if the target is Marked."},
-	"rally": {"name":"Rally","cost":1,"emoji":"📣","target":"party","type":"skill",
+	"rally": {"name":"Rally","cost":1,"emoji":"📣","target":"party","type":"skill", "school":"block",
 				"effect":[["party_block",3],["draw",1]],
 				"tip":"All allies gain 3 Block. Draw 1."},
-	"trophy_hunter": {"name":"Trophy Hunter","cost":2,"emoji":"🏆","target":"enemy","type":"attack","is_attack":true,
+	"trophy_hunter": {"name":"Trophy Hunter","cost":2,"emoji":"🏆","target":"enemy","type":"attack", "school":"physical","is_attack":true,
 				"effect":[["dmg",12],["on_kill",[["gain_energy",2]]]],
 				"tip":"Deal 12. If it kills the target, gain 2 Energy."},
+
+	# ============================================================ THE THREE ARCHETYPES (2026-07-17)
+	# The three published role sheets, shipped. Every card carries a `school` (block/physical/spell) — a
+	# SECOND axis beside `type`, because Strike and Bolt are both attacks and no amount of squinting at
+	# the type tells you one is a swing and one is a spell. The Druid's forms and the Sorcerer's
+	# Metamagic are the first readers of it.
+	# --- Barbarian (Enrage: rage replaces Guard) ---
+	"blood_for_blood": {"name":"Blood for Blood","cost":1,"emoji":"🩸","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",7],["if_bloodied",[["dmg",7]]]],
+				"tip":"Deal 7 — 14 instead while Bloodied (at or below half HP). The Barbarian is paid for being hurt."},
+	"thick_hide": {"name":"Thick Hide","cost":1,"emoji":"🐗","target":"self","type":"skill","school":"block","fortifiable":true,
+				"effect":[["gain_guard",6],["if_bloodied",[["gain_guard",6]]]],
+				"tip":"Gain 6 Guard, +6 more while Bloodied. Dead weight while you rage — rage replaces Guard."},
+	"bellow": {"name":"Bellow","cost":1,"emoji":"📢","target":"self","type":"skill","school":"block","limiter":"no_repeat",
+				"effect":[["force_target_all","tank"],["gain_guard",4]],
+				"tip":"Force every enemy to swing at you next turn, and gain 4 Guard. Can't be played two turns in a row."},
+	"rampage": {"name":"Rampage","cost":2,"emoji":"👊","target":"all_enemies","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",8]],
+				"tip":"A wild swing that catches every enemy at once."},
+	# --- Fighter (Guard is spent, never hoarded) ---
+	"shield_up": {"name":"Shield Up","cost":1,"emoji":"🛡️","target":"self","type":"skill","school":"block","fortifiable":true,
+				"effect":[["gain_guard",8]],
+				"tip":"Raise the wall. Guard soaks the next hits — and pulls the enemy's eye onto you."},
+	"sidestep": {"name":"Sidestep","cost":1,"emoji":"↩️","target":"self","type":"skill","school":"block",
+				"effect":[["gain_guard",5],["draw",1]],
+				"tip":"Gain 5 Guard and draw 1. Keeps the wall moving."},
+	"shield_bash": {"name":"Shield Bash","cost":1,"emoji":"🔨","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",6],["dmg_per_guard",1,4]],
+				"tip":"Deal 6, +1 per 4 Guard you're holding. Cash the wall in as damage."},
+	"reforge": {"name":"Reforge","cost":0,"emoji":"🔋","target":"self","type":"skill","school":"block",
+				"effect":[["pay_with_guard"]],
+				"tip":"Your next card is paid for with Guard instead of Energy. Pour the wall into a Whirlwind."},
+	"whirlwind": {"name":"Whirlwind","cost":"X","emoji":"🌪️","target":"all_enemies","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg_x"]],
+				"tip":"Spend EVERYTHING. Deal that much to every enemy. (After Reforge, X is your Guard, not your Energy.)"},
+	"hold_the_line": {"name":"Hold the Line","cost":1,"emoji":"🧱","target":"party","type":"skill","school":"block",
+				"effect":[["party_block",4]],
+				"tip":"All allies gain 4 Guard. The wall covers the whole company."},
+	# --- Paladin (Devotion banks between Smites) ---
+	"vow_of_wrath": {"name":"Vow of Wrath","cost":1,"emoji":"⚔️","target":"self","type":"skill","school":"block",
+				"effect":[["gain_guard",4],["temp","smite_bonus",4]],
+				"tip":"Gain 4 Guard, and your next Divine Smite hits 4 harder. Swear it before you swing."},
+	# --- Cleric (Channel Divinity: the aura reads your cast TYPES) ---
+	"mend": {"name":"Mend","cost":1,"emoji":"🙌","target":"ally","type":"skill","school":"spell",
+				"effect":[["heal_ally",8],["bank_communion",1]],
+				"tip":"Heal an ally 8 and bank 📿. A 🙏 mercy cast — it feeds the aura's healing side."},
+	"bless": {"name":"Bless","cost":1,"emoji":"✨","target":"party","type":"skill","school":"block",
+				"effect":[["party_block",3],["bank_communion",1]],
+				"tip":"All allies gain 3 block and you bank 📿. A 🙏 mercy cast."},
+	"sanctuary": {"name":"Sanctuary","cost":1,"emoji":"🔰","target":"ally","type":"skill","school":"block",
+				"effect":[["shield_ally",3],["bank_communion",1]],
+				"tip":"Every blow against an ally is softened by 3 this turn. A 🙏 mercy cast."},
+	"censure": {"name":"Censure","cost":1,"emoji":"💥","target":"enemy","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",6]],
+				"tip":"Deal 6. A 🔥 smite cast — it feeds the aura's damage side."},
+	"searing_word": {"name":"Searing Word","cost":1,"emoji":"☀️","target":"enemy","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",5],["apply","burn",2]],
+				"tip":"Deal 5 and apply 2 🔥 Burn. A 🔥 smite cast — and a status, which hands a Monk its fists back."},
+	# --- Bard (the song is held by BREADTH: 3 distinct targets a turn) ---
+	"mockery": {"name":"Vicious Mockery","cost":1,"emoji":"🎭","target":"enemy","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",4],["apply","vulnerable",1]],
+				"tip":"Deal 4 and apply Vulnerable 💥. An insult that lands — and a target for the song."},
+	"inspiration": {"name":"Inspiration","cost":1,"emoji":"🎵","target":"ally","type":"skill","school":"spell",
+				"effect":[["buff_ally_next",4],["bank_communion",1]],
+				"tip":"An ally's next attack this turn deals +4. Bank 📿."},
+	"crescendo": {"name":"Crescendo","cost":1,"emoji":"🎶","target":"party","type":"power","school":"spell",
+				"effect":[["party_buff","attack",2],["bank_communion",1]],
+				"tip":"All allies deal +2 this turn. Bank 📿. The party counts as ONE target for the song."},
+	"refrain": {"name":"Refrain","cost":0,"emoji":"🔁","target":"self","type":"skill","school":"spell",
+				"effect":[["draw",1],["bard_free_target"]],
+				"tip":"Draw 1 — and it counts as a third target all by itself. The song's escape hatch."},
+	"ballad": {"name":"Ballad","cost":2,"emoji":"📯","target":"party","type":"skill","school":"spell",
+				"effect":[["heal_party",5],["bank_communion",1]],
+				"tip":"Heal every ally 5. Bank 📿. An AoE counts as ONE target, no matter how many it hits."},
+	# --- Druid (Wild Shape: the form pays for the card SCHOOLS in your hand) ---
+	"forage": {"name":"Forage","cost":1,"emoji":"🌰","target":"self","type":"skill","school":"spell",
+				"effect":[["shuffle_random_into_deck",1],["draw",2],["bank_communion",1]],
+				"tip":"Put a random card back into your deck, draw 2, bank 📿. Re-seed the hand your form reads."},
+	"regrowth": {"name":"Regrowth","cost":1,"emoji":"🍃","target":"ally","type":"skill","school":"spell",
+				"effect":[["heal_ally",6],["heal_ally_next",4],["bank_communion",1]],
+				"tip":"Heal an ally 6 now and 4 more at the start of next turn. Bank 📿."},
+	"barkskin": {"name":"Barkskin","cost":1,"emoji":"🌳","target":"party","type":"skill","school":"block",
+				"effect":[["party_block",4],["bank_communion",1]],
+				"tip":"All allies gain 4 block. Bank 📿. A 🛡️ block card — 🐻 Bear pays you for holding it."},
+	"entangle": {"name":"Entangle","cost":1,"emoji":"🕸️","target":"all_enemies","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",4],["apply","vulnerable",1]],
+				"tip":"Deal 4 to ALL and apply Vulnerable 💥 to each. A 🧿 spell — 🦅 Hawk pays you for holding it."},
+	"maul": {"name":"Maul","cost":1,"emoji":"🐻","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",6],["if_form","wolf",[["dmg",4]]]],
+				"tip":"Deal 6 — 10 while you're in 🐺 Wolf form."},
+	# --- Sorcerer (Metamagic charges on ANYONE's spell) ---
+	"bolt": {"name":"Bolt","cost":1,"emoji":"⚡","target":"enemy","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",6]],
+				"tip":"Deal 6. Same numbers as a Strike — but it's a 🧿 spell, and that is the whole difference."},
+	# --- Rogue (the party keeps the mark bleeding) ---
+	"backstab": {"name":"Backstab","cost":1,"emoji":"🗡️","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",6],["if_assassin_mark",[["dmg",6]]]],
+				"tip":"Deal 6, +6 more if the target carries your 🎯 Assassin's Mark."},
+	"shiv": {"name":"Shiv","cost":0,"emoji":"🔪","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",3]],
+				"tip":"Deal 3, free. Cheap — and every hit of yours makes your mark tick harder."},
+	"shadowstep": {"name":"Shadowstep","cost":0,"emoji":"💨","target":"self","type":"skill","school":"physical",
+				"effect":[["gain_energy",1],["buff_next_attack",4]],
+				"tip":"Refund 1 ⚡ and your next attack deals +4. Free tempo."},
+	"poison_blade": {"name":"Poison Blade","cost":1,"emoji":"🧪","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",4],["apply","burn",3]],
+				"tip":"Deal 4 and apply 3 🔥. A status — which refunds a Monk's Flurry this turn."},
+	"fan_of_knives": {"name":"Fan of Knives","cost":2,"emoji":"🔪","target":"all_enemies","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",8]],
+				"tip":"Deal 8 to every enemy."},
+	# --- Monk (Flurry is refunded by ANYONE's status) ---
+	"jab": {"name":"Jab","cost":0,"emoji":"👊","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",3],["gain_energy",1]],
+				"tip":"Deal 3 and refund 1 ⚡. Effectively free."},
+	"stunning_strike": {"name":"Stunning Strike","cost":1,"emoji":"💫","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",4],["apply","stun",1]],
+				"tip":"Deal 4 and Stun 💫 — it loses its next action. A status, so it hands your Flurry back."},
+	"deflect": {"name":"Deflect","cost":1,"emoji":"🌀","target":"self","type":"skill","school":"block","fortifiable":true,
+				"effect":[["block",5],["temp","retaliate",4]],
+				"tip":"Gain 5 block and reflect 4 on every hit you eat this turn."},
+	"chill_touch": {"name":"Chill Touch","cost":1,"emoji":"❄️","target":"enemy","type":"attack","school":"spell","is_attack":true,
+				"effect":[["dmg",4],["apply","vulnerable",1]],
+				"tip":"Deal 4 and apply Vulnerable 💥. The Monk's one 🧿 spell — it charges a Sorcerer."},
+	"quivering_palm": {"name":"Quivering Palm","cost":2,"emoji":"☝️","target":"enemy","type":"attack","school":"physical","is_attack":true,
+				"effect":[["dmg",8],["on_kill",[["gain_energy",2]]]],
+				"tip":"Deal 8. If it kills, gain 2 ⚡."},
+}
+
+## The CLASS POWERS — one per class, fired by tapping your own dwarf's orb (a Hearthstone-style hero
+## power, a second lever beside the hand). class_powers.gd resolves them; combat.gd only routes taps.
+##   target  = "" (no pick) | "enemy" (tap an enemy to aim it)
+##   choices = a 3-way pick the tap must answer first (Metamagic's shapes, Wild Shape's forms)
+##   passive = fires ITSELF; the orb is a readout, not a button
+## The three archetypes gate their powers on three different things ON PURPOSE: tank spends a
+## cooldown, support spends Communion 📿, and dps spends nothing — the party charges it.
+const POWERS := {
+	# --- tank: a cooldown, and the resource it spends ---
+	"action_surge": {"name":"Action Surge", "emoji":"⏱️", "target":"", "choices":[],
+		"gate":"4-turn cooldown", "tip":"+2 ⚡ this turn and draw 1. The tempo burst that empties your hand and breaks a stall."},
+	"enrage": {"name":"Enrage", "emoji":"😤", "target":"", "choices":[],
+		"gate":"stance · attack each turn to hold it", "tip":"Take HALF damage and deal +4 while Bloodied — but you can no longer gain Guard: resistance replaces your block. Skip a turn without attacking and it drops for 4 turns."},
+	"smite": {"name":"Divine Smite", "emoji":"🌟", "target":"enemy", "choices":[],
+		"gate":"3-turn cooldown · spends banked 🙏", "tip":"Deal 6 +4 per Devotion spent, and the party gains 3 block. Bank hard between casts — the smite you save up hits for more."},
+	# --- support: Communion is the IGNITION, never the upkeep ---
+	"channel_divinity": {"name":"Channel Divinity", "emoji":"✨", "target":"", "choices":[], "passive":true,
+		"gate":"passive · auto-discharges every 5 casts", "tip":"No tap. Every cast charges it by TYPE — attacks feed 🔥 smite, heals and shields feed 🙏 mercy — and a streak of the same type pays more each repeat. Every 5th cast it fires itself. Commit to a line."},
+	"bardic_performance": {"name":"Bardic Performance", "emoji":"🎶", "target":"", "choices":[], "communion":3,
+		"gate":"stance · 3 distinct targets a turn", "tip":"Allies deal +2 and gain +2 block. Holding it costs no resource — it costs REACH: touch 3 distinct targets each turn, and an AoE counts as ONE. Come up short and the song breaks."},
+	"wild_shape": {"name":"Wild Shape", "emoji":"🐾", "target":"", "communion":3,
+		"choices":[{"key":"bear","name":"Bear","emoji":"🐻","tip":"Every 🛡️ block card in hand -> +5 Guard, free."},
+			{"key":"hawk","name":"Hawk","emoji":"🦅","tip":"Every 🧿 spell card in hand -> +3 block to the whole party, free."},
+			{"key":"wolf","name":"Wolf","emoji":"🐺","tip":"Every ⚔️ physical card in hand -> your first attack hits +5 harder."}],
+		"gate":"stance · pick a form · costs 2 cards · 3 turns", "tip":"Shift for 3 turns. At the start of your next turn you hand 2 cards back to your DECK and do NOT replace them — that −2 hand is the price. Then every shifted turn your form reads your hand and pays for its school."},
+	# --- dps: never a cooldown. The gate reads what the PARTY just did. ---
+	"metamagic": {"name":"Metamagic", "emoji":"🌀", "target":"", "charge":3,
+		"choices":[{"key":"twin","name":"Twinned","emoji":"🌀","tip":"Your next spell also hits a second target, in full."},
+			{"key":"quicken","name":"Quicken","emoji":"⚡","tip":"Your next spell costs 2 less."},
+			{"key":"heighten","name":"Heighten","emoji":"⏳","tip":"Your next spell doesn't fire now — at the start of your next turn it fires TWICE."}],
+		"gate":"charges +1 per spell cast by ANYONE · ready at 3", "tip":"Never on a cooldown. Your Bolt charges it; so does the Cleric's Mend. At 3, choose a shape for your next spell: wider, cheaper, or later but double."},
+	"assassins_mark": {"name":"Assassin's Mark", "emoji":"🎯", "target":"enemy", "choices":[],
+		"gate":"no cooldown · one mark at a time", "tip":"It bleeds 4 a turn for 3 turns and IGNORES ARMOUR entirely. Every ally hit on it adds a turn; every hit of YOURS adds 2 tick. The party keeps it alive, you make it hurt."},
+	"flurry": {"name":"Flurry of Blows", "emoji":"👊", "target":"enemy", "choices":[],
+		"gate":"3-turn cooldown — refunded by every status ANYONE lands", "tip":"Strike for 8. For the rest of this turn every status applied to an enemy — a teammate's Burn, anyone's — hands it straight back. Status -> Flurry -> status -> Flurry."},
 }
 
 ## Role-skewed decks (~10-12 cards each); the strike/guard split encodes the role.
+## `role` is the ARCHETYPE (tank/support/dps) — enemy targeting reads it. `power` is the class's
+## signature. Warrior/Cleric/Sorcerer keep their ids: the campaign gates its High job on a fieldable
+## canonical trio, and all four harnesses hardcode them.
 const CLASSES := {
-	"warrior": {"name":"Warrior", "emoji":"🛡️", "role":"warrior", "max_hp":36, "energy":3, "move":1,
+	# --- TANK ⚔️ — Guard soaks the hit AND pulls the threat (it is the shipped `block` field) ---
+	# The shipped Warrior IS the Fighter archetype in its simple form, so it takes Action Surge —
+	# which means the default trio ships one power from each of the three archetypes.
+	"warrior": {"name":"Warrior", "emoji":"🛡️", "role":"tank", "power":"action_surge", "max_hp":36, "energy":3, "move":1,
 		"deck":["strike","strike","strike","strike","guard","guard","guard","guard","guard","taunt","retaliate","fortify"]},
-	"cleric":  {"name":"Cleric",  "emoji":"⛑️", "role":"cleric",  "max_hp":28, "energy":3, "move":2,
-		"deck":["strike","strike","strike","guard","guard","guard","guard","channel_shield","mend_or_smite","aura_of_valor"]},
-	"sorcerer":{"name":"Sorcerer","emoji":"🧙", "role":"sorcerer","max_hp":22, "energy":3, "move":3,
-		"deck":["strike","strike","strike","strike","strike","guard","guard","guard","mark","channel","arcane_finisher"]},
+	"barbarian":{"name":"Barbarian","emoji":"🪓", "role":"tank", "power":"enrage", "max_hp":34, "energy":3, "move":1,
+		"deck":["strike","strike","strike","guard","guard","reckless_swing","reckless_swing","blood_for_blood","thick_hide","thick_hide","bellow","rampage"]},
+	"fighter": {"name":"Fighter", "emoji":"🛡️", "role":"tank", "power":"action_surge", "max_hp":38, "energy":3, "move":1,
+		"deck":["strike","strike","strike","shield_up","shield_up","shield_up","sidestep","shield_bash","shield_bash","reforge","whirlwind","hold_the_line"]},
+	"paladin": {"name":"Paladin", "emoji":"🌟", "role":"tank", "power":"smite", "max_hp":34, "energy":3, "move":1,
+		"deck":["strike","strike","strike","guard","guard","lay_on_hands","consecrate","consecrate","channel_shield","vow_of_wrath","vow_of_wrath","aura_of_valor"]},
+	# --- SUPPORT 📿 — Communion buys the stance, then gets out of the way ---
+	"cleric":  {"name":"Cleric",  "emoji":"⛑️", "role":"support", "power":"channel_divinity", "max_hp":28, "energy":3, "move":2,
+		"deck":["strike","strike","strike","guard","guard","guard","mend","mend","bless","sanctuary","censure","searing_word"]},
+	"bard":    {"name":"Bard",    "emoji":"🎻", "role":"support", "power":"bardic_performance", "max_hp":26, "energy":3, "move":2,
+		"deck":["strike","strike","strike","guard","guard","mockery","mockery","inspiration","crescendo","refrain","ballad"]},
+	"druid":   {"name":"Druid",   "emoji":"🐻", "role":"support", "power":"wild_shape", "max_hp":30, "energy":3, "move":2,
+		"deck":["strike","strike","guard","guard","guard","forage","regrowth","barkskin","entangle","maul","maul"]},
+	# --- DPS 🗡️ — no personal meter; the party charges every one of these ---
+	# Sorcerer does NOT start with arc_lightning: it is already in overworld's CLASS_REWARDS["sorcerer"],
+	# and shipping it in the starting deck would make its own reward tile a duplicate.
+	"sorcerer":{"name":"Sorcerer","emoji":"🧙", "role":"dps", "power":"metamagic", "max_hp":22, "energy":3, "move":3,
+		"deck":["strike","strike","strike","guard","guard","guard","bolt","bolt","mark","channel","arcane_finisher"]},
+	"rogue":   {"name":"Rogue",   "emoji":"🗡️", "role":"dps", "power":"assassins_mark", "max_hp":24, "energy":3, "move":3,
+		"deck":["strike","strike","guard","guard","guard","shiv","shiv","backstab","backstab","shadowstep","poison_blade","fan_of_knives"]},
+	"monk":    {"name":"Monk",    "emoji":"👊", "role":"dps", "power":"flurry", "max_hp":24, "energy":3, "move":3,
+		"deck":["strike","strike","guard","guard","guard","jab","jab","jab","stunning_strike","deflect","chill_touch","quivering_palm"]},
 }
+## The canonical trio — one per archetype. UNCHANGED: the campaign gates its High job on it, the
+## Monte-Carlo sim was tuned against it, and every harness hardcodes warrior/sorcerer.
 const PARTY_ORDER := ["warrior", "cleric", "sorcerer"]
+## The full roster — what a lobby roll or a campaign recruit draws from, where variety is the point.
+const ROLL_POOL := ["warrior", "barbarian", "fighter", "paladin", "cleric", "bard", "druid",
+	"sorcerer", "rogue", "monk"]
 
 ## Enemies: each picks its highest-priority valid target and telegraphs it.
 ## pref: "tankiest" | "healer_dps" | "lowest_hp".
@@ -274,6 +466,44 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 					lines.append("+%d (%d ⚔️×%d)" % [op[1] * mom, mom, op[1]])
 				else:
 					lines.append("+%d per ⚔️ Momentum" % op[1])
+			# --- the three archetypes (2026-07-17). EVERY op needs an arm here or its card renders a
+			# blank body: describe() is the only thing that writes a card face.
+			"dmg_per_guard":
+				var g: int = 0 if ch == null else int(ch.get("block", 0))
+				if g >= int(op[2]):
+					lines.append("+%d (%d 🛡️)" % [int(float(g) * float(op[1]) / float(op[2])), g])
+				else:
+					lines.append("+%d per %d 🛡️ Guard" % [op[1], op[2]])
+			"dmg_x":
+				var pool: int = 0 if ch == null else int(ch.get("energy", 0))
+				if ch != null and bool((ch.get("temp", {}) as Dictionary).get("pay_with_guard", false)):
+					pool = int(ch.get("block", 0))
+					lines.append("Deal %d to ALL (X = 🛡️)" % pool)
+				else:
+					lines.append("Deal X to ALL (X = %d ⚡)" % pool)
+			"pay_with_guard":
+				lines.append("Next card: pay with 🛡️, not ⚡")
+			"gain_guard":
+				var gg: int = op[1] + (5 if (fg and def.get("fortifiable", false)) else 0)
+				if gg != op[1]:
+					buffed = true
+				lines.append("Gain %d 🛡️ Guard" % gg)
+			"bank_communion":
+				lines.append("Bank %d 📿" % op[1])
+			"heal_party":
+				lines.append("Heal all allies %d" % op[1])
+			"buff_ally_next":
+				lines.append("Ally's next attack +%d" % op[1])
+			"heal_ally_next":
+				lines.append("+%d more next turn" % op[1])
+			"shuffle_random_into_deck":
+				lines.append("Shuffle %d back into deck" % op[1])
+			"bard_free_target":
+				lines.append("Counts as a 3rd 🎯 target")
+			"if_form":
+				lines.append("%s: %s" % [_form_emoji(str(op[1])), _nested_text(op[2], ch, party_buff)])
+			"if_assassin_mark":
+				lines.append("If 🎯 Marked: %s" % _nested_text(op[1], ch, party_buff))
 			"self_dmg":
 				lines.append("Lose %d HP" % op[1])
 			"heal_self":
@@ -296,6 +526,8 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 						lines.append("Apply %d 🔥 Burn" % op[2])
 					"vulnerable":
 						lines.append("Apply Vulnerable 💥 (+50%)")
+					"stun":
+						lines.append("Apply Stun 💫 (skips a turn)")
 			"if_bloodied":
 				lines.append("Bloodied: %s" % _nested_text(op[1], ch, party_buff))
 			"if_target_marked":
@@ -326,7 +558,7 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 				if op[1] == "marked":
 					lines.append("Mark: +25% dmg taken")
 			"force_target_all":
-				lines.append("All enemies hit Warrior")
+				lines.append("All enemies hit the tank")
 			"temp":
 				match op[1]:
 					"retaliate":
@@ -338,12 +570,21 @@ static func describe(def: Dictionary, ch, party_buff: int, attacks_played: int) 
 						lines.append("Next Guard +5; Retaliate +2")
 					"channel":
 						lines.append("Next %d attacks +%d" % [op[3], op[2]])
+					"smite_bonus":
+						lines.append("Next 🌟 Smite +%d" % op[2])
 			"shield_ally":
 				lines.append("Ally: -%d dmg per hit" % op[1])
 			"party_buff":
 				if op[1] == "attack":
 					lines.append("All allies +%d attack" % op[2])
 	return {"text": "\n".join(lines), "buffed": buffed}
+
+static func _form_emoji(form: String) -> String:
+	match form:
+		"bear": return "🐻 Bear"
+		"hawk": return "🦅 Hawk"
+		"wolf": return "🐺 Wolf"
+		_: return form
 
 ## Compact one-line description of nested ops (for conditional cards: if_bloodied, on_kill, etc.).
 static func _nested_text(ops: Array, ch, party_buff: int) -> String:
@@ -354,6 +595,8 @@ static func _nested_text(ops: Array, ch, party_buff: int) -> String:
 				parts.append("+%d dmg" % attack_preview(o[1], ch, party_buff))
 			"block":
 				parts.append("+%d block" % o[1])
+			"gain_guard":
+				parts.append("+%d 🛡️" % o[1])
 			"gain_energy":
 				parts.append("+%d ⚡" % o[1])
 			"heal_self":

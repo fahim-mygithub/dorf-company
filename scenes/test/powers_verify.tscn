@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://bq7xk2npwr4ma"]
+
+[ext_resource type="Script" path="res://scripts/test/powers_verify.gd" id="1_pverif"]
+
+[node name="PowersVerify" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_pverif")

@@ -30,10 +30,22 @@ const REWARD_POOL := ["strike", "guard", "cleave", "wall",
 	"power_through", "precise_jab", "whetstone", "guard_break", "field_dressing",
 	"bracing_stance", "opportunist", "rally", "trophy_hunter"]
 # Class-gated reward cards, offered on hex reward tiles when a crew member of that class is present.
+## Every class in Db.ROLL_POOL needs an entry, or its dwarves silently get nothing from a reward tile.
+## Each pool offers cards that are NOT already in that class's starting deck.
 const CLASS_REWARDS := {
-	"warrior":  ["reckless_swing", "second_wind", "momentum_strike"],
-	"cleric":   ["lay_on_hands", "consecrate", "divine_smite"],
-	"sorcerer": ["arc_lightning", "empower", "kindle"],
+	# tank
+	"warrior":   ["reckless_swing", "second_wind", "momentum_strike"],
+	"barbarian": ["rampage", "second_wind", "guard_break"],
+	"fighter":   ["hold_the_line", "bracing_stance", "shield_bash"],
+	"paladin":   ["lay_on_hands", "divine_smite", "vow_of_wrath"],
+	# support
+	"cleric":    ["lay_on_hands", "consecrate", "searing_word"],
+	"bard":      ["ballad", "inspiration", "mockery"],
+	"druid":     ["barkskin", "regrowth", "entangle"],
+	# dps
+	"sorcerer":  ["arc_lightning", "empower", "kindle"],
+	"rogue":     ["poison_blade", "fan_of_knives", "shadowstep"],
+	"monk":      ["quivering_palm", "stunning_strike", "chill_touch"],
 }
 # Phase 5: contract modifiers — one data tag reshapes BOTH the job offer (payout) and the fight
 # (enemy scale), so "which job" carries more variety from the same 3 enemies. Cheapest recomb axis.
@@ -115,7 +127,17 @@ const C_RED := Color(0.92, 0.26, 0.26)
 const C_COIN := Color(0.96, 0.82, 0.26)
 const DANGER_BG := {"low": Color(0.16, 0.34, 0.20), "med": Color(0.40, 0.32, 0.10), "high": Color(0.40, 0.13, 0.13)}
 const DANGER_BANNER := {"low": Color(0.30, 0.82, 0.42), "med": Color(0.95, 0.74, 0.20), "high": Color(0.92, 0.26, 0.26)}
-const CLASS_COL := {"warrior": Color(0.62, 0.64, 0.68), "cleric": Color(0.95, 0.80, 0.30), "sorcerer": Color(0.62, 0.40, 0.85)}
+## One colour per class in Db.ROLL_POOL. Read it through _class_col(), NEVER bare: this was keyed to
+## the canonical trio while the roll pool grew to 10, and a bare index on a missing key is a runtime
+## error that takes the whole campaign screen down with it.
+const CLASS_COL := {
+	"warrior": Color(0.62, 0.64, 0.68), "barbarian": Color(0.85, 0.35, 0.25),
+	"fighter": Color(0.55, 0.70, 0.85), "paladin": Color(0.98, 0.88, 0.45),
+	"cleric": Color(0.95, 0.80, 0.30), "bard": Color(0.90, 0.55, 0.80),
+	"druid": Color(0.45, 0.75, 0.42), "sorcerer": Color(0.62, 0.40, 0.85),
+	"rogue": Color(0.50, 0.50, 0.58), "monk": Color(0.95, 0.62, 0.30),
+}
+const CLASS_COL_FALLBACK := Color(0.60, 0.60, 0.65)
 const MOD_WOUNDED := Color(0.72, 0.66, 0.55)
 const MOD_LOST := Color(0.35, 0.35, 0.38)
 
@@ -443,6 +465,10 @@ func _new_run() -> void:
 	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
 	_enter_dashboard()
 
+## Total by construction: a class added later renders grey instead of crashing the screen.
+func _class_col(cls: String) -> Color:
+	return CLASS_COL.get(cls, CLASS_COL_FALLBACK)
+
 # One roster dwarf. downed/stable/ds_* are per-EXPEDITION death-save state (reset each expedition start).
 func _make_dwarf(dname: String, cls: String) -> Dictionary:
 	var mh: int = int(Db.CLASSES[cls]["max_hp"])
@@ -562,7 +588,7 @@ func _build_dashboard() -> void:
 
 func _build_dwarf_token(d: Dictionary, cx: int, cy: int) -> void:
 	var status: String = d["status"]
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	_rect(Vector2(cx - 58, cy - 74), Vector2(116, 176), Color(col.r, col.g, col.b, 0.22), screen_root)
 	var emo := _mkemoji(Vector2(cx, cy - 16), Vector2(110, 84), 54, screen_root)
 	emo.text = Db.CLASSES[d["cls"]]["emoji"]
@@ -789,7 +815,7 @@ func _build_crew_select(c: Dictionary) -> void:
 
 func _build_pick_token(d: Dictionary, cx: int, cy: int) -> void:
 	var picked: bool = crew_pick.has(d)
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	var card := Control.new()
 	card.position = Vector2(cx - 70, cy - 60)
 	card.size = Vector2(140, 210)
@@ -817,13 +843,16 @@ func _build_crew_gauge(c: Dictionary) -> void:
 	var has_sorc: bool = false
 	var tothp: int = 0
 	for d in crew_pick:
-		if d["cls"] == "cleric": has_cleric = true
-		if d["cls"] == "sorcerer": has_sorc = true
+		# Read the ARCHETYPE, not the class id — a Bard and a Druid heal too, and this gauge claims
+		# "all three roles" while testing two ids.
+		var role: String = str(Db.CLASSES[d["cls"]]["role"])
+		if role == "support": has_cleric = true
+		if role == "dps": has_sorc = true
 		tothp += int(d["hp"])
 	if crew_pick.size() == int(c["crew_size"]):
 		var warns: Array = []
-		if not has_cleric: warns.append("⚠ no healer — no Mend / Shield / Aura")
-		if not has_sorc: warns.append("⚠ no burst — no Mark / Channel / Finisher")
+		if not has_cleric: warns.append("⚠ no support — nobody to heal or shield")
+		if not has_sorc: warns.append("⚠ no damage dealer — the fight will grind")
 		if warns.is_empty():
 			_mklabel("balanced crew — all three roles", Vector2(0, y), Vector2(720, 20), 14, screen_root, true, C_GREEN)
 		else:
@@ -912,7 +941,7 @@ func _build_spoil_card(i: int, x: int) -> void:
 	_mklabel(body["text"], Vector2(8, 178), Vector2(168, 110), 14, card, true, Color(0.9, 0.9, 0.92))
 
 func _build_spoil_target(d: Dictionary, cx: int, cy: int) -> void:
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	var tok := Control.new()
 	tok.position = Vector2(cx - 70, cy - 60)
 	tok.size = Vector2(140, 170)
@@ -1515,7 +1544,7 @@ func _build_exp_crew_strip() -> void:
 		_build_exp_crew_token(exp_crew[i], startx + i * 240, 800)
 
 func _build_exp_crew_token(d: Dictionary, cx: int, cy: int) -> void:
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	_rect(Vector2(cx - 66, cy - 66), Vector2(132, 168), Color(col.r, col.g, col.b, 0.16), screen_root)
 	var emo := _mkemoji(Vector2(cx, cy - 28), Vector2(96, 70), 44, screen_root)
 	emo.text = Db.CLASSES[d["cls"]]["emoji"]
@@ -1772,7 +1801,7 @@ func _build_hex_loot_card(i: int, x: int) -> void:
 	_mklabel(body["text"], Vector2(8, 178), Vector2(168, 114), 13, card, true, Color(0.9, 0.9, 0.92))
 
 func _build_hex_loot_target(d: Dictionary, cx: int, cy: int) -> void:
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	var tok := Control.new()
 	tok.position = Vector2(cx - 70, cy - 60)
 	tok.size = Vector2(140, 190)
@@ -1973,7 +2002,7 @@ func _reroll_shop() -> void:
 	shop_stock.append({"kind": "heal", "cost": SHOP_HEAL_COST})
 	if mode == Mode.SOLO:
 		var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
-		var rc: String = Db.PARTY_ORDER[randi() % Db.PARTY_ORDER.size()]
+		var rc: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]   # recruits draw from the full roster
 		shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
 	else:
 		# Co-op has no Recruit: seats are fixed and the wagon rule already refills a dead dwarf.
@@ -2079,7 +2108,7 @@ func _build_shop_targets() -> void:
 		_build_shop_target_token(elig[i], startx + i * 96, 1058)
 
 func _build_shop_target_token(d: Dictionary, cx: int, cy: int) -> void:
-	var col: Color = CLASS_COL[d["cls"]]
+	var col: Color = _class_col(str(d["cls"]))
 	var tok := Control.new()
 	tok.position = Vector2(cx - 40, cy - 34)
 	tok.size = Vector2(80, 74)

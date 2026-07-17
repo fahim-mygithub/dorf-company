@@ -53,7 +53,8 @@ func _exit_tree() -> void:
 func _gen_roster() -> void:
 	my_roster = []
 	for i in 4:
-		var cls: String = Db.PARTY_ORDER[randi() % Db.PARTY_ORDER.size()]
+		# The FULL roster, not the canonical trio — a lobby roll is exactly where class variety pays.
+		var cls: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]
 		my_roster.append({"cls": cls, "name": NAMES[randi() % NAMES.size()]})
 
 # ---------------------------------------------------------------- Net
