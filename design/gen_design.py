@@ -1141,16 +1141,16 @@ S_BARD = [
     C("mockery", "Vicious Mockery", 1, "\U0001f3ad", "attack", "enemy", ["Deal 4", "Apply Vulnerable \U0001f4a5"], ""),
     C("inspiration", "Inspiration", 1, "\U0001f3b5", "skill", "ally", ["Ally’s next card +4", "Bank \U0001f4ff"], ""),
     C("crescendo", "Crescendo", 1, "\U0001f3b6", "power", "party", ["All allies +2 attack", "Bank \U0001f4ff"], ""),
-    C("refrain", "Refrain", 0, "\U0001f501", "skill", "self", ["Draw 1", "Bank \U0001f4ff / distinct card"], ""),
+    C("refrain", "Refrain", 0, "\U0001f501", "skill", "self", ["Draw 1", "Free 3rd target"], ""),
     C("ballad", "Ballad", 2, "\U0001f4ef", "skill", "party", ["Heal all allies 5", "Bank \U0001f4ff"], ""),
     STRIKE,
 ]
 S_DRUID = [
-    C("thorns", "Thorns", 1, "\U0001f33f", "skill", "self", ["Reflect 4 when hit", "Bank \U0001f4ff"], ""),
+    C("forage", "Forage", 1, "\U0001f330", "skill", "self", ["Shuffle 1 back", "Draw 2", "Bank \U0001f4ff"], ""),
     C("regrowth", "Regrowth", 1, "\U0001f343", "skill", "ally", ["Heal ally 6", "+4 next turn"], ""),
     C("barkskin", "Barkskin", 1, "\U0001f333", "skill", "party", ["All allies +4 block", "Bank \U0001f4ff"], ""),
     C("entangle", "Entangle", 1, "\U0001f578️", "attack", "all_enemies", ["Deal 4 to ALL", "Apply Vulnerable"], ""),
-    C("maul", "Maul", 1, "\U0001f43b", "attack", "enemy", ["Deal 6", "Shifted: 12"], ""),
+    C("maul", "Maul", 1, "\U0001f43b", "attack", "enemy", ["Deal 6", "\U0001f43a Wolf: 10"], ""),
     STRIKE,
 ]
 # ---- DPS card kits (Momentum substrate) ----
@@ -1183,7 +1183,15 @@ def s_cards_support():
     b = ('<div class="note"><b>Draft direction (2026-07-15).</b> The <b>Support</b> role, same three-layer '
          "shape as the Tank sheet: the <b>role</b> is a shared <i>substrate</i> (Communion), each <b>class</b> "
          "is one <b>Class Power</b> that channels it, and a <b>skill tree</b> (post-MVP) upgrades that power. "
-         "Numbers are unsimmed placeholders.</div>")
+         "Numbers are unsimmed placeholders."
+         "<br><br><b>Rev 2026-07-16 — the two stances were reworked.</b> The <b>Bard</b>’s song no longer "
+         "burns Communion to stay up; it’s held by <b>touching 3 distinct targets a turn</b> (an AoE counts "
+         "as <b>1</b>), and comes up short → it breaks. The <b>Druid</b> is rebuilt around <b>deck "
+         "manipulation</b>: pick <b>\U0001f43b Bear / \U0001f985 Hawk / \U0001f43a Wolf</b>, <b>hand 2 cards "
+         "back to your deck</b> to pay for it, and get paid — hard — for the card types you <i>draw</i> "
+         "rather than the ones you play. Both changes pull the same lever: <b>the cost moved out of a meter "
+         "and into how you play</b>. The Bard pays in <i>reach</i>, the Druid pays in <i>cards</i>."
+         "</div>")
 
     b += ('<div class="sub" style="background:linear-gradient(135deg,#1c2622,#151c19);border-color:#2f4a3a">'
           '<h3 style="color:#4dd16b">\U0001f4ff SUPPORT — the Communion substrate</h3>'
@@ -1191,16 +1199,21 @@ def s_cards_support():
           "<b>helping an ally</b> — a heal, a shield, a buff banks 1 \U0001f4ff — and support cards read off "
           "it. The cards <i>build</i> the resource; the <b>Class Power channels it</b>, differently per class: "
           "the Cleric runs a <b>passive aura</b> that auto-discharges every 5 casts (heal-all + smite-all, "
-          "scaled by your cast streak), the Bard <b>burns</b> it slowly to sustain a party-wide song, the "
-          "Druid <b>spends a lump</b> to shift into a front-line beast. <i>(The Cleric’s aura reads cast "
-          "types directly instead of banking Communion — it’s the always-on member of the trio.)</i> "
-          "Communion lives on the party dict, host-side, so both the meter and the power ride the "
+          "scaled by your cast streak), the Bard <b>spends a lump</b> to strike up a party-wide song, the "
+          "Druid <b>spends a lump</b> to shift into a beast. <i>(The Cleric’s aura reads cast types directly "
+          "instead of banking Communion — it’s the always-on member of the trio.)</i></p>"
+          "<p><b>Communion is the ignition, never the upkeep.</b> It buys the Bard’s song and the Druid’s "
+          "shift, and then it’s out of the way — neither power drains a meter to stay alive. What holds them "
+          "up is <b>how you play</b>: the Bard must <b>spread its turn across 3 distinct targets</b>, the "
+          "Druid must <b>draw the card types its form pays for</b>. That keeps the failure state legible "
+          "(you can see it in your own hand) instead of hiding it in a bar ticking toward zero.</p>"
+          "<p>Communion lives on the party dict, host-side, so both the meter and the power ride the "
           "snapshot.</p><span class=\"rk\">DRAFT — unsimmed</span></div>")
 
     b += combat_row_box([
         ("⛑️", "Cleric", "✨", "Channel Divinity<br>passive · auto every 5"),
-        ("\U0001f3bb", "Bard", "\U0001f3b6", "Bardic Performance<br>stance · sustain"),
-        ("\U0001f43b", "Druid", "\U0001f43e", "Wild Shape<br>stance · beast"),
+        ("\U0001f3bb", "Bard", "\U0001f3b6", "Bardic Performance<br>stance · 3 targets / turn"),
+        ("\U0001f43b", "Druid", "\U0001f43e", "Wild Shape<br>pick a form · pay 2 cards"),
     ], accent="#7ad19a")
 
     b += role_block(
@@ -1232,39 +1245,63 @@ def s_cards_support():
     b += role_block(
         "\U0001f3bb", "Bard", "Performance Kit", "26 hp · 3 energy",
         {"icon": "\U0001f3b6", "name": "Bardic Performance",
-         "gate": "stance · burns 1 \U0001f4ff each turn to hold · ends when \U0001f4ff runs dry",
+         "gate": "stance · hold it by touching <b>3 distinct targets</b> each turn · come up short and it breaks",
          "effect": "Strike up a song (a <b>stance</b>). While performing, every ally deals <b>+2</b> and gains "
-                   "<b>+2 block</b> at the start of their turn. It <b>burns 1 Communion per turn</b> to "
-                   "sustain — when your Communion runs out, the song ends. Restart it whenever you’ve banked "
-                   "more.",
+                   "<b>+2 block</b> at the start of their turn. Holding it costs <b>no resource</b> — it costs "
+                   "<b>reach</b>. Each turn you must touch <b>3 distinct targets</b>, and an <b>AoE counts as "
+                   "one</b> no matter how many it hits. Mend a dwarf, Ballad the whole party, Strike an "
+                   "enemy — that’s 3, and the music plays on. Mend the <i>same</i> dwarf three times and "
+                   "that’s <b>1</b>: the song <b>breaks</b> and goes on a <b>3-turn cooldown</b>.",
          "tree": ["<b>Virtuoso</b> — the aura rises to +3 attack / +3 block",
                   "<b>Countersong</b> — allies also gain Retaliate 2 while you perform",
-                  "<b>Song of Rest</b> — swap the block for +2 healing each turn"]},
-        "Communion \U0001f4ff — the Bard banks 1 for every <b>distinct</b> card played (breadth is the stat; a "
-        "varied hand keeps the music going). The song is the drain — keep the pool ahead of it.",
+                  "<b>Encore</b> — the first turn you come up short doesn’t break the song (once per fight)"]},
+        "Communion \U0001f4ff — banked by helping an ally. The Bard spends a <b>lump</b> to strike the song "
+        "up, and then Communion is <b>done</b>: it never touches the song again. The upkeep is <b>breadth</b>. "
+        "A turn spent poking one dwarf over and over is a turn the music stops — which is the whole point, "
+        "because a support that tunnels on one target isn’t supporting.",
         S_BARD,
-        '<div class="wg"><div class="wgl">COMMUNION — sustains the song</div>'
-        '<div class="bar"><div class="fill" style="width:58%;background:#4dd16b"></div></div>'
-        '<div class="wgt">\U0001f3b6 performing · −1 \U0001f4ff / turn · +2 attack &amp; +2 block to all allies</div></div>')
+        '<div class="wg"><div class="wgl">PERFORMANCE — 3 distinct targets to hold</div>'
+        '<div class="pips"><span style="color:#4dd16b">\U0001f3af\U0001f3af</span>'
+        '<span style="color:#3a3a46">○</span></div>'
+        '<div class="wgt">\U0001f3b6 performing · \U0001f64c Mend → the tank · \U0001f4ef Ballad → party '
+        '(AoE = <b>1</b>) · one more target or the song breaks</div></div>')
 
     b += role_block(
         "\U0001f43b", "Druid", "Wildshape Kit", "30 hp · 3 energy",
         {"icon": "\U0001f43e", "name": "Wild Shape",
-         "gate": "stance · spends a lump of \U0001f4ff to shift · lasts 3 turns",
-         "effect": "Spend Communion to shift into a <b>dire beast</b> (a <b>stance</b>). While shifted you gain "
-                   "<b>6 Guard each turn</b> and your Strikes deal <b>+5</b>, but you can’t play support "
-                   "skills — you’re the front line now. Lasts <b>3 turns</b>, or shift back early. Covers a "
-                   "downed tank.",
-         "tree": ["<b>Dire Form</b> — also +10 max HP while shifted",
-                  "<b>Primal</b> — your Strikes hit ALL enemies while shifted",
-                  "<b>Natural Recovery</b> — shifting back heals the party 6"]},
-        "Communion \U0001f4ff — nature skills and heals bank it; Wild Shape spends a lump to transform. Support "
-        "is the <b>role-flex</b>: charge as a healer, then <i>become</i> a bruiser when the wall falls.",
+         "gate": "stance · spend a lump of \U0001f4ff · choose \U0001f43b / \U0001f985 / \U0001f43a · costs "
+                 "<b>2 cards</b> · lasts 3 turns",
+         "effect": "Spend Communion to shift — and <b>choose the form</b> (a <b>stance</b>, <b>3 turns</b>). "
+                   "It resolves at the <b>start of your next turn</b>: shuffle <b>2 cards from your hand back "
+                   "into your deck</b>, and you do <b>not</b> replace them. That’s the real price of the "
+                   "form — a <b>−2 hand</b>, two plays you simply don’t get. You <i>do</i> choose which two, "
+                   "and they go back into the <b>deck</b>, not the discard: you aren’t throwing them away, "
+                   "you’re re-seeding.<br>"
+                   "It has to buy back a whole turn of tempo, so it pays <b>hard</b>. At the start of "
+                   "<b>every turn you’re shifted</b>, the form reads your hand and pays for <b>every matching "
+                   "card type in it</b>:<br>"
+                   "\U0001f43b <b>Bear</b> — every <b>block</b> card in hand → <b>+5 Guard</b>, free.<br>"
+                   "\U0001f43a <b>Wolf</b> — every <b>attack</b> card in hand → your <b>first attack</b> this "
+                   "turn hits <b>+5</b> harder.<br>"
+                   "\U0001f985 <b>Hawk</b> — every <b>spell</b> card in hand → <b>+3 block to the whole "
+                   "party</b>, free. <i>(Reads lower per card only because it multiplies by party size.)</i>"
+                   "<br>"
+                   "The payout is on the <b>draw</b>, not the play: you’re paid for <b>holding</b> the right "
+                   "types, not spending them — so the two you give back are the two your form wasn’t going to "
+                   "pay for anyway. It isn’t a mulligan, it’s a <b>tithe you get to aim</b>.",
+         "tree": ["<b>Deep Roots</b> — the shift costs <b>1 card</b> instead of 2",
+                  "<b>Primal Instinct</b> — draw 1 extra each turn while shifted (more hand, more payout)",
+                  "<b>Two Natures</b> — your hand also pays out for a second form of your choice"]},
+        "Communion \U0001f4ff — nature skills and heals bank it; Wild Shape spends a lump to shift. But the "
+        "lump isn’t the real price — <b>2 cards</b> are. A form only ever pays what your deck can draw, so the "
+        "Druid is the class that rewards a list built <b>lopsided on purpose</b>: a narrow deck is what makes "
+        "the two you hand back the easy ones, and then the hand pays you before you spend a point of energy.",
         S_DRUID,
-        '<div class="wg"><div class="wgl">COMMUNION — shift charge</div>'
-        '<div class="pips"><span style="color:#4dd16b">\U0001f4ff\U0001f4ff\U0001f4ff</span>'
-        '<span style="color:#3a3a46">○○</span></div>'
-        '<div class="wgt">\U0001f43e Wild Shape → beast form · +6 Guard/turn · Strike +5 · 3 turns</div></div>')
+        '<div class="wg"><div class="wgl">WILD SHAPE — pick a form, pay 2 cards for it</div>'
+        '<div class="pips"><span style="color:#4dd16b">\U0001f43b</span>'
+        '<span style="color:#3a3a46">\U0001f985\U0001f43a</span></div>'
+        '<div class="wgt">\U0001f43b Bear · turn <b>1 of 3</b> · gave 2 back (hand <b>−2</b>) → '
+        '\U0001f6e1️\U0001f6e1️\U0001f6e1️ still in hand = <b>+15 Guard</b>, free</div></div>')
 
     b += ('<div class="sub" style="background:#141821;border-color:#2c3340"><h3 style="color:#8fb4e0">'
           "The build cost — what Support adds</h3>"
@@ -1272,10 +1309,26 @@ def s_cards_support():
           "<code>power</code> + <code>power_cd</code> on the party dict, ticked host-side, fired by a "
           "validated tap intent. Communion is <b>one new counter</b> (<code>communion</code> on the party "
           "dict, +1 when a card that helps an ally resolves).<br><br>"
-          "<b>The Bard and Druid powers are stances</b> (like Enrage), so they reuse that upkeep hook: the "
-          "<b>Bard’s song</b> drains 1 Communion at end of turn and ends at 0; <b>Wild Shape</b> sets a "
-          "<code>shifted</code> flag (Guard/turn, +5 Strikes, support skills locked) for 3 turns. The "
-          "<b>Cleric’s Channel is passive</b> — the simplest of the three: a per-cast hook tags each play "
+          "<b>The Bard and Druid powers are stances</b> (like Enrage), so they reuse that end-of-turn upkeep "
+          "hook.<br><br>"
+          "<b>The Bard’s song is the cheapest thing on this sheet, and that’s not luck.</b> Its rule — 3 "
+          "distinct targets, AoE counts as 1 — needs <b>no new addressing</b>, because the host already "
+          "validates every play as <code>(target_kind, target_idx)</code> in "
+          "<code>_try_play(seat, uid, kind, idx)</code>. That pair <i>is</i> the distinct-target key. Bank it "
+          "in a per-turn <code>targets</code> set, check <code>size() &gt;= 3</code> at end of turn, and drop "
+          "the song + set <code>power_cd = 3</code> if not. <b>“AoE counts as 1” is not a special case we "
+          "write — it falls out</b>: an AoE play carries a single address (<code>kind=\"all\"</code>, "
+          "<code>idx=-1</code>), so it can only ever add one entry. It’s the same static address the M3b fx "
+          "rider already ships as <code>side</code>+<code>slot</code>.<br><br>"
+          "<b>Wild Shape is the expensive one</b>, and the cost is <i>input</i>, not logic: it needs two "
+          "choices combat has never had to ask for. First a <b>3-way form pick</b> on the tap "
+          "(<code>form</code> = bear/hawk/wolf on the party dict, plus <code>shift_turns = 3</code>). Then, on "
+          "the first shifted turn, a <b>pick-2-from-hand</b> modal to pay the tithe — a genuinely new input "
+          "shape, since every existing play targets a <i>character</i>, not a <i>card</i>. Both are new "
+          "validated intents in co-op (per-seat and instant — your own dwarf, so never a ring decision). The "
+          "payout itself is trivial by comparison: at the start of each shifted turn, count the hand by "
+          "<code>type</code> and multiply. <br><br>"
+          "The <b>Cleric’s Channel is passive</b> — the simplest of the three: a per-cast hook tags each play "
           "\U0001f525 (attack) or \U0001f64f (skill/power), bumps a same-type <code>streak</code> (reset on "
           "switch) and a <code>casts</code> counter, and adds <code>streak</code> to the matching charge; on "
           "every 5th cast it fires a party heal + <code>dmg_all</code> sized by the two charges, then clears. "
@@ -1283,9 +1336,19 @@ def s_cards_support():
           "<b>New ops:</b> <code>channel_aura</code> (the Cleric per-cast hook: tag + streak + 5-cast "
           "discharge) · <code>bank_communion v</code> · <code>spend_communion [ops]</code> (scale by "
           "Communion, exactly like the shipped <code>spend_devotion</code>) · <code>buff_ally_next v</code> "
-          "(Bard Inspiration) · the two stance powers (<code>perform</code> / <code>wild_shape</code>). "
-          "<b>Reused as-is:</b> heal_ally, party_block, party_buff, shield_ally, "
-          "dmg_all, apply/vulnerable+burn, temp/retaliate, draw. Everything else is pure data.</p></div>")
+          "(Bard Inspiration) · the two stance powers (<code>perform</code> / <code>wild_shape form</code>) · "
+          "<code>shuffle_into_deck n</code> (Forage + the Wild Shape filter) · <code>hand_type_payout</code> "
+          "(the form’s start-of-turn count). <b>Reused as-is:</b> heal_ally, party_block, party_buff, "
+          "shield_ally, dmg_all, apply/vulnerable+burn, temp/retaliate, draw, gain_guard. Everything else is "
+          "pure data.<br><br>"
+          "<b>The one thing to sim first:</b> the form payouts can’t be tuned in isolation — they’re a "
+          "function of whatever list the Druid built, so they’re the only numbers on this sheet that move "
+          "when a <i>card</i> changes. Bear at <b>+5 per block card</b> off a block-stacked deck is the "
+          "obvious blow-out: a 3-block hand is <b>+15 Guard for zero energy</b>, every turn, for 3 turns — "
+          "and you still get to play the blocks afterward. The <b>−2 hand</b> is the only brake, and there’s "
+          "a real tension worth watching: the narrow deck that makes the payout wide is the same narrow deck "
+          "that makes the tithe painless. If Wild Shape ends up dominant, that loop is why, and the lever is "
+          "the <b>cost</b> (2 cards → 3) at least as much as the three payout numbers.</p></div>")
 
     return page("Cards — Support role · class powers", "card_db.gd · STARTER_PACKS (draft)", "Cards", b,
                 ROLE_CSS, stage_h=0,
