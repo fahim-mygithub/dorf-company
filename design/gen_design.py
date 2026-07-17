@@ -1003,8 +1003,9 @@ def s_cards_roles():
           '<div class="chips">'
           '<span class="cc"><b>\U0001f4ff Support</b> — Communion → Cleric <i>Channel Divinity</i> · Bard '
           '<i>Bardic Performance</i> · Druid <i>Wild Shape</i> &nbsp;→&nbsp; <code>cards/support.html</code></span>'
-          '<span class="cc"><b>⚔️ DPS</b> — Momentum → Sorcerer <i>Surge</i> · Rogue <i>Assassinate</i> · Monk '
-          '<i>Flurry of Blows</i> &nbsp;→&nbsp; <code>cards/dps.html</code></span></div>'
+          '<span class="cc"><b>⚔️ DPS</b> — the party charges it → Sorcerer <i>Metamagic</i> · Rogue '
+          '<i>Assassin’s Mark</i> · Monk <i>Flurry of Blows</i> &nbsp;→&nbsp; <code>cards/dps.html</code>'
+          "</span></div>"
           "<p style=\"margin-top:9px;color:#8b8b99\">Ranger (Hunter’s Mark) and Wizard are held as future "
           "signatures — the substrate carries them when they’re built.</p></div>")
 
@@ -1113,14 +1114,20 @@ def role_block(e, name, kit, sub, active, feeds, cards, widget):
     h += '</div>%s</div></div>' % widget
     return h
 
-def combat_row_box(portraits, accent="#c295e0"):
-    """The 'In combat: the Class Power' explainer + a row of portrait orbs."""
+def combat_row_box(portraits, accent="#c295e0", fuel=None):
+    """The 'In combat: the Class Power' explainer + a row of portrait orbs.
+
+    fuel overrides the sentence describing what the orb's gate reads. The default assumes
+    a cooldown or a spent resource, which is true on Tank and Support and false on DPS.
+    """
+    if fuel is None:
+        fuel = ("the orb shows the gate (its cooldown, or the resource it spends). Cards build the "
+                "resource, the Class Power spends it.")
     h = ('<div class="sub" style="background:#181622;border-color:#3a2f4a"><h3 style="color:%s">'
          "\U0001f7e3 In combat: the Class Power</h3>"
          "<p>Each dwarf carries its <b>Class Power</b> as an orb on its portrait — a Hearthstone-style hero "
-         "power. Tap your own dwarf to fire it; the orb shows the gate (its cooldown, or the resource it "
-         "spends). Cards build the resource, the Class Power spends it. In co-op you only ever fire your "
-         "own.</p><div class=\"combatrow\">") % accent
+         "power. Tap your own dwarf to fire it; %s In co-op you only ever fire your "
+         "own.</p><div class=\"combatrow\">") % (accent, fuel)
     for pe, pn, po, pg in portraits:
         h += ('<div class="port"><div class="pe">%s</div><div class="pn">%s</div>'
               '<div class="po">%s</div><div class="pg">%s</div></div>' % (pe, pn, po, pg))
@@ -1155,27 +1162,34 @@ S_DRUID = [
 ]
 # ---- DPS card kits (Momentum substrate) ----
 D_SORC = [
-    C("mark_d", "Mark", 1, "\U0001f3af", "skill", "enemy", ["Mark: +25% dmg taken"], ""),
-    C("channel_d", "Channel", 1, "\U0001f300", "power", "self", ["Next 2 attacks +3"], ""),
-    C("bolt", "Bolt", 1, "⚡", "attack", "enemy", ["Deal 6", "+2 per ⚔️"], ""),
-    C("arc_lightning_d", "Arc Lightning", 2, "\U0001f329️", "attack", "enemy", ["Deal 9", "Deal 4 to ALL"], ""),
-    C("finisher_d", "Arcane Finisher", 2, "\U0001f4a5", "attack", "enemy", ["Deal 5", "+3 per attack"], ""),
+    C("mark_d", "Mark", 1, "\U0001f3af", "skill", "enemy", ["Mark: +25% dmg taken", "\U0001f9ff spell"], ""),
+    C("channel_d", "Channel", 1, "\U0001f300", "power", "self", ["Next 2 attacks +3", "\U0001f9ff spell"], ""),
+    C("bolt", "Bolt", 1, "⚡", "attack", "enemy", ["Deal 6", "\U0001f9ff spell"], ""),
+    C("arc_lightning_d", "Arc Lightning", 2, "\U0001f329️", "attack", "enemy",
+      ["Deal 9", "Deal 4 to ALL", "\U0001f9ff spell"], ""),
+    C("finisher_d", "Arcane Finisher", 2, "\U0001f4a5", "attack", "enemy",
+      ["Deal 5", "+3 per attack", "\U0001f9ff spell"], ""),
     STRIKE,
 ]
 D_ROGUE = [
-    C("backstab", "Backstab", 1, "\U0001f5e1️", "attack", "enemy", ["Deal 6", "Marked/Bloodied: +6"], ""),
-    C("expose_r", "Expose", 1, "\U0001f3af", "skill", "enemy", ["Mark target", "Gain ⚔️"], ""),
+    C("backstab", "Backstab", 1, "\U0001f5e1️", "attack", "enemy", ["Deal 6", "Marked: +6", "⚔️ physical"], ""),
+    C("shiv", "Shiv", 0, "\U0001f52a", "attack", "enemy", ["Deal 3", "Marked: +2 tick", "⚔️ physical"], ""),
     C("shadowstep", "Shadowstep", 0, "\U0001f4a8", "skill", "self", ["Gain 1 ⚡", "Next attack +4"], ""),
-    C("poison_blade", "Poison Blade", 1, "\U0001f9ea", "attack", "enemy", ["Deal 4", "Apply 3 \U0001f525"], ""),
-    C("fan_of_knives", "Fan of Knives", 2, "\U0001f52a", "attack", "all_enemies", ["Deal 6 to ALL"], ""),
+    C("poison_blade", "Poison Blade", 1, "\U0001f9ea", "attack", "enemy",
+      ["Deal 4", "Apply 3 \U0001f525", "⚔️ physical"], ""),
+    C("fan_of_knives", "Fan of Knives", 2, "\U0001f52a", "attack", "all_enemies",
+      ["Deal 6 to ALL", "⚔️ physical"], ""),
     STRIKE,
 ]
 D_MONK = [
-    C("jab", "Jab", 0, "\U0001f44a", "attack", "enemy", ["Deal 3", "Gain 1 ⚡"], ""),
-    C("crane_kick", "Crane Kick", 1, "\U0001f9b5", "attack", "enemy", ["Deal 5", "+2 per ⚔️"], ""),
+    C("jab", "Jab", 0, "\U0001f44a", "attack", "enemy", ["Deal 3", "Gain 1 ⚡", "⚔️ physical"], ""),
+    C("stunning_strike", "Stunning Strike", 1, "\U0001f4ab", "attack", "enemy",
+      ["Deal 4", "Apply Stun \U0001f4ab", "⚔️ physical"], ""),
     C("deflect", "Deflect", 1, "\U0001f300", "skill", "self", ["Gain 5 block", "Reflect 4"], ""),
-    C("meditate", "Meditate", 1, "\U0001f9d8", "power", "self", ["Draw 1", "Next attack repeats"], ""),
-    C("quivering_palm", "Quivering Palm", 2, "☝️", "attack", "enemy", ["Deal 8", "On kill: +2 ⚡"], ""),
+    C("chill_touch", "Chill Touch", 1, "❄️", "attack", "enemy",
+      ["Deal 4", "Apply Chill ❄️", "\U0001f9ff spell"], ""),
+    C("quivering_palm", "Quivering Palm", 2, "☝️", "attack", "enemy",
+      ["Deal 8", "On kill: +2 ⚡", "⚔️ physical"], ""),
     STRIKE,
 ]
 
@@ -1278,14 +1292,16 @@ def s_cards_support():
                    "and they go back into the <b>deck</b>, not the discard: you aren’t throwing them away, "
                    "you’re re-seeding.<br>"
                    "It has to buy back a whole turn of tempo, so it pays <b>hard</b>. At the start of "
-                   "<b>every turn you’re shifted</b>, the form reads your hand and pays for <b>every matching "
-                   "card type in it</b>:<br>"
-                   "\U0001f43b <b>Bear</b> — every <b>block</b> card in hand → <b>+5 Guard</b>, free.<br>"
-                   "\U0001f43a <b>Wolf</b> — every <b>attack</b> card in hand → your <b>first attack</b> this "
-                   "turn hits <b>+5</b> harder.<br>"
-                   "\U0001f985 <b>Hawk</b> — every <b>spell</b> card in hand → <b>+3 block to the whole "
-                   "party</b>, free. <i>(Reads lower per card only because it multiplies by party size.)</i>"
-                   "<br>"
+                   "<b>every turn you’re shifted</b>, the form reads your hand and pays for every card of its "
+                   "<b>school</b> in it — the three forms are the three schools, one each "
+                   "(see <code>cards/dps.html</code>):<br>"
+                   "\U0001f43b <b>Bear</b> — every <b>\U0001f6e1️ block</b> card in hand → <b>+5 Guard</b>, "
+                   "free.<br>"
+                   "\U0001f43a <b>Wolf</b> — every <b>⚔️ physical</b> card in hand → your <b>first attack</b> "
+                   "this turn hits <b>+5</b> harder.<br>"
+                   "\U0001f985 <b>Hawk</b> — every <b>\U0001f9ff spell</b> card in hand → <b>+3 block to the "
+                   "whole party</b>, free. <i>(Reads lower per card only because it multiplies by party "
+                   "size.)</i><br>"
                    "The payout is on the <b>draw</b>, not the play: you’re paid for <b>holding</b> the right "
                    "types, not spending them — so the two you give back are the two your form wasn’t going to "
                    "pay for anyway. It isn’t a mulligan, it’s a <b>tithe you get to aim</b>.",
@@ -1356,96 +1372,176 @@ def s_cards_support():
 
 def s_cards_dps():
     b = ('<div class="note"><b>Draft direction (2026-07-15).</b> The <b>DPS</b> role, same three-layer shape '
-         "as the Tank sheet: the <b>role</b> is a shared <i>substrate</i> (Momentum), each <b>class</b> is one "
-         "<b>Class Power</b> that spends it, and a <b>skill tree</b> (post-MVP) upgrades that power. The "
-         "Sorcerer’s kit already ships today; Rogue and Monk are new. Numbers are unsimmed placeholders.</div>")
+         "as the Tank sheet: the <b>role</b> is a shared <i>substrate</i>, each <b>class</b> is one <b>Class "
+         "Power</b> that runs on it, and a <b>skill tree</b> (post-MVP) upgrades that power. Numbers are "
+         "unsimmed placeholders."
+         "<br><br><b>Rev 2026-07-17 — all three powers were rebuilt, and the substrate with them.</b> "
+         "<b>Momentum is gone from this role.</b> It measured a <i>solo</i> turn (+1 per attack you played, "
+         "reset each turn), and not one of the three powers below is about a solo turn — so it was measuring "
+         "the wrong thing. What replaces it isn’t another meter: it’s <b>the rest of the party</b>."
+         "</div>")
 
     b += ('<div class="sub" style="background:linear-gradient(135deg,#2a1e1e,#1c1618);border-color:#4a2f2f">'
-          '<h3 style="color:#eb6b6b">⚔️ DPS — the Momentum substrate</h3>'
-          "<p><b>Momentum</b> ramps your damage as the turn builds: <b>+1 for every attack you play</b>, reset "
-          "each turn. Sequence the turn right and the last hit is the biggest. The cards <i>build</i> "
-          "Momentum; the <b>Class Power spends ALL of it</b>, and the SHAPE of the spend is the class — the "
-          "Sorcerer dumps it into <b>one enormous hit</b>, the Rogue into <b>one execute</b> that ignores the "
-          "block of the weak, the Monk into <b>many small blows</b> that each re-trigger on-hit. Momentum "
-          "already ships (<code>dmg_per_momentum</code>) and lives on the party dict, so it rides the "
-          "snapshot.</p><span class=\"rk\">DRAFT — unsimmed</span></div>")
+          '<h3 style="color:#eb6b6b">⚔️ DPS — your party charges your power</h3>'
+          "<p>No personal meter. Every Class Power here is <b>charged, extended or refunded by what your "
+          "allies do</b>:</p>"
+          '<div class="chips">'
+          '<span class="cc"><b>\U0001f9d9 Metamagic</b> — <b>charges</b> when you <i>or an ally</i> casts a '
+          '<b>spell</b></span>'
+          '<span class="cc"><b>\U0001f5e1️ Assassin’s Mark</b> — <b>lasts longer</b> every time an <i>ally</i> '
+          "hits it</span>"
+          '<span class="cc"><b>\U0001f44a Flurry</b> — <b>refunded</b> every time <i>anyone</i> lands a '
+          "status</span></div>"
+          "<p><b>None of the three is on a cooldown, and that’s the point:</b> a cooldown counts <i>turns</i>, "
+          "and these need to count <i>teammates</i>. It works because combat here is <b>simultaneous</b> — all "
+          "three dwarves act in the same player phase, so your ally’s Burn lands <i>while you still have your "
+          "turn</i>. The DPS role is where co-op actually pays out, and these powers are the payout: they’re "
+          "the reason you shout “burn it!” at your friend instead of quietly optimising your own hand. Solo, "
+          "all three still work — you just have to feed them all three dwarves yourself.</p>"
+          "<span class=\"rk\">DRAFT — unsimmed</span></div>")
+
+    b += ('<div class="sub" style="background:#181622;border-color:#3a2f4a">'
+          '<h3 style="color:#c295e0">\U0001f9ff What a “spell” is — the one new piece of data</h3>'
+          "<p>Two of these powers read <b>spells</b>, so the word has to mean something. It becomes a card’s "
+          "<b>school</b> — one of three, on every card:</p>"
+          '<div class="chips">'
+          '<span class="cc"><b>\U0001f6e1️ block</b> — it puts up a shield</span>'
+          '<span class="cc"><b>⚔️ physical</b> — it swings something</span>'
+          '<span class="cc"><b>\U0001f9ff spell</b> — everything else: a bolt, a heal, a mark, a bless</span>'
+          "</div>"
+          "<p><b>School is a second axis, not a rename of the type.</b> The existing <code>attack</code> / "
+          "<code>skill</code> / <code>power</code> type drives the tint and the targeting and doesn’t move. "
+          "<b>Strike and Bolt are both <code>attack</code> type</b> — but Strike is <i>physical</i> and Bolt "
+          "is a <i>spell</i>, and no amount of squinting at the existing type tells you that. Hence a tag.</p>"
+          "<p>It pays for itself immediately: the <b>Druid’s three Wild Shape forms</b> on the Support sheet "
+          "already read exactly these three schools (\U0001f43b Bear = block, \U0001f43a Wolf = physical, "
+          "\U0001f985 Hawk = spell). One field, two sheets.</p></div>")
 
     b += combat_row_box([
-        ("\U0001f9d9", "Sorcerer", "\U0001f300", "Surge<br>3-turn cooldown"),
-        ("\U0001f5e1️", "Rogue", "\U0001f5e1️", "Assassinate<br>3-turn cooldown"),
-        ("\U0001f44a", "Monk", "\U0001f44a", "Flurry<br>3-turn cooldown"),
-    ], accent="#eb9a9a")
+        ("\U0001f9d9", "Sorcerer", "\U0001f300", "Metamagic<br>charges on spellcasts"),
+        ("\U0001f5e1️", "Rogue", "\U0001f3af", "Assassin’s Mark<br>one mark at a time"),
+        ("\U0001f44a", "Monk", "\U0001f44a", "Flurry of Blows<br>refunded by statuses"),
+    ], accent="#eb9a9a",
+        fuel="the orb shows the gate — and on this sheet the gate is <b>never a cooldown</b>. It reads "
+             "<b>what the party just did</b>: spells cast, hits landed on your mark, statuses stuck.")
 
     b += role_block(
         "\U0001f9d9", "Sorcerer", "Metamagic Kit", "22 hp · 3 energy",
-        {"icon": "\U0001f300", "name": "Surge",
-         "gate": "3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy",
-         "effect": "Overchannel. Pour all your <b>Momentum</b> into one hit: your next attack this turn deals "
-                   "<b>+5 per ⚔️</b> spent — a single enormous strike. On a <b>3-turn cooldown</b>. The "
-                   "multiply-one-hit pillar, weaponised.",
-         "tree": ["<b>Twin</b> — Surge also strikes a second enemy for half",
-                  "<b>Wild Magic</b> — a kill under Surge refunds the cooldown",
-                  "<b>Empowered</b> — Mark \U0001f3af counts double on the Surged hit"]},
-        "Momentum ⚔️ — +1 per attack you play this turn. The Sorcerer stacks Channel/Mark first, then Surges "
-        "the finisher. Play it <b>last</b>, when Momentum is highest.",
+        {"icon": "\U0001f300", "name": "Metamagic",
+         "gate": "no cooldown · charges <b>+1 per spell</b> cast by <b>anyone</b> · ready at <b>3</b>",
+         "effect": "<b>Never on a cooldown.</b> Metamagic charges when a <b>spell</b> is cast — <b>yours or "
+                   "an ally’s</b>. Your Bolt charges it; so does the Cleric’s Mend, and the Druid’s Regrowth. "
+                   "At <b>3</b>, tap it and <b>choose one</b>, then it applies to your <b>next spell</b> and "
+                   "the charge resets:<br>"
+                   "\U0001f300 <b>Twinned</b> — the spell also hits a <b>second target</b>, in full.<br>"
+                   "⚡ <b>Quicken</b> — the spell costs <b>2 less</b> (a 2-cost becomes free).<br>"
+                   "⏳ <b>Heighten</b> — the spell <b>doesn’t fire now</b>. At the start of your next turn it "
+                   "fires <b>twice</b>.<br>"
+                   "Three shapes, one choice, no maths: <b>wider</b>, <b>cheaper</b>, or <b>later but "
+                   "double</b>.",
+         "tree": ["<b>Font of Magic</b> — ready at <b>2</b> spells instead of 3",
+                  "<b>Metamagic Adept</b> — apply <b>two</b> metamagics to the same spell",
+                  "<b>Empowered</b> — a Heightened spell fires <b>three</b> times, not twice"]},
+        "<b>The party’s spellcasting</b> — not a meter of your own. The Sorcerer is the class that gets "
+        "<i>faster</i> the more casters sit beside it: next to a Cleric it charges twice as quickly, next to "
+        "a Warrior swinging an axe it charges not at all. <b>Heighten is the one to read twice</b> — it is "
+        "the only card in the game that deliberately does nothing on the turn you pay for it.",
         D_SORC,
-        '<div class="wg"><div class="wgl">MOMENTUM — Surge fuel</div>'
-        '<div class="bar"><div class="fill" style="width:66%;background:#eb6b6b"></div></div>'
-        '<div class="wgt">\U0001f300 next attack +5 per ⚔️ · one huge hit · then reset</div></div>')
+        '<div class="wg"><div class="wgl">METAMAGIC — charges on party spellcasts</div>'
+        '<div class="pips"><span style="color:#c295e0">\U0001f9ff\U0001f9ff</span>'
+        '<span style="color:#3a3a46">○</span></div>'
+        '<div class="wgt">2 / 3 · your \U0001f3af Mark + the Cleric’s \U0001f64c Mend · one more cast from '
+        '<b>anyone</b> and you choose \U0001f300 / ⚡ / ⏳</div></div>')
 
     b += role_block(
         "\U0001f5e1️", "Rogue", "Sneak Attack Kit", "24 hp · 3 energy",
-        {"icon": "\U0001f5e1️", "name": "Assassinate",
-         "gate": "3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy",
-         "effect": "A killing blow. Deal <b>6 + 4 per ⚔️</b> Momentum to one target — and if it is "
-                   "<b>Marked or Bloodied, ignore its block entirely</b>. The execute: soften it, then delete "
-                   "it. <b>3-turn cooldown</b>.",
-         "tree": ["<b>Deadly</b> — +6 per ⚔️ instead of +4",
-                  "<b>Vanish</b> — a kill with Assassinate refunds the cooldown",
-                  "<b>Exploit</b> — also ignores block on ANY target under half HP"]},
-        "Momentum ⚔️ — the Rogue ramps it fastest by drilling <b>exposed</b> targets (a hit on a Marked enemy "
-        "banks 2). <i>Practiced</i>: precision is the ramp.",
+        {"icon": "\U0001f3af", "name": "Assassin’s Mark",
+         "gate": "no cooldown · <b>one mark at a time</b> · re-cast it when the target dies or it runs out",
+         "effect": "Name a target. It bleeds <b>4 a turn</b> for <b>3 turns</b>, and the bleed <b>ignores "
+                   "armour completely</b> — block, Guard, Bulwark, none of it matters. Then the fight feeds "
+                   "it, from <b>both ends</b>:<br>"
+                   "\U0001f465 <b>Every ally hit on the marked target → +1 turn.</b> Your party keeps it "
+                   "<b>alive</b>.<br>"
+                   "\U0001f5e1️ <b>Every hit of YOURS → +2 tick.</b> You make it <b>hurt</b>.<br>"
+                   "Neither half is worth much without the other: you alone build a vicious bleed that expires "
+                   "in 3 turns; the party alone keeps a 4-a-turn scratch running forever. Together the mark "
+                   "outlives the fight and gets worse every round it does.",
+         "tree": ["<b>Deep Cut</b> — your hits add <b>+3</b> tick instead of +2",
+                  "<b>Open Season</b> — ally hits add <b>2</b> turns instead of 1",
+                  "<b>Contract Killer</b> — when a marked target dies, the mark <b>jumps</b> to a new one at "
+                  "full duration"]},
+        "<b>Your allies’ attacks</b> — the mark is the only thing on this sheet that <b>two people build "
+        "together</b>. It’s also the answer to the Warden \U0001f5ff and its Bulwark: a bleed that ignores "
+        "armour doesn’t care how much block the wall stacked, so the Rogue is how a party cracks a target it "
+        "cannot out-damage.",
         D_ROGUE,
-        '<div class="wg"><div class="wgl">MOMENTUM — Assassinate fuel</div>'
+        '<div class="wg"><div class="wgl">ASSASSIN’S MARK — the party keeps it bleeding</div>'
         '<div class="bar"><div class="fill" style="width:80%;background:#eb6b6b"></div></div>'
-        '<div class="wgt">\U0001f5e1️ 6 +4 per ⚔️ · ignores block on the Marked / Bloodied</div></div>')
+        '<div class="wgt">\U0001f3af \U0001f479 Brute · <b>8</b> a turn (base 4 +2 +2 from your hits) · '
+        '<b>4 turns left</b> (3 +1 from the Warrior) · ignores armour</div></div>')
 
     b += role_block(
         "\U0001f44a", "Monk", "Flurry Kit", "24 hp · 3 energy",
         {"icon": "\U0001f44a", "name": "Flurry of Blows",
-         "gate": "3-turn cooldown · spends ALL ⚔️ Momentum · target an enemy",
-         "effect": "Unleash a torrent — strike the target <b>once per ⚔️</b> Momentum for <b>4 each</b>, and "
-                   "<b>every hit</b> fires your on-hit effects (Burn, the Mark payoff, energy refunds). Many "
-                   "small blows, not one big one. <b>3-turn cooldown</b>.",
-         "tree": ["<b>Iron Fist</b> — 5 per hit instead of 4",
-                  "<b>Ki Flow</b> — each hit that kills refunds 1 ⚡",
-                  "<b>Endless</b> — Flurry throws one extra blow"]},
-        "Momentum ⚔️ — the Monk ramps by <b>not repeating</b> (<i>Cadence</i>: a distinct attack banks 2). "
-        "Each blow re-triggers on-hit, so a wide setup pays off many times over.",
+         "gate": "3-turn cooldown — but <b>refunded</b> by every status <b>anyone</b> lands this turn",
+         "effect": "Tap it and strike for <b>8</b>. Then the cooldown lights up — and for <b>the rest of this "
+                   "turn</b>, <b>every status effect applied to an enemy refunds it</b>. Not just yours: a "
+                   "<b>teammate’s</b> Burn \U0001f525, the Sorcerer’s Mark \U0001f3af, the Witch’s Hex — "
+                   "<b>anyone’s</b>. Refunded means <b>tap it again</b>.<br>"
+                   "So the Monk isn’t a card you play, it’s a <b>rhythm you keep</b>: status → Flurry → "
+                   "status → Flurry. The ceiling isn’t your energy or your hand — it’s <b>how many statuses "
+                   "your party can land in one turn</b>. Play beside a Cleric slinging Searing Word and a "
+                   "Rogue with Poison Blade and the fists simply don’t stop.",
+         "tree": ["<b>Iron Fist</b> — <b>10</b> a blow instead of 8",
+                  "<b>Ki Flow</b> — every refund also hands you <b>1 ⚡</b>",
+                  "<b>Whirlwind</b> — Flurry strikes <b>every</b> enemy, not just one"]},
+        "<b>Everyone’s status effects</b> — and it only works because combat is <b>simultaneous</b>: your "
+        "ally’s Burn lands <i>while you still have your turn</i>, so it can hand you your fists back before "
+        "you’re done. <b>The tension is real, though</b> — end-turn is order-free, and the Monk who ends "
+        "first ends its own combo. <b>You want to end LAST</b>, and that is a genuinely social decision, not "
+        "a solver one.",
         D_MONK,
-        '<div class="wg"><div class="wgl">MOMENTUM — Flurry fuel</div>'
-        '<div class="bar"><div class="fill" style="width:72%;background:#eb6b6b"></div></div>'
-        '<div class="wgt">\U0001f44a 4 damage × ⚔️ hits · each blow re-triggers on-hit</div></div>')
+        '<div class="wg"><div class="wgl">FLURRY — refunded by every status this turn</div>'
+        '<div class="pips"><span style="color:#4dd16b">\U0001f44a\U0001f44a\U0001f44a</span>'
+        '<span style="color:#3a3a46">○</span></div>'
+        '<div class="wgt">3 blows so far · your \U0001f3af Mark → refund · the Cleric’s \U0001f525 Burn → '
+        'refund · <b>ready again</b> — someone land one more</div></div>')
 
     b += ('<div class="sub" style="background:#141821;border-color:#2c3340"><h3 style="color:#8fb4e0">'
           "The build cost — what DPS adds</h3>"
-          "<p>DPS is the <b>lightest</b> role to add: Momentum already exists (<code>dmg_per_momentum</code> "
-          "ships today on Momentum Strike), so the substrate is <i>free</i>. It reuses the same "
-          "<code>power</code> / <code>power_cd</code> Class Power plumbing as Tank and Support.<br><br>"
-          "All three powers are <b>one-shot discharges</b> — no stance, no upkeep: each reads the dwarf’s "
-          "Momentum, applies its shape, resets Momentum, and sets a 3-turn cooldown. The differences are pure "
-          "op composition — <b>Surge</b> = <code>buff_next_attack</code> scaled by Momentum; "
-          "<b>Assassinate</b> = one hit + a <code>pierce_block</code> flag when the target is Marked/Bloodied; "
-          "<b>Flurry</b> = a loop of N single hits, each running the normal on-hit pipeline.<br><br>"
-          "<b>New ops:</b> <code>surge</code> / <code>assassinate</code> / <code>flurry</code> (all "
-          "Momentum-scaled) · <code>pierce_block</code> (ignore block for this hit). <b>Reused as-is:</b> dmg, "
-          "dmg_all, dmg_per_momentum, buff_next_attack, apply_status/marked, apply/vulnerable+burn, "
-          "if_bloodied, if_target_marked, on_kill, gain_energy, draw. The Sorcerer’s whole kit "
-          "(Mark/Channel/Finisher) is already shipped.</p></div>")
+          "<p>DPS <b>was</b> the lightest role — it scaled off Momentum, which already ships. Dropping "
+          "Momentum gives that back: these three powers need <b>hooks</b>, and a hook is more work than a "
+          "counter. The good news is that it’s the <b>same three hooks</b>, and once they exist all three "
+          "powers are small.<br><br>"
+          "<b>The one new field: <code>school</code></b> (<code>block</code> / <code>physical</code> / "
+          "<code>spell</code>) on every card def. It can’t be derived — <code>Strike</code> and "
+          "<code>Bolt</code> are both <code>attack</code> type. Cheap, but it touches every card in "
+          "<code>card_db.gd</code>, and the existing <code>tags</code> field is where it goes.<br><br>"
+          "<b>The three hooks</b>, all host-side, all fired where the ops already resolve:<br>"
+          "• <b>on any card resolving</b> → if <code>school == spell</code>, +1 to every Sorcerer’s "
+          "<code>meta_charge</code>. <i>Party-wide, so it reads the resolving SEAT, not the actor.</i><br>"
+          "• <b>on any attack landing</b> → if the target carries an <code>assassin_mark</code>, +1 duration "
+          "when the attacker is an ally, +2 tick when it’s the mark’s owner. <i>The mark stores its owner "
+          "seat; that’s the whole “both ends” rule.</i><br>"
+          "• <b>on any status applying to an enemy</b> → clear <code>power_cd</code> for every Monk, if the "
+          "Monk fired this turn. <i>One line, and it is the entire Monk.</i><br><br>"
+          "<b>Ordering matters exactly once:</b> Heighten must resolve at <b>start of turn</b>, before the "
+          "hand is drawn, or a Quickened+Heightened spell can’t interact with the hand it was meant to set "
+          "up.<br><br>"
+          "<b>New ops:</b> <code>metamagic</code> (charge + the 3-way pick: <code>twin</code> / "
+          "<code>quicken</code> / <code>heighten</code>) · <code>assassin_mark</code> (a DoT carrying owner + "
+          "tick + duration) · <code>flurry</code> (flat hit + arm the refund window) · "
+          "<code>pierce_armour</code> (the mark’s tick ignores block) · <code>delayed_cast</code> (Heighten’s "
+          "held spell). <b>Reused as-is:</b> dmg, dmg_all, apply_status/marked, apply/vulnerable+burn, "
+          "on_kill, gain_energy, draw, the whole status pipeline.<br><br>"
+          "<b>Co-op is free here, and that is not luck:</b> all three hooks live on the <b>host</b>, which "
+          "already resolves every seat’s plays in one place. The charge, the mark and the refund are just "
+          "<b>party-dict state</b>, so they ride the existing absolute snapshot — a client never computes "
+          "any of it, it renders it. The M3b fx rider already carries the animations.</p></div>")
 
     return page("Cards — DPS role · class powers", "card_db.gd · STARTER_PACKS (draft)", "Cards", b,
                 ROLE_CSS, stage_h=0,
-                note="DPS: Momentum → Surge / Assassinate / Flurry of Blows")
+                note="DPS: your party charges it → Metamagic / Assassin’s Mark / Flurry of Blows")
 
 # ================================================================ FOUNDATIONS / COMPONENTS
 def s_palette():
