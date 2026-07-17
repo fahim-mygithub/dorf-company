@@ -281,9 +281,9 @@ const POWERS := {
 	"bardic_performance": {"name":"Bardic Performance", "emoji":"🎶", "target":"", "choices":[], "communion":3,
 		"gate":"stance · 3 distinct targets a turn", "tip":"Allies deal +2 and gain +2 block. Holding it costs no resource — it costs REACH: touch 3 distinct targets each turn, and an AoE counts as ONE. Come up short and the song breaks."},
 	"wild_shape": {"name":"Wild Shape", "emoji":"🐾", "target":"", "communion":3,
-		"choices":[{"key":"bear","name":"Bear","emoji":"🐻","tip":"Every 🛡️ block card in hand → +5 Guard, free."},
-			{"key":"hawk","name":"Hawk","emoji":"🦅","tip":"Every 🧿 spell card in hand → +3 block to the whole party, free."},
-			{"key":"wolf","name":"Wolf","emoji":"🐺","tip":"Every ⚔️ physical card in hand → your first attack hits +5 harder."}],
+		"choices":[{"key":"bear","name":"Bear","emoji":"🐻","tip":"Every 🛡️ block card in hand -> +5 Guard, free."},
+			{"key":"hawk","name":"Hawk","emoji":"🦅","tip":"Every 🧿 spell card in hand -> +3 block to the whole party, free."},
+			{"key":"wolf","name":"Wolf","emoji":"🐺","tip":"Every ⚔️ physical card in hand -> your first attack hits +5 harder."}],
 		"gate":"stance · pick a form · costs 2 cards · 3 turns", "tip":"Shift for 3 turns. At the start of your next turn you hand 2 cards back to your DECK and do NOT replace them — that −2 hand is the price. Then every shifted turn your form reads your hand and pays for its school."},
 	# --- dps: never a cooldown. The gate reads what the PARTY just did. ---
 	"metamagic": {"name":"Metamagic", "emoji":"🌀", "target":"", "charge":3,
@@ -294,7 +294,7 @@ const POWERS := {
 	"assassins_mark": {"name":"Assassin's Mark", "emoji":"🎯", "target":"enemy", "choices":[],
 		"gate":"no cooldown · one mark at a time", "tip":"It bleeds 4 a turn for 3 turns and IGNORES ARMOUR entirely. Every ally hit on it adds a turn; every hit of YOURS adds 2 tick. The party keeps it alive, you make it hurt."},
 	"flurry": {"name":"Flurry of Blows", "emoji":"👊", "target":"enemy", "choices":[],
-		"gate":"3-turn cooldown — refunded by every status ANYONE lands", "tip":"Strike for 8. For the rest of this turn every status applied to an enemy — a teammate's Burn, anyone's — hands it straight back. Status → Flurry → status → Flurry."},
+		"gate":"3-turn cooldown — refunded by every status ANYONE lands", "tip":"Strike for 8. For the rest of this turn every status applied to an enemy — a teammate's Burn, anyone's — hands it straight back. Status -> Flurry -> status -> Flurry."},
 }
 
 ## Role-skewed decks (~10-12 cards each); the strike/guard split encodes the role.

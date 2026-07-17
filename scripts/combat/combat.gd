@@ -9,6 +9,7 @@ extends Control
 
 const Db := preload("res://scripts/combat/card_db.gd")
 const Powers := preload("res://scripts/combat/class_powers.gd")
+const PowerOrb := preload("res://scripts/ui/power_orb.gd")
 const Card := preload("res://scripts/ui/card.gd")
 const Threat := preload("res://scripts/ui/threat_arrows.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
@@ -92,6 +93,11 @@ var ip_body: Label
 var ip_next: Label
 var ip_pref: Label
 var intent_open := -1           # enemy index the intent panel is showing, -1 = hidden
+var power_tip: Control          # hover explainer for a Class Power coin
+var pt_title: Label
+var pt_gate: Label
+var pt_body: Label
+var power_tip_open := -1        # party index the power tooltip is showing, -1 = hidden
 var active_label: Label
 var hint_label: Label
 var hand_box: Control
@@ -211,6 +217,33 @@ func _build_ui() -> void:
 	ip_pref.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
 	ip_pref.reparent(intent_panel, false)
 
+	# Class Power explainer (hover a coin) — lives in the open band between the enemies and the crew.
+	power_tip = Control.new()
+	power_tip.visible = false
+	power_tip.z_index = 61
+	power_tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(power_tip)
+	var ptbg := ColorRect.new()
+	ptbg.color = Color(0.07, 0.07, 0.10, 0.97)
+	ptbg.size = Vector2(360, 138)
+	ptbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	power_tip.add_child(ptbg)
+	var ptedge := ColorRect.new()
+	ptedge.color = Color(1, 1, 1, 0.14)
+	ptedge.size = Vector2(360, 1)
+	ptedge.position = Vector2(0, 137)
+	ptedge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	power_tip.add_child(ptedge)
+	pt_title = _label("", Vector2(10, 5), Vector2(340, 20), 15, false)
+	pt_title.reparent(power_tip, false)
+	pt_gate = _label("", Vector2(10, 28), Vector2(340, 18), 12, false)
+	pt_gate.add_theme_color_override("font_color", Color(0.95, 0.80, 0.45))
+	pt_gate.reparent(power_tip, false)
+	pt_body = _label("", Vector2(10, 50), Vector2(340, 84), 12, false)
+	pt_body.add_theme_color_override("font_color", Color(0.80, 0.80, 0.84))
+	pt_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pt_body.reparent(power_tip, false)
+
 	for i: int in range(party_n):
 		_build_party_slot(i)
 
@@ -307,22 +340,21 @@ func _build_party_slot(i: int) -> void:
 	var e := _emoji(pos, Vector2(110, 70), 50)
 	e.gui_input.connect(_on_party_input.bind(i))
 	pc_emoji.append(e)
-	# The CLASS POWER orb — a Hearthstone-style hero power on the portrait, a second lever beside the
+	# The CLASS POWER coin — a Hearthstone-style hero power on the portrait, a second lever beside the
 	# hand. It sits in the gutter to the RIGHT of the emoji (which spans pos.x±55) and clear of every
 	# label: name at y-58, hp/block/energy at y+38/+58/+76, the mini row at y=798. Added AFTER the
-	# emoji so it is above it in the tree and wins the 11px where the two rects overlap.
-	var orb := Label.new()
-	orb.position = pos + Vector2(44, -18)
-	orb.size = Vector2(36, 36)
-	orb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	orb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	orb.add_theme_font_size_override("font_size", 19)
-	orb.mouse_filter = Control.MOUSE_FILTER_STOP
+	# emoji so it is above it in the tree and wins where the two rects overlap. The widget owns all
+	# the visuals (flip / fill / orbit); combat only routes taps and feeds it a state dict.
+	var orb := PowerOrb.new()
+	orb.size = Vector2(56, 56)
+	orb.position = pos + Vector2(32, -32)      # centre ≈ pos+(60,-4), just right of the portrait
 	orb.gui_input.connect(_on_orb_input.bind(i))
+	orb.mouse_entered.connect(_open_power_tip.bind(i))
+	orb.mouse_exited.connect(_close_power_tip.bind(i))
 	add_child(orb)
 	pc_power.append(orb)
-	# The gate readout under the orb — the cooldown, the 📿 it needs, the 🧿 casts it is waiting on.
-	pc_power_lbl.append(_label("", Vector2(pos.x + 20, pos.y + 20), Vector2(84, 16), 11, true))
+	# The gate readout under the coin — the cooldown, the 📿 it needs, the 🧿 casts it is waiting on.
+	pc_power_lbl.append(_label("", Vector2(pos.x + 32, pos.y + 28), Vector2(56, 16), 11, true))
 	pc_name.append(_label("", Vector2(pos.x - 80, pos.y - 58), Vector2(160, 20), 14))
 	pc_hp.append(_label("", Vector2(pos.x - 80, pos.y + 38), Vector2(160, 20), 16))
 	pc_block.append(_label("", Vector2(pos.x - 80, pos.y + 58), Vector2(160, 18), 14))
@@ -1855,6 +1887,7 @@ func _refresh() -> void:
 	end_turn_btn.visible = not overlay.visible
 	_update_cursor()
 	_refresh_intent_panel()
+	_refresh_power_tip()
 	_hand_anim = ""   # one-shot: consumed by _rebuild_hand/_refresh_minis above
 	_switch_from = -1
 
@@ -1942,28 +1975,70 @@ func _refresh_party() -> void:
 			pc_energy[i].text = ""
 		_refresh_orb(i, a, alive)
 
-## The Class Power orb. It is a BUTTON when it is yours and ready, and a READOUT otherwise — and the
-## thing that decides which is Powers.can_fire, the exact predicate the host re-validates the tap
-## with. What you see and what the host allows physically cannot drift apart.
+## The Class Power coin. combat derives one plain state dict from the SAME predicate the host
+## re-validates the tap with (Powers.can_fire) and hands it to the widget, which owns every visual —
+## flip on cooldown, fill arc on charge, orbiting motes on a held stance. What you see and what the
+## host allows physically cannot drift apart, because both read can_fire.
 func _refresh_orb(i: int, a: Dictionary, alive: bool) -> void:
+	var orb: PowerOrb = pc_power[i]
 	var p: Dictionary = Powers.power_def(a)
 	if p.is_empty() or not alive:
-		pc_power[i].text = ""
+		orb.visible = false
 		pc_power_lbl[i].text = ""
 		return
-	pc_power[i].text = str(p["emoji"])
+	orb.visible = true
+	orb.configure(str(a.get("role", "tank")), str(p["emoji"]))
 	var mine: int = my_seat if mode != Mode.SOLO else active_idx
 	var lit: bool = i == mine and phase == "playerTurn" and Powers.can_fire(self, a)
+	var power: String = str(a.get("power", ""))
+	var stance := ""
+	var form := ""
+	if power == "enrage" and bool(a.get("raging", false)):
+		stance = "rage"
+	elif power == "bardic_performance" and bool(a.get("performing", false)):
+		stance = "perform"
+	elif power == "wild_shape" and int(a.get("shift_turns", 0)) > 0:
+		stance = "shape"
+		form = str(a.get("form", ""))
+	var st := {"emoji": str(p["emoji"]), "lit": lit}
 	if bool(p.get("passive", false)):
-		# It fires ITSELF — so it never lights up as tappable. The readout is the whole interface.
-		pc_power[i].modulate = Color(1, 0.92, 0.5)
-		pc_power_lbl[i].text = "%d/%d" % [int(a.get("casts", 0)) % Powers.CHANNEL_EVERY, Powers.CHANNEL_EVERY]
+		st["kind"] = "passive"
+		st["pips"] = int(a.get("casts", 0)) % Powers.CHANNEL_EVERY
+		st["pips_max"] = Powers.CHANNEL_EVERY
+	elif stance != "":
+		st["kind"] = "stance"
+		st["stance"] = stance
+		st["form"] = form
+	elif int(a.get("power_cd", 0)) > 0:
+		st["kind"] = "cooldown"
+		st["cd"] = int(a["power_cd"])
+		st["cd_max"] = Powers.cd_max_of(power)
+	elif int(p.get("charge", 0)) > 0 and int(a.get("meta_charge", 0)) < int(p["charge"]):
+		st["kind"] = "charge"
+		st["fill"] = int(a.get("meta_charge", 0))
+		st["fill_max"] = int(p["charge"])
+	elif int(p.get("communion", 0)) > 0 and int(a.get("communion", 0)) < int(p["communion"]):
+		st["kind"] = "communion"
+		st["fill"] = int(a.get("communion", 0))
+		st["fill_max"] = int(p["communion"])
 	elif lit:
-		pc_power[i].modulate = Color(1, 1, 1)         # lit: yours, and firable right now
-		pc_power_lbl[i].text = "READY"
+		st["kind"] = "ready"
 	else:
-		pc_power[i].modulate = Color(0.42, 0.40, 0.48)   # dark: on cooldown, not yours, or unpaid
-		pc_power_lbl[i].text = _orb_gate(a, p)
+		st["kind"] = "locked"
+	orb.set_state(st)
+	pc_power_lbl[i].text = _orb_label(a, p, lit, stance)
+
+## The short readout under the coin — one line, the fewest characters that still say which thing.
+func _orb_label(a: Dictionary, p: Dictionary, lit: bool, stance: String) -> String:
+	if bool(p.get("passive", false)):
+		return "%d/%d" % [int(a.get("casts", 0)) % Powers.CHANNEL_EVERY, Powers.CHANNEL_EVERY]
+	match stance:
+		"rage": return "RAGING"
+		"perform": return "SONG"
+		"shape": return "%s %d" % [str(a.get("form", "")).to_upper(), int(a.get("shift_turns", 0))]
+	if lit:
+		return "READY"
+	return _orb_gate(a, p)
 
 ## What the orb's gate is waiting on, in the fewest characters that still say which thing.
 func _orb_gate(a: Dictionary, p: Dictionary) -> String:
@@ -1974,6 +2049,53 @@ func _orb_gate(a: Dictionary, p: Dictionary) -> String:
 	if int(p.get("communion", 0)) > 0 and int(a.get("communion", 0)) < int(p["communion"]):
 		return "📿%d/%d" % [int(a.get("communion", 0)), int(p["communion"])]
 	return ""
+
+# ---------------------------------------------------------------- Class Power tooltip
+func _open_power_tip(i: int) -> void:
+	power_tip_open = i
+	_refresh_power_tip()
+
+func _close_power_tip(i: int) -> void:
+	if power_tip_open == i:
+		power_tip_open = -1
+		power_tip.visible = false
+
+## The hover explainer: the coin's name, its LIVE status, and what it does. Refreshed every frame it
+## is open so the countdown / charge ticks in place while you read it.
+func _refresh_power_tip() -> void:
+	if power_tip_open < 0:
+		return
+	var a: Dictionary = party[power_tip_open]
+	var p: Dictionary = Powers.power_def(a)
+	if p.is_empty() or not a.get("alive", false) or overlay.visible or choice_box.visible:
+		power_tip_open = -1
+		power_tip.visible = false
+		return
+	pt_title.text = "%s %s" % [str(p["emoji"]), str(p["name"])]
+	pt_gate.text = _tip_status(a, p)
+	pt_body.text = str(p.get("tip", ""))
+	var cx: float = pc_pos[power_tip_open].x + 60.0
+	power_tip.position = Vector2(clampf(cx - 180.0, 8.0, 720.0 - 8.0 - 360.0), 520.0)
+	power_tip.visible = true
+
+## The coin's live status in one short gold line — what it is doing RIGHT NOW, not the rules.
+func _tip_status(a: Dictionary, p: Dictionary) -> String:
+	var power: String = str(a.get("power", ""))
+	if bool(p.get("passive", false)):
+		return "streak ×%d · %d/%d to discharge" % [int(a.get("streak", 0)), int(a.get("casts", 0)) % Powers.CHANNEL_EVERY, Powers.CHANNEL_EVERY]
+	if power == "enrage" and bool(a.get("raging", false)):
+		return "RAGING — attack this turn to hold it"
+	if power == "bardic_performance" and bool(a.get("performing", false)):
+		return "song playing — reach 3 targets this turn"
+	if power == "wild_shape" and int(a.get("shift_turns", 0)) > 0:
+		return "%s form · %d turns left" % [str(a.get("form", "")).capitalize(), int(a.get("shift_turns", 0))]
+	if int(a.get("power_cd", 0)) > 0:
+		return "recovers in %d turns" % int(a["power_cd"])
+	if int(p.get("charge", 0)) > 0 and int(a.get("meta_charge", 0)) < int(p["charge"]):
+		return "charging 🧿 %d / %d" % [int(a.get("meta_charge", 0)), int(p["charge"])]
+	if int(p.get("communion", 0)) > 0 and int(a.get("communion", 0)) < int(p["communion"]):
+		return "needs 📿 %d / %d" % [int(a.get("communion", 0)), int(p["communion"])]
+	return "READY"
 
 # ---------------------------------------------------------------- Intent telegraph
 ## Compact always-on readout of the latched move, with LIVE numbers (rage + target Vulnerable).

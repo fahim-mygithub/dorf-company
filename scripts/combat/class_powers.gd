@@ -80,6 +80,18 @@ static func int_keys() -> Array:
 static func power_def(a: Dictionary) -> Dictionary:
 	return Db.POWERS.get(str(a.get("power", "")), {})
 
+## The cooldown a power lands on — the denominator the coin's recovery ring drains against. Kept here
+## with the constants so the UI can never invent a number the rules don't use.
+static func cd_max_of(power: String) -> int:
+	match power:
+		"action_surge": return SURGE_CD
+		"smite": return SMITE_CD
+		"flurry": return FLURRY_CD
+		"enrage": return ENRAGE_CD
+		"bardic_performance": return PERFORM_CD
+		"wild_shape": return SHAPE_TURNS
+	return 1
+
 # ================================================================ Firing
 ## Can this seat fire right now? The ONE readable gate — the UI greys the orb with it and the host
 ## re-validates with it, so what you see and what the host allows can never drift apart.

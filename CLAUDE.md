@@ -99,6 +99,17 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
 The three published design sheets (`design/cards/{class,support,dps}.html`) are **shipped**.
 Plan + every design/engine contradiction and its resolution: `docs/plans/2026-07-17-class-archetypes-plan.md`.
 
+- **The Class Power orb is now a HEARTHSTONE-STYLE COIN** (`scripts/ui/power_orb.gd`, a `_draw()`
+  Control combat instances per dwarf; helpers `scripts/vfx/orbit_ring.gd` + `ring_pop.gd`). It is
+  struck in its archetype's metal (tank=steel, support=gold, dps=arcane), **flips** to a spent face
+  on cooldown (countdown + draining recovery ring), fills a rim arc for charge/communion, shows a
+  5-segment pip ring for the Cleric's passive, and is ringed by **orbiting themed motes** while a
+  stance is held (Enrage embers / Bard notes / Wild-Shape leaves). Hover opens a live tooltip. The
+  widget is PURE cosmetic + input target: `combat._refresh_orb` derives one state dict from the SAME
+  `Powers.can_fire` predicate the host re-validates the tap with, and the coin **diffs its own state**
+  to fire the flip/burst/orbit — so every animation replays identically on host and client with **no
+  new wire event** (it rides state the snapshot already carries). ⚠ The web glyph gate
+  (`check_web_glyphs.py`) rejects `→` (U+2192, tofu on web) — the form/Flurry tips use `->`.
 - **`role` is now the ARCHETYPE** — `tank` / `support` / `dps` (it used to double as the class id). A
   new **`cls`** key carries the class id. ⚠ `combat.gd`'s `crew_results` emitted `{"cls": a["role"]}`;
   the campaign index-matches and never read it, so it was dead data — which is exactly why it would
