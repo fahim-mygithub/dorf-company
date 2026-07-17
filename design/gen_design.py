@@ -1784,6 +1784,9 @@ def s_enemy():
 # ================================================================ landing page
 def s_index():
     groups = [
+        ("Planning", "the feature/clarity review + the road to 1.0", [
+            ("scope.html", "Full Game Scope", "clarity review · roadmap · milestones"),
+        ]),
         ("Screens", "every major game scene, at the true 720×1280 portrait", [
             ("screens/main-menu.html", "Main Menu", "Solo · Host · Join"),
             ("screens/lobby.html", "Lobby", "room code · seats · dorf pick"),
@@ -1851,9 +1854,768 @@ a.tile code{font-size:11px;color:#5c5c68;font-family:ui-monospace,Consolas,monos
             "<title>Dorf Company — Design Workspace</title>\n<style>%s</style></head>\n"
             "<body>\n%s\n</body></html>\n" % (css, b))
 
+# ================================================================ SCOPE / ROADMAP
+# Not a pixel-faithful scene recreation like the pages above — this is the planning doc:
+# a feature/clarity review + the road to 1.0, framed as the demon CEO's scope ledger.
+# Content is grounded in an automated source review (2026-07-17) over the ~7.6k-line codebase.
+
+SCOPE_POSITIONING = (
+    "Run a dwarf company for a summoned demon-lord CEO: a co-op, 3-dwarf Slay-the-Spire deckbuilder wrapped "
+    "in a rising-rent management sim — the only StS-like where the meta-layer is quarterly solvency, not a "
+    "spire climb.")
+
+SCOPE_VISION = (
+    "\"Full game\" for Dorf Company means the working co-op slice grown into a complete, replayable roguelike: "
+    "a solo player boots straight into the campaign, is taught the loop, and plays a full run that climbs from "
+    "scaled skirmishes through elite fights to a real boss climax, drafting from a 3-5x deeper card pool with "
+    "relics and card upgrades that make each run's build feel distinct. The rent-clock economy stays the spine "
+    "— every contract a solvency bet the player can actually SEE before committing (projected balance vs rent, "
+    "an honest month/job clock, a confirm before a run-ending End Month) — but victory becomes a scored, "
+    "escalating goal feeding cross-run unlocks and an ascension ladder, not a flat 8-month timer that resets "
+    "byte-identical. Co-op survives a real Discord night: a crashed friend reclaims their seat, a backgrounded "
+    "host hands off authority, and the campaign autosaves so a 60-minute company is never lost to a closed tab. "
+    "Every number has been through dorf_sim.py, every status has an honest telegraph, its own pulse and a "
+    "sound, and the emoji-and-shader placeholder look is pushed into a deliberate art direction. None of this "
+    "is a rewrite — the combat engine, card/op vocabulary, class-power system and host-authoritative netcode "
+    "are already battle-hardened; the full game is depth, structure, robustness and legibility layered onto a "
+    "spine that already works.")
+
+SCOPE_CLARITY_HEADLINE = (
+    "The slice reads clearly turn-to-turn for someone who already knows it — but a first-timer hits a wall of "
+    "unexplained systems, the two combat moments that most need honest feedback (stun and blocked hits) "
+    "actively lie, and the campaign spine can silently steal a loss: an uninformed End Month or shop buy can "
+    "hit insolvency with no warning shown before the tap.")
+
+# (name, status[solid|partial|missing], note) — sorted assets -> WIP -> liabilities in the ledger
+SCOPE_PILLARS = [
+    ("Combat engine", "solid",
+     "2477-line data-driven loop with single mutation paths, host-authoritative co-op, and an advisory "
+     "fx rider that networks every current + future card for free. Gaps are cosmetic-telegraph, not "
+     "structural. Hard-locked to exactly 3 enemies."),
+    ("The 9 Class Powers + coin orb", "solid",
+     "All nine wired, reachable, and powers_verify green (103/103) across three deliberately-different "
+     "gate models. But every number is an unsimmed placeholder (the uncapped Bear Wild-Shape blow-out is "
+     "real), and the coin has real legibility gaps (armed Metamagic invisible, Cleric charge invisible)."),
+    ("Campaign / rent-clock economy", "solid",
+     "Feature-dense and cohesive: rent clock, tiered board, shop, visible-board hex-crawl with real nested "
+     "combat, death saves, wagon rule, within-run deckbuilding. Two structural holes: session-bound (no "
+     "save, no meta-progression) and thin economic legibility (no End Month confirm, unanchored shop spend)."),
+    ("Card content & op vocabulary", "partial",
+     "~38 op verbs all dispatched and 68 cards prove the systems work, but volume is vertical-slice sized: "
+     "~16 obtainable cards per class per run vs StS's ~75. No card upgrades, no rarity weighting, no "
+     "removal, no persistent Power cards — build identity is locked to class choice. Some faces also lie."),
+    ("Multiplayer netcode", "partial",
+     "Happy-path co-op works and is headless-verified, but it is friends-only plumbing: seat-ownership is a "
+     "stub returning true, no authority migration (backgrounded host freezes everyone), no rejoin-in-"
+     "progress, no connection-status UI, ghost seats block Start."),
+    ("Enemy & encounter design", "partial",
+     "7 well-telegraphed enemies across 7 move kinds with role targeting and additive scaling — solid for a "
+     "slice. But no bosses, no elite entities (only a scalar tag), no act structure, hard-locked to 3-up "
+     "encounters, and enemies can't inflict the player's rich status grammar."),
+    ("Balance / simulation", "partial",
+     "dorf_sim.py exists and proved the old economy, but has seen NONE of the 9 class powers or new cards; "
+     "enemy numbers were tuned against the old pool. The Bear Wild-Shape scaler is a confirmed uncapped "
+     "exploit; PARTY_STEP is an unvalidated guess. No confident fair/fun claim is possible yet."),
+    ("Docs vs shipped model", "partial",
+     "CLAUDE.md's header and design/index.html still frame the party as Warrior(Momentum) / Sorcerer(Surge) "
+     "/ Paladin(Devotion) with a resource-pillar system the shipped Warrior/Cleric/Sorcerer build never had. "
+     "The pixel-faithful design workspace teaches a system that isn't there."),
+    ("Game shell", "missing",
+     "Essentially no shell: zero persistence, zero audio, no settings, no tutorial, no pause/credits/quit. "
+     "Solo Play drops into an endless skirmish and never reaches the campaign. Plays like an engineering "
+     "vertical slice, not a shippable game."),
+    ("Art direction", "missing",
+     "All art is emoji glyphs + one hit-flash shader + code-drawn parametric VFX (which is genuinely strong). "
+     "Zero image files in the project. Many distinct moves (Smash/Stab/Bite/Slam/Zap) share the dagger glyph; "
+     "the per-status visual grammar CLAUDE.md documents is unbuilt; web tofu-box risk."),
+]
+
+# clarity review — ranked most-severe first (title, area, sev, observed, impact, fix, effort)
+SCOPE_CLARITY = [
+    ("Solo End Month can silently steal a loss", "Campaign / rent-clock", "high",
+     "Solo _on_rest calls _end_month directly with no confirm (overworld.gd:1236-42, dashboard button :582-87); "
+     "bankruptcy is only detected at month close inside _advance_months (treasury < fee at :1170), and nothing "
+     "on the dashboard surfaces 'you are short for rent' before the tap.",
+     "An accidental or uninformed End Month forfeits every remaining profitable job AND can drop straight to "
+     "game-over — the game reads as stealing the loss rather than the player misjudging a solvency bet.",
+     "Add a confirm dialog on End Month showing projected treasury vs fee, and a persistent 'short for rent by "
+     "Ng' banner on the dashboard whenever treasury < fee before month close.", "M"),
+    ("Stun and blocked hits actively mislead", "Combat legibility", "high",
+     "A stunned enemy shows no 'will skip' (stun is not in the has_stat gate, combat.gd:1902) yet still "
+     "telegraphs its attack; a fully-blocked hit fires a full-size _impact sized from pre-block amt, not HP "
+     "lost (combat.gd:1766-72).",
+     "The player wastes Guard on a hit that never lands, and an enemy's harmlessly-blocked swing looks like "
+     "heavy damage — the feedback channel teaches the wrong board state precisely when the read decides the turn.",
+     "Gate stun into the badge/intent path with a greyed 'SKIPS' readout and suppressed arrow; size _impact from "
+     "HP actually lost and show a shield BLOCKED tick on zero-HP-loss, on both sides.", "M"),
+    ("'campaign' / 'month' / 'job' terminology collision", "Campaign / rent-clock", "med",
+     "A single job is called a 'campaign' internally and in-fiction (dashboard :570, post-job msg :1149) while "
+     "the HUD frames the whole run as Month X/8 (:426). Flagged across two lenses.",
+     "A player reads 'campaigns left' as months-to-win and misjudges their rent runway — the core solvency clock "
+     "is mislabelled at the moment they commit to it.",
+     "Reserve 'campaign' for the whole run; rename the per-contract unit to 'job/contract' across :570, :1149, :426.",
+     "S"),
+    ("Shop spend is never anchored to the treasury", "Campaign / rent-clock", "med",
+     "The shop says a buy 'trades against the rent clock' (:2012) but never shows projected balance-after-buy vs "
+     "fee; solo _on_shop_input only blocks when treasury < cost (:2066), and co-op's 'below the rent line' ring "
+     "fires on a threshold that is never displayed.",
+     "A solo player can spend straight into insolvency with zero signal; the shop-vs-rent tension — the economic "
+     "spine the positioning sells — is invisible at the point of purchase.",
+     "Show balance-after-buy vs fee on each shop item and add a below-rent-line warning (solo) mirroring the "
+     "co-op ring threshold.", "M"),
+    ("Death-save countdown & heir identity are only log lines", "Campaign / expedition", "med",
+     "Downed dwarves roll permadeath saves each tile (_roll_death_saves, 3-to-die) and co-op reseats an heir at "
+     "the same seat (_reseat_fallen/_make_heir), but both are conveyed only by transient _msg lines — no "
+     "persistent success/fail pip tracker, no 'you now pilot HEIR' banner.",
+     "Players don't grasp the permadeath countdown or which deck is now theirs — the plan invests heavily in "
+     "wagon/rejoin robustness but drops the wagon's player-facing legibility.",
+     "Add a persistent per-dwarf save-pip tracker and a heir-swap banner naming the active deck.", "M"),
+    ("Enrage's Guard-lockout fires silently as a bug", "Combat legibility", "med",
+     "blocks_guard returns raging (class_powers.gd:492), so _gain_guard early-returns with only a log line "
+     "(combat.gd:1725) when a raging tank plays a Guard card or receives an ally's Consecrate.",
+     "The tank gains zero Guard with no rejection at the point of play — the intended 'resistance replaces block' "
+     "rule reads as a broken card.",
+     "Emit a 'RAGE: no Guard' rejection tick at the play site so the lockout reads as a rule, not a failure.", "S"),
+    ("Cleric passive banked charge is invisible on the coin", "Class Powers / coin orb", "med",
+     "The pip ring shows only casts-to-discharge (n/5), never the banked mercy_charge / smite_charge payload "
+     "(class_powers.gd:280).",
+     "The core decision the passive is built around — keep streaking one school (1+2+3+4+5=15) vs switch (all "
+     "1s=5) — has no at-a-glance readout, only the hover tooltip.",
+     "Surface the banked payload on the coin, analogous to the armed-Metamagic fix.", "S"),
+    ("Armed Metamagic is invisible; the swirl glyph carries two meanings", "Combat legibility / coin orb", "med",
+     "The swirl renders both Channel charges and an armed Metamagic pick on the same dwarf line (combat.gd:"
+     "1943-62); the charge branch beats the armed pick in _refresh_orb (:2016), so a shaped spell shows nothing.",
+     "A player who armed TWIN / QUICKEN / HEIGHTEN sees no confirmation and can't tell the two swirl uses apart — "
+     "the whole point of the pick is hidden.",
+     "Give the armed pick its own glyph and an 'armed: TWIN/QUICKEN/HEIGHTEN' orb kind that beats the charge branch.",
+     "M"),
+    ("Whirlwind 'X' cost & the Mark x Vulnerable window are opaque", "Combat legibility / card faces", "med",
+     "Whirlwind prints cost 'X' whose real value flips on a prior Reforge (pay_with_guard); player Vulnerable "
+     "(+50%) stacks multiplicatively with Mark (+25%) but each card shows only its own flat %, and enemy Expose "
+     "is ALSO called Vulnerable — so the same word means 'enemy takes more' on your cards and 'you take more' "
+     "from enemies.",
+     "The biggest damage windows in the kit and a live cost are never displayed, and a shared word/icon inverts "
+     "meaning by source — new players can't price a play.",
+     "Resolve the 'X' cost to its live value on the face, show the combined 1.25 x 1.5 multiplier when both "
+     "apply, and disambiguate the Expose/Vulnerable naming.", "M"),
+    ("The documented per-status visual grammar is unimplemented", "Combat legibility / art", "low",
+     "CLAUDE.md specifies a distinct look per status (Burn flicker / Chill desaturate / Poison throb / Stun ring "
+     "/ Bleed drip / Block shimmer), but the code ships one class-agnostic white _flash pulse for everything "
+     "(combat.gd:2447-59).",
+     "Statuses are indistinguishable at a glance on the board — a concrete, already-specced polish gap goes "
+     "unscheduled.",
+     "Implement the per-status shader/modulate grammar as named in CLAUDE.md, driven from the same flash "
+     "primitive so it networks for free.", "M"),
+]
+
+# roadmap epics grouped by priority; (epic, status, why, [ (title, effort, dep, detail) ])
+SCOPE_ROADMAP = [
+    ("Onboarding, the game shell & campaign legibility", "P0", "not-started",
+     "The default first action — a lone player taps Solo Play — drops into an endless skirmish and never "
+     "discovers the campaign that IS the product; a dense first turn (3 simultaneous dwarves, two-tap "
+     "targeting, power coins, 13 status glyphs) has zero teaching; and once in the campaign the rent spine can "
+     "silently steal a loss. This is the top churn cluster and blocks every other investment from being seen.",
+     [("Solo Campaign entry from the main menu", "S", "",
+       "Boot overworld.tscn in the already-existing Mode.SOLO (dice contracts, shop, recruit all solo-gated and "
+       "working); keep the skirmish as a labelled 'Quick Fight'. Today _on_solo (main_menu.gd:71-77) change_"
+       "scene's straight to combat.tscn, so single-player has no path to the rent-clock loop."),
+      ("Solo End Month confirm + insolvency banner", "M", "",
+       "Add a confirm showing projected treasury vs fee, and a persistent 'short for rent by Ng' dashboard "
+       "banner whenever treasury < fee before close, so an uninformed End Month can't burn profitable jobs and "
+       "drop to game-over unseen. Highest-severity clarity finding."),
+      ("Rename the run / job / month vocabulary", "S", "",
+       "A single contract is called a 'campaign' (:570, :1149) while the run is framed Month X/8 (:426), so "
+       "'campaigns left' misreads as months-to-win. Reserve 'campaign' for the whole run."),
+      ("Shop projected-balance-vs-rent readout", "M", "",
+       "Show balance-after-buy vs fee on each item plus a below-rent-line warning, making the shop-vs-rent "
+       "tension visible at the point of purchase."),
+      ("Death-save pip tracker + heir/wagon identity banner", "M", "",
+       "Add a persistent per-dwarf save-pip tracker and a 'you now pilot HEIR; original rolling on the wagon' "
+       "banner naming the active deck."),
+      ("First-run coached tutorial fight", "M", "",
+       "A scripted first combat with 3-4 dismissable coach-marks: 'this is your energy', 'tap a card then a "
+       "target', 'tap your coin for a Class Power', 'end each dwarf's turn'. grep tutorial|onboard returns "
+       "nothing today."),
+      ("Two-tap targeting prompt", "S", "",
+       "When a target card is armed, show an explicit 'Now tap an enemy' banner and pulse valid targets. Today a "
+       "tapped attack card arms silently and reads as broken/unresponsive."),
+      ("Campaign-economy intro", "M", "",
+       "A short guided pass explaining rent, the month-vs-job cadence, dice-vs-real-fight, and extract-vs-rescue "
+       "— today conveyed only by terse in-situ labels."),
+      ("Pause menu + quit/abandon + credits", "M", "",
+       "A get_tree().paused overlay usable in combat and expedition, plus a credits screen. No pause usage "
+       "exists anywhere; table stakes on mobile where interruptions are constant."),
+      ("Status legend / glossary", "S", "",
+       "A tap-anywhere legend for the ~13 status glyphs (and hover names on the stat line). Players cannot "
+       "decode their own board state today."),
+      ("Reconcile stale design docs with the shipped class model", "S", "",
+       "CLAUDE.md's header and design/index.html still frame Warrior(Momentum) / Sorcerer(Surge) / "
+       "Paladin(Devotion) — a resource-pillar system the shipped build never had. Reconcile the docs/workspace "
+       "to the built model.")]),
+
+    ("Combat legibility & honest feedback", "P0", "foundations",
+     "The feedback channel actively teaches the WRONG board state on the two turns tactics matter most, and "
+     "several powers/cards hide the exact number the player is deciding on. These are individually small fixes "
+     "that collectively separate 'confusing' from 'reads clearly', and they land on the primitives so they "
+     "cover all future content.",
+     [("Stun 'will skip' telegraph", "S", "",
+       "Add stun to the has_stat gate (combat.gd:1902), render a stun badge, override the intent to a greyed "
+       "'SKIPS' readout + suppress the threat arrow. Player currently wastes Guard on a hit that never lands."),
+      ("Blocked-hit impact fix", "M", "",
+       "Size _impact from HP actually lost, not the pre-block amt (combat.gd:1766-72), and show a BLOCKED tick "
+       "on zero-HP-loss — both sides. Today an enemy's blocked hit looks like big damage."),
+      ("Enrage Guard-lockout feedback", "S", "",
+       "Emit a 'RAGE: no Guard' rejection tick at the play site (combat.gd:1725) so the 'resistance replaces "
+       "block' rule reads as a rule, not a broken card."),
+      ("Cleric passive banked-charge readout on the coin", "S", "",
+       "Surface the banked payload (class_powers.gd:280) so the keep-streaking (1+2+3+4+5=15) vs switch-types "
+       "(all 1s=5) decision is legible without hover."),
+      ("Retaliate reflect number popup", "S", "",
+       "Add _impact(e, refl) after the reflect deal (combat.gd:1803-10); today reflect deals real HP with only "
+       "a white flash, so a kill-by-reflect looks unexplained."),
+      ("Disambiguate the swirl glyph + armed Metamagic", "M", "",
+       "The swirl means Channel charges AND an armed Metamagic pick on the same line (combat.gd:1943-62). Give "
+       "the armed pick its own glyph and an orb kind that beats the charge branch so a shaped spell isn't "
+       "invisible."),
+      ("Card-face cost & multiplier honesty", "M", "",
+       "Resolve Whirlwind's 'X' to its live value, show the combined 1.25 x 1.5 window when Mark + Vulnerable "
+       "both apply, and disambiguate Expose vs Vulnerable naming."),
+      ("school glyph on card faces", "S", "",
+       "Render spell / physical / block on every card and highlight cards a currently-armed power will consume. "
+       "Two classes gate entirely on school, yet Bolt and Strike render identical bodies."),
+      ("Intent readout fixes", "M", "",
+       "Expose shows no magnitude; Howl hides that its rage is PERMANENT + board-wide; swap the '>' pointer for "
+       "'->'; add enemy Vulnerable stack count; distinguish off-turn-ready orbs from genuinely-gated dark coins."),
+      ("Distinct dark-orb states + Guard terminology", "S", "",
+       "Give cooldown / padlock / greyed-but-ready-next-phase distinct coin faces (all collapse to one dark disc "
+       "today), and unify 'block' vs 'Guard' labels across card bodies.")]),
+
+    ("Save, settings & accessibility", "P0", "not-started",
+     "Zero persistence means a closed tab, refresh, or mobile app-switch loses an entire 20-60 minute campaign; "
+     "the snapshot serializer already exists so this is wiring, not architecture. And a game whose ENTIRE status "
+     "grammar is color + emoji has no colorblind-safe option — table stakes for web + mobile.",
+     [("Autosave + resume", "M", "",
+       "The overworld already builds JSON-safe absolute snapshots (overworld.gd:2235); write _last_snap to "
+       "user://camp.save on every ring-close/month-end and add a 'Resume Company' menu entry. grep confirms zero "
+       "FileAccess/user:// today."),
+      ("Settings menu (audio, display, accessibility)", "M", "",
+       "Volume sliders, fullscreen/vsync, and critically a colorblind-safe status option (text labels / distinct "
+       "shapes, not just hue) + a glyph-fallback toggle for web tofu-boxes."),
+      ("Mobile-lifecycle handling", "M", "Autosave + resume",
+       "Persist + resume across a killed backgrounded tab (mobile web routinely destroys the in-memory Net "
+       "autoload), backed by the save layer and the rejoin flow.")]),
+
+    ("Combat depth: relics, upgrades & content volume", "P0", "foundations",
+     "The mid-run power ramp — relics, card upgrades, removal, rarity — is the core loop of the genre and is "
+     "ENTIRELY absent; build identity is locked to class choice, not deck-crafting. And content is vertical-"
+     "slice sized (~16 obtainable cards/class, 7 enemies, 1 event flavor), so a multi-tile expedition repeats "
+     "fast. This is the largest ongoing authoring cost.",
+     [("Relic system, hung on Dorf's existing hooks", "XL", "",
+       "Ground it in THIS game, not a generic StS bolt-on: relics are per-COMPANY (a new persistence tier "
+       "alongside retain_block, not cleared with combat's temp[] each turn), read/write through the same op "
+       "dispatcher and _gain_guard/_deal chokepoints so effects network via the fx rider for free, at least one "
+       "tier trades against the rent economy (rent-reducing vs combat-scaling), and acquisition rides the "
+       "existing hex reward/objective tiles. Spec the acquire op + persistence bucket first, then author."),
+      ("Card upgrade path", "L", "",
+       "An 'upgraded' field + upgrade op + rest-site/upgrade-reward. No mid-run power curve from upgrades exists "
+       "today (no upgraded field anywhere)."),
+      ("Card removal & deck-thinning", "M", "",
+       "A removal card/event op so drafted signatures aren't permanently diluted by the mandatory strike/guard "
+       "chassis (decks only grow today)."),
+      ("Rarity-weighted rewards + persistent Power cards", "M", "",
+       "REWARD_POOL is a flat uniform list; add rarity tiers/weighting and StS-style persistent in-fight Power "
+       "cards (all buffs live in temp[] cleared each turn except retain_block)."),
+      ("3-5x card pool with intra-class variety", "XL", "",
+       "Grow from ~5-6 signatures/class so two players of a class don't build near-identical decks; wire the "
+       "dead-until-drafted Cleave/Wall chassis and test their latent per-target Channel multi-hit interaction."),
+      ("Enemy roster to ~25-40 with signature mechanics", "XL", "",
+       "Every enemy today is a combo of the same 7 generic move kinds; add summon/split/enrage-at-half/revive/"
+       "immunity and let enemies inflict the player's status grammar (currently almost all raw damage)."),
+      ("Event table of 15+ flavors", "L", "",
+       "Exactly ONE event flavor (a 'sealed door' safe/risky choice) is reused in every expedition (overworld."
+       "gd:1859-1914); build a real event table with meaningful choices."),
+      ("Varied encounter shapes", "L", "",
+       "Combat is hard-locked to exactly 3 enemies (3 UI slots, range(3) loops, enemies[i] indexed directly). "
+       "Refactor to variable count to enable 1-big, swarms of 4-6, and add-spawning waves.")]),
+
+    ("Run structure: bosses, acts & meta-progression", "P1", "not-started",
+     "A deckbuilder's runs are shaped by boss checkpoints and retained by between-run unlocks — Dorf Company has "
+     "NEITHER. Not one boss exists; 'elite' is just a scalar tag; difficulty is a flat fee+10/month timer; and "
+     "_new_run rebuilds byte-identical STARTERS. The review rates the missing boss/act climax as the single "
+     "biggest structural gap — it sits at P1 (not silently) only because the boss items depend on the >3-enemy "
+     "refactor and deeper roster landing first. If the content epic slips, promote this epic.",
+     [("Boss entities + expedition/act climax", "XL", "Varied encounter shapes",
+       "Multi-phase boss enemies with signature mechanics gating the campaign into checkpoints — the biggest "
+       "structural gap vs the StS-like the game is modeled on. The rescue 'objective' hex pays big but is still "
+       "an ordinary rolled 3-comp."),
+      ("True elite variants", "L", "",
+       "Distinct elite ENTITIES with unique mechanics, not just the 1.50-scale/1.3-pay MODIFIER tag on the same "
+       "7 enemies."),
+      ("Persistent profile + between-run unlocks", "L", "Autosave + resume",
+       "Cards/classes/relics/starting bonuses that carry across campaigns. Turns a solved 8-month puzzle into a "
+       "replayable ladder; nothing persists today."),
+      ("Ascension/heat ladder + scored victory", "M", "",
+       "A difficulty ladder and a distinct celebratory scored win (months/gold/jobs/crew survived) that "
+       "escalates rather than resets — vs today's single flat survival timer and shared win/loss overlay.")]),
+
+    ("Co-op robustness & live hardening", "P1", "partial",
+     "Today's netcode is friends-only plumbing with concrete holes: a backgrounded host freezes the whole "
+     "company with no recovery (CLAUDE.md's #1 unfixed risk), a crashed friend can't rejoin their seat, and "
+     "_peer_owns_seat is a stub returning true so any peer can act as any seat. These block a credible broad "
+     "co-op release.",
+     [("Seat-ownership validation", "S", "",
+       "Wire _peer_owns_seat (combat.gd:1027-28, currently `return true`) to the lobby's authoritative "
+       "peer_id->seat map and reject mismatches. Low effort, closes a real griefing/desync vector gating every "
+       "action and power."),
+      ("Rejoin an in-progress match", "M", "Autosave + resume",
+       "Persist peer_id + room_code, add a 'reclaim seat' hello the host answers by re-binding peer_id and "
+       "pushing a fresh full snapshot. start/camp_start are one-shot lobby events a returning peer never re-"
+       "receives; the spec's ~15-line seat-reclaim panel was omitted."),
+      ("Authority migration on host drop", "XL", "",
+       "The #1 unfixed risk (backgrounded host freezes the whole company; the 2s re-dial fixes the socket, not "
+       "the frozen resolver). Detect host silence via heartbeat, elect the lowest live seat as new authority, "
+       "seed it with the last absolute snapshot — OR move the resolver server-side (Supabase Edge Function). At "
+       "P1 as a deliberate call: it is XL and friends-only can just re-host, but it gates any broad co-op launch."),
+      ("Liveness + combat absence timeout + Foreman's Call", "M", "",
+       "Surface per-seat liveness to all peers, mirror the campaign's 12s absence-sweep into combat's "
+       "_all_alive_ended gate, and add the omitted host force-close override for a present-but-idle player "
+       "blocking a ring."),
+      ("Connection-status UI + room-exists check", "S", "",
+       "Drive a connecting/connected/reconnecting/disconnected indicator from Net's existing signals, and a "
+       "host-presence handshake so a typo'd 4-char code returns 'room not found' instead of an empty lobby."),
+      ("Lobby seat pruning + ring-of-ayes UI", "S", "",
+       "Prune departed seats (a ghost seat blocks _all_ready forever today) and surface the ring-of-ayes "
+       "explicitly ('Waiting on: <names> (2/3 agreed)' + per-seat pips + a 'proposing IS your aye' tooltip)."),
+      ("Client incremental rendering", "L", "",
+       "Reconcile changed fields against existing nodes instead of the full teardown-per-snapshot, preserving "
+       "hover/armed/tooltip state that is lost every beat today."),
+      ("Campaign fx parity", "S", "",
+       "Route the dice cinematic and coin-burst through the campaign fx channel (advisory, drained-per-beat like "
+       "combat's rider) and fix the coin-burst's ~0.7s-late push; clients currently watch silent resolves.")]),
+
+    ("Balance & simulation pass", "P1", "foundations",
+     "Every gameplay number is an unsimmed placeholder — dorf_sim.py has seen none of the 9 class powers or new "
+     "cards, and enemy numbers were tuned against the OLD pool. The raw Bear/Hawk cap is a CONFIRMED live "
+     "exploit (uncapped Guard/turn) and is pulled forward into the quick-wins; the rest here is genuine "
+     "simulation work, not a hotfix.",
+     [("Teach dorf_sim.py the 9 powers + new cards", "L", "",
+       "Model Action Surge / Enrage / Smite / Channel / Bardic / Wild Shape / Metamagic / Assassin's Mark / "
+       "Flurry and the archetype card set in the existing Monte-Carlo harness."),
+      ("Retune power numbers against the sim", "M", "Teach dorf_sim.py the 9 powers + new cards",
+       "Re-tune SMITE_PER_DEVOTION / FLURRY_DMG / BEAR_GUARD / etc. against the taught sim. The Druid tithe is "
+       "paid once (hands redraw to 5) so turns 2-3 are free — the sheet already names the cost 2->3 lever."),
+      ("Validate PARTY_STEP for 2/4-player crews", "M", "Teach dorf_sim.py the 9 powers + new cards",
+       "PARTY_STEP (0.34, additive to enemy_scale) is an explicit unvalidated first guess; a 4-player fight is 3 "
+       "bigger enemies, not 4. Sim it before it ships broadly."),
+      ("Re-tune enemy difficulty against the shipped kit", "M", "Teach dorf_sim.py the 9 powers + new cards",
+       "Enemy numbers were tuned against the old card pool before the powers landed; re-run the winnability "
+       "Monte-Carlo (trust the 0% cells, not the bot's 100% floors) across the additive scaling bands.")]),
+
+    ("Audio, juice & art direction", "P2", "not-started",
+     "The entire audio feedback channel is missing (no AudioStreamPlayer, no assets, no bus layout) so blocked-"
+     "vs-landed and valid-vs-ignored taps read ambiguously — worse on mobile where the ~0.15s pulses are already "
+     "brief. And the placeholder emoji look needs to become a deliberate style. Wiring sound (and the status "
+     "pulses) into the two combat primitives networks them for every future card the same way the fx rider does.",
+     [("Audio subsystem + SFX layer", "L", "",
+       "Master/Music/SFX bus layout, music per context (menu/combat/campaign/boss), and SFX hooked into "
+       "_flash/_impact + card play + power fire + UI + death/win/lose stings — one chokepoint covers all "
+       "content, mirroring the M3b fx rider."),
+      ("Per-status visual grammar", "M", "",
+       "CLAUDE.md documents a distinct look per status (Burn orange flicker / Chill blue desaturate / Poison "
+       "green throb / Stun yellow ring / Bleed red drip / Block white shimmer) but the code ships ONE white "
+       "_flash pulse (combat.gd:2447-59). Implement the specced grammar from the flash primitive so it networks "
+       "via the fx rider — a concrete, already-designed deliverable, not open-ended art."),
+      ("Hit-weight juice", "M", "",
+       "Widen _impact's dynamic range (clampi round(mag/2),1,10 makes a 4-dmg chip and a 20-dmg crunch look the "
+       "same) and add magnitude-proportional shake/hit-stop so big swings feel heavy."),
+      ("Committed art direction + per-move iconography", "XL", "",
+       "The concrete this-game hooks: give each move its own icon (Smash/Stab/Bite/Slam/Zap all render the same "
+       "dagger glyph today); fill the empty dwarf_placeholder.tres with authored art or a parametric style "
+       "pushed far enough to read as intentional; eliminate the web tofu-box risk from bare emoji.")]),
+
+    ("Relay scale & abuse controls", "P3", "not-started",
+     "All rooms share one anon-keyed relay with only code-namespaced topics, no rate limiting, no per-room "
+     "secret, and 4-char codes that collide at scale. Fine for a handful of friends today; needed only past the "
+     "friends-only threshold, so lowest priority.",
+     [("Per-room secret + inbound validation + rate limiting", "L", "",
+       "Token-gate channel access, throttle/size-validate inbound events before the host acts (pairs with moving "
+       "authority server-side)."),
+      ("Room registry, longer codes & matchmaking", "L", "",
+       "Server-issued room ids or namespaced codes, existence/capacity checks, teardown/expiry, and optional "
+       "quick-match/public rooms — only worth it past friends-only scale.")]),
+]
+
+# milestones toward 1.0 (name, goal, [includes])
+SCOPE_MILESTONES = [
+    ("M1", "Playable Loop & Clarity",
+     "A solo player can find, understand, and finish a full campaign, never lose it to a closed tab, and never "
+     "be blindsided by an unwarned insolvency. First-session drop-off addressed; the game reads honestly turn-"
+     "to-turn and month-to-month.",
+     ["Onboarding & the game shell", "Combat legibility & honest feedback", "Save, settings & accessibility",
+      "Teach the sim + ship the Bear/Hawk cap"]),
+    ("M2", "Content Complete",
+     "Runs have genuine depth and a climax: relics, card upgrades, a 3-5x card pool, ~25-40 enemies with real "
+     "mechanics, variable encounter shapes, bosses, act structure, meta-progression, and an event table. The "
+     "genre's core power ramp exists.",
+     ["Relics, upgrades & content volume", "Bosses, acts & meta-progression", "Retune against the full kit"]),
+    ("M3", "Co-op Hardening",
+     "Co-op survives a real Discord night: crashed friends reclaim seats, a backgrounded host hands off "
+     "authority, seat security is enforced, and the client stops fighting the player with per-snapshot rebuilds.",
+     ["Co-op robustness & live hardening", "Mobile-lifecycle handling"]),
+    ("M4", "1.0 Polish & Scale",
+     "Ships as a game, not a slice: full audio, the per-status pulse grammar, per-move iconography and a "
+     "committed art direction, plus relay/abuse controls sized for traction beyond friends-only.",
+     ["Audio, juice & art direction", "Relay scale & abuse controls"]),
+]
+
+# quick wins — high clarity value, low effort (title, detail)
+SCOPE_WINS = [
+    ("Solo Campaign menu entry",
+     "One button that boots overworld.tscn in the existing Mode.SOLO instead of dropping Solo Play into an "
+     "endless skirmish (main_menu.gd:71-77). The mode already runs solo — the single highest-value-per-line "
+     "fix, exposing the whole game to the default player."),
+    ("Cap the Bear/Hawk Guard scaler",
+     "Clamp n in _form_payout (class_powers.gd:408) — today it gains uncapped Guard per turn from every matching "
+     "card in hand, a CONFIRMED live exploit, not a tuning nicety. No sim needed for the raw cap."),
+    ("Fix the static campaign-count label",
+     "The dashboard literal at overworld.gd:570 reads 'N campaigns left this month' against a Month/8 clock, "
+     "conflating a job with a month. Fix the count and apply the job/campaign/month rename in the same pass."),
+    ("Seat-ownership validation",
+     "Wire _peer_owns_seat (combat.gd:1027-28, currently `return true`) to the lobby's peer_id->seat map. A few "
+     "lines closes a real spoofing/desync vector across every action and power."),
+    ("Stun 'will skip' telegraph",
+     "Add stun to the has_stat gate (combat.gd:1902), a stun badge, a greyed 'SKIPS' intent, and suppress the "
+     "threat arrow while stunned. Stops the player wasting Guard on a hit that never lands."),
+    ("Enrage Guard-lockout tick",
+     "blocks_guard (class_powers.gd:492) makes _gain_guard early-return silently (combat.gd:1725) when a raging "
+     "tank plays Guard or gets Consecrated. Emit a 'RAGE: no Guard' tick so it reads as the rule, not a bug."),
+    ("Retaliate reflect number popup",
+     "Add _impact(e, refl) after the reflect deal (combat.gd:1803-10) so reflect damage shows a number instead "
+     "of an unexplained white flash and mystery kills."),
+    ("Disambiguate the swirl glyph",
+     "Channel charges and an armed Metamagic pick both render the swirl on the same dwarf line "
+     "(combat.gd:1943-62). Give the armed pick its own glyph so it stops reading as one garbled status."),
+    ("Clamp the card tooltip to the viewport",
+     "The 236px tooltip sits at a fixed centered offset with no edge clamp (card.gd:82-84), so the rightmost/"
+     "leftmost fan cards clip exactly when hovered. Mirror the intent panel's clamp (combat.gd:2172)."),
+    ("school glyph on card faces",
+     "Render spell / physical / block on every card so Bolt vs Strike (identical bodies today) are "
+     "distinguishable — the mechanical hook two whole classes read is currently invisible on the cards."),
+]
+
+def s_scope():
+    def esc(s):
+        return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    SEVCOL = {"high": "var(--rust)", "med": "var(--amber)", "low": "var(--faint)"}
+    SEVWORD = {"high": "HIGH", "med": "MED", "low": "LOW"}
+    PCOL = {"P0": "var(--rust)", "P1": "var(--coin)", "P2": "var(--steel)", "P3": "var(--slate)"}
+    PTIER = {"P0": "Ship-blocking", "P1": "Core depth & hardening", "P2": "Feel & finish", "P3": "Scale"}
+    STATUSWORD = {"solid": "SHIPPED", "partial": "IN PROGRESS", "missing": "UNBUILT",
+                  "not-started": "not started", "foundations": "foundations laid"}
+
+    def chip_eff(e):
+        return '<span class="eff %s">%s</span>' % (e, e)
+
+    css = """
+:root{
+  --ink:#0b0b0e;--vellum:#101017;--panel:#15151d;--panel2:#1a1a24;
+  --rule:#26262f;--rule2:#34343f;
+  --coin:#f5d142;--amber:#f2bd33;--jade:#4dd16b;--rust:#eb4242;--steel:#8fb4e0;
+  --violet:#b58ce0;--slate:#7a7a88;
+  --text:#e6e7ea;--dim:#9a9aa8;--faint:#63636f;
+  --mono:ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--ink);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif;
+  background-image:radial-gradient(1100px 480px at 50% -160px,#15131c 0%,var(--ink) 70%)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}
+a{color:var(--coin);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--coin);outline-offset:3px;border-radius:3px}
+.doc{max-width:968px;margin:0 auto;padding:56px 32px 100px}
+
+/* masthead */
+.memo{font-family:var(--mono);font-size:11.5px;letter-spacing:.01em;color:var(--faint);
+  display:flex;flex-wrap:wrap;gap:6px 26px;border:1px solid var(--rule);border-radius:9px;
+  padding:12px 16px;margin-bottom:34px;background:linear-gradient(180deg,#121219,#0e0e14)}
+.memo b{color:var(--dim);font-weight:600}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.30em;text-transform:uppercase;
+  color:var(--coin);font-weight:600}
+h1{font-size:54px;line-height:1.03;letter-spacing:-.022em;font-weight:800;margin:16px 0 0}
+h1 .g{color:var(--coin)}
+.stand{font-size:18.5px;color:#cdcdd7;line-height:1.5;max-width:730px;margin:22px 0 0;
+  padding-left:17px;border-left:2px solid var(--coin)}
+.prov{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:18px;line-height:1.7}
+
+/* balance-sheet hero */
+.sheet{margin-top:36px;border:1px solid var(--rule2);border-radius:13px;overflow:hidden;
+  background:var(--panel)}
+.sheet .cols{display:grid;grid-template-columns:repeat(3,1fr)}
+.sheet .col{padding:20px 22px;border-right:1px solid var(--rule)}
+.sheet .col:last-child{border-right:0}
+.sheet .k{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.sheet .n{font-size:44px;font-weight:800;font-family:var(--mono);line-height:1;margin:9px 0 12px}
+.col.solid .n{color:var(--jade)}.col.partial .n{color:var(--amber)}.col.missing .n{color:var(--rust)}
+.sheet .names{font-size:12.5px;color:var(--dim);line-height:1.6}
+.sheet .foot{border-top:1px solid var(--rule);padding:14px 22px;display:flex;align-items:center;
+  gap:16px;flex-wrap:wrap}
+.sheet .segbar{flex:1;min-width:220px;height:9px;border-radius:5px;overflow:hidden;display:flex;
+  border:1px solid #0c0c11}
+.sheet .segbar>i{height:100%}
+.sheet .bl{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.sheet .bl b{color:var(--text)}
+
+/* sections */
+section{margin-top:66px}
+.sec-h{display:flex;align-items:baseline;gap:15px;border-top:1px solid var(--rule2);padding-top:20px}
+.sec-h .num{font-family:var(--mono);font-size:13px;color:var(--faint);letter-spacing:.05em}
+.sec-h h2{font-size:27px;font-weight:750;letter-spacing:-.012em}
+.sec-sub{color:var(--dim);font-size:15px;margin-top:9px;max-width:770px;line-height:1.6}
+.read{font-size:15.5px;color:#c7c7d2;line-height:1.72;margin-top:20px;max-width:800px}
+
+/* pillar ledger */
+.ledger{margin-top:24px;border:1px solid var(--rule);border-radius:13px;overflow:hidden}
+.acct{display:grid;grid-template-columns:138px 1fr;gap:18px;padding:17px 20px;border-top:1px solid var(--rule)}
+.acct:first-child{border-top:0}
+.acct .name{font-weight:700;font-size:15px;line-height:1.3;margin-bottom:5px}
+.acct .note{color:var(--dim);font-size:13.5px;line-height:1.55}
+.tag{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:99px;width:max-content;
+  border:1px solid;height:max-content}
+.tag .dot{width:7px;height:7px;border-radius:2px;background:currentColor}
+.tag.solid{color:var(--jade);border-color:#2f5e3d;background:#11241a}
+.tag.partial{color:var(--amber);border-color:#5e4f22;background:#241f0f}
+.tag.missing{color:var(--rust);border-color:#5e2a2a;background:#241313}
+
+/* defect register */
+.reg{margin-top:24px;display:flex;flex-direction:column;gap:14px}
+.def{border:1px solid var(--rule);border-left:3px solid var(--sev);border-radius:11px;
+  padding:17px 19px;background:var(--panel)}
+.def .top{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:9px}
+.def .idx{font-family:var(--mono);font-size:12px;color:var(--faint)}
+.sev{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  padding:3px 8px;border-radius:4px;font-weight:700}
+.sev.high{color:#1a0e0e;background:var(--rust)}
+.sev.med{color:#221a06;background:var(--amber)}
+.sev.low{color:var(--dim);background:#26262f}
+.area{font-family:var(--mono);font-size:11px;color:var(--dim);margin-right:auto}
+.def h3{font-size:16.5px;font-weight:700;margin:0 0 11px;line-height:1.3}
+.rows{display:grid;gap:8px}
+.rw{display:grid;grid-template-columns:78px 1fr;gap:13px;font-size:13.5px;line-height:1.55}
+.rw .rk{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);padding-top:2px}
+.rw .rv{color:#cdcdd7}
+.rw.obs .rv{color:var(--dim)}
+.rw.fix .rv{color:#c9d6c9}
+.rw .rv code,.rv .m{font-family:var(--mono);font-size:12.5px;color:#b7b7c4}
+
+/* effort chip */
+.eff{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid var(--rule2);
+  color:var(--dim);font-weight:700;letter-spacing:.04em}
+.eff.S{color:var(--jade);border-color:#2f5e3d}
+.eff.M{color:var(--steel);border-color:#33506b}
+.eff.L{color:var(--amber);border-color:#5e4f22}
+.eff.XL{color:var(--rust);border-color:#5e2a2a}
+
+/* roadmap */
+.tier{margin-top:40px}
+.tier-h{display:flex;align-items:center;gap:13px;margin-bottom:16px}
+.ptag{font-family:var(--mono);font-weight:800;font-size:14px;padding:5px 11px;border-radius:7px;
+  color:#0c0c11}
+.ptag.P0{background:var(--rust)}.ptag.P1{background:var(--coin)}
+.ptag.P2{background:var(--steel)}.ptag.P3{background:var(--slate);color:#12121a}
+.tier-h .tt{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-family:var(--mono)}
+.tier-h .tl{flex:1;height:1px;background:var(--rule)}
+.epic{border:1px solid var(--rule);border-left:3px solid var(--pc);border-radius:12px;
+  padding:20px 22px;margin-bottom:15px;background:var(--panel)}
+.epic .eh{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.epic h3{font-size:19px;font-weight:750;letter-spacing:-.01em}
+.epic .est{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-transform:uppercase;
+  letter-spacing:.09em;border:1px solid var(--rule2);border-radius:99px;padding:2px 9px}
+.epic .why{color:var(--dim);font-size:13.5px;line-height:1.65;margin:11px 0 17px;max-width:820px}
+.items{display:flex;flex-direction:column;gap:13px}
+.item{display:grid;grid-template-columns:16px 1fr;gap:11px}
+.item .b{color:var(--coin);font-family:var(--mono);font-size:13px;padding-top:2px}
+.item .ih{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.item .it{font-weight:650;font-size:14.5px}
+.item .id{color:var(--dim);font-size:13px;line-height:1.6;margin-top:4px}
+.dep{font-family:var(--mono);font-size:10px;color:var(--violet);border:1px solid #4a3a5e;
+  border-radius:4px;padding:1px 7px}
+.dep::before{content:"needs ";color:var(--faint)}
+
+/* milestones */
+.mline{margin-top:26px}
+.ms{display:grid;grid-template-columns:64px 1fr;gap:18px;position:relative;padding-bottom:24px}
+.ms:not(:last-child)::before{content:"";position:absolute;left:27px;top:52px;bottom:-4px;width:2px;
+  background:linear-gradient(180deg,var(--coin),#3a3320)}
+.ms .mk{width:54px;height:54px;border-radius:50%;border:2px solid var(--coin);color:var(--coin);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;
+  font-size:17px;background:radial-gradient(circle at 40% 35%,#241f0e,#12100a);z-index:1}
+.ms h3{font-size:18px;font-weight:750;margin-bottom:6px}
+.ms .goal{color:var(--dim);font-size:13.5px;line-height:1.6;max-width:800px}
+.ms .inc{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.mchip{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--rule2);
+  border-radius:99px;padding:4px 11px;background:var(--vellum)}
+
+/* quick wins */
+.wins{margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.win{border:1px solid var(--rule);border-left:3px solid var(--coin);border-radius:10px;padding:15px 17px;
+  background:linear-gradient(180deg,#17150e,#121118)}
+.win .wt{font-weight:700;font-size:14px;color:var(--coin);display:flex;gap:9px;align-items:baseline}
+.win .wc{font-family:var(--mono);color:var(--faint);font-size:12px}
+.win .wd{color:var(--dim);font-size:12.5px;line-height:1.55;margin-top:7px}
+
+.foot{margin-top:74px;border-top:1px solid var(--rule);padding-top:22px;color:var(--faint);
+  font-size:12px;line-height:1.75;font-family:var(--mono)}
+.foot b{color:var(--dim)}
+
+@media (max-width:720px){
+  .doc{padding:36px 17px 76px}
+  h1{font-size:37px}
+  .sheet .cols{grid-template-columns:1fr}
+  .sheet .col{border-right:0;border-bottom:1px solid var(--rule)}
+  .acct{grid-template-columns:1fr;gap:10px}
+  .rw{grid-template-columns:1fr;gap:2px}
+  .rw .rk{padding-top:6px}
+  .wins{grid-template-columns:1fr}
+  .ms{grid-template-columns:48px 1fr;gap:14px}
+  .ms .mk{width:44px;height:44px;font-size:14px}
+  .ms:not(:last-child)::before{left:22px;top:46px}
+}
+"""
+
+    # ---- counts + balance sheet ----
+    by = {"solid": [], "partial": [], "missing": []}
+    for name, st, note in SCOPE_PILLARS:
+        by[st].append(name)
+    tot = len(SCOPE_PILLARS)
+    seg = ""
+    for st, cc in (("solid", "var(--jade)"), ("partial", "var(--amber)"), ("missing", "var(--rust)")):
+        seg += '<i style="width:%g%%;background:%s"></i>' % (100.0 * len(by[st]) / tot, cc)
+
+    b = ['<div class="doc">']
+    # masthead
+    b.append('<div class="memo">'
+             '<span><b>TO</b> the Dorf Company</span>'
+             '<span><b>FROM</b> the Managing Demon, MBA</span>'
+             '<span><b>RE</b> vertical slice → 1.0</span>'
+             '<span><b>FILED</b> design/scope.html</span></div>')
+    b.append('<div class="eyebrow">Dorf Company · Scope to 1.0</div>')
+    b.append('<h1>The ledger to a <span class="g">full game</span>.</h1>')
+    b.append('<p class="stand">%s</p>' % esc(SCOPE_POSITIONING))
+    b.append('<p class="prov">A feature &amp; clarity review of the shipped build, read against a full-game '
+             'scope.<br>Prepared 2026-07-17 from an automated source pass — 8 subsystem maps, 5 clarity/'
+             'scope lenses, an adversarial critic — over ~7,600 lines of GDScript.</p>')
+
+    # balance sheet
+    b.append('<div class="sheet"><div class="cols">')
+    for st, label in (("solid", "Shipped"), ("partial", "In progress"), ("missing", "Unbuilt")):
+        names = " · ".join(esc(n) for n in by[st])
+        b.append('<div class="col %s"><div class="k">%s</div><div class="n">%d</div>'
+                 '<div class="names">%s</div></div>' % (st, label, len(by[st]), names))
+    b.append('</div><div class="foot"><div class="segbar">%s</div>'
+             '<div class="bl"><b>%d</b> pillars of a full game — <b>%d</b> shipped, '
+             '<b>%d</b> in progress, <b>%d</b> unbuilt</div></div></div>'
+             % (seg, tot, len(by["solid"]), len(by["partial"]), len(by["missing"])))
+
+    # 01 The read
+    b.append('<section><div class="sec-h"><span class="num">01</span><h2>The read</h2></div>')
+    b.append('<p class="read">%s</p></section>' % esc(SCOPE_VISION))
+
+    # 02 Where it stands (pillars, sorted solid->partial->missing)
+    b.append('<section><div class="sec-h"><span class="num">02</span><h2>Where it stands</h2></div>')
+    b.append('<p class="sec-sub">Ten systems, marked like a balance sheet — assets shipped, work in '
+             'progress, liabilities still unbuilt. The combat spine, the class powers and the campaign loop '
+             'already work; the shell around them does not yet.</p>')
+    order = {"solid": 0, "partial": 1, "missing": 2}
+    b.append('<div class="ledger">')
+    for name, st, note in sorted(SCOPE_PILLARS, key=lambda p: order[p[1]]):
+        b.append('<div class="acct"><span class="tag %s"><span class="dot"></span>%s</span>'
+                 '<div><div class="name">%s</div><div class="note">%s</div></div></div>'
+                 % (st, STATUSWORD[st], esc(name), esc(note)))
+    b.append('</div></section>')
+
+    # 03 Clarity review — defect register
+    b.append('<section><div class="sec-h"><span class="num">03</span><h2>Clarity review</h2></div>')
+    b.append('<p class="sec-sub">%s</p>' % esc(SCOPE_CLARITY_HEADLINE))
+    b.append('<div class="reg">')
+    for i, (title, area, sev, obs, impact, fix, e) in enumerate(SCOPE_CLARITY, 1):
+        b.append('<div class="def" style="--sev:%s">'
+                 '<div class="top"><span class="idx">%02d</span><span class="sev %s">%s</span>'
+                 '<span class="area">%s</span>%s</div><h3>%s</h3>'
+                 '<div class="rows">'
+                 '<div class="rw obs"><span class="rk">Observed</span><span class="rv">%s</span></div>'
+                 '<div class="rw"><span class="rk">Impact</span><span class="rv">%s</span></div>'
+                 '<div class="rw fix"><span class="rk">Fix</span><span class="rv">%s</span></div>'
+                 '</div></div>'
+                 % (SEVCOL[sev], i, sev, SEVWORD[sev], esc(area), chip_eff(e), esc(title),
+                    esc(obs), esc(impact), esc(fix)))
+    b.append('</div></section>')
+
+    # 04 The work — roadmap grouped by priority
+    b.append('<section><div class="sec-h"><span class="num">04</span><h2>The work</h2></div>')
+    b.append('<p class="sec-sub">Nine work orders, filed by priority. None of this is a rewrite — the '
+             'combat engine, card/op vocabulary, class-power system and host-authoritative netcode are already '
+             'load-bearing. The full game is depth, structure, robustness and legibility layered onto a spine '
+             'that works.</p>')
+    for tier in ("P0", "P1", "P2", "P3"):
+        epics = [e for e in SCOPE_ROADMAP if e[1] == tier]
+        if not epics:
+            continue
+        b.append('<div class="tier"><div class="tier-h"><span class="ptag %s">%s</span>'
+                 '<span class="tt">%s</span><span class="tl"></span></div>' % (tier, tier, PTIER[tier]))
+        for epic, pr, est, why, items in epics:
+            b.append('<div class="epic" style="--pc:%s"><div class="eh"><h3>%s</h3>'
+                     '<span class="est">%s</span></div><div class="why">%s</div><div class="items">'
+                     % (PCOL[tier], esc(epic), STATUSWORD[est], esc(why)))
+            for it, e, dep, detail in items:
+                dephtml = ('<span class="dep">%s</span>' % esc(dep)) if dep else ""
+                b.append('<div class="item"><span class="b">▸</span><div>'
+                         '<div class="ih"><span class="it">%s</span>%s%s</div>'
+                         '<div class="id">%s</div></div></div>'
+                         % (esc(it), chip_eff(e), dephtml, esc(detail)))
+            b.append('</div></div>')
+        b.append('</div>')
+    b.append('</section>')
+
+    # 05 The path to 1.0 — milestones
+    b.append('<section><div class="sec-h"><span class="num">05</span><h2>The path to 1.0</h2></div>')
+    b.append('<p class="sec-sub">Four releases, in dependency order — make it legible, then deep, then '
+             'durable under real players, then finished.</p><div class="mline">')
+    for m, name, goal, inc in SCOPE_MILESTONES:
+        chips = "".join('<span class="mchip">%s</span>' % esc(c) for c in inc)
+        b.append('<div class="ms"><div class="mk">%s</div><div><h3>%s — %s</h3>'
+                 '<div class="goal">%s</div><div class="inc">%s</div></div></div>'
+                 % (esc(m), esc(m), esc(name), esc(goal), chips))
+    b.append('</div></section>')
+
+    # 06 Quick wins
+    b.append('<section><div class="sec-h"><span class="num">06</span><h2>Bank these first</h2></div>')
+    b.append('<p class="sec-sub">Ten low-effort, high-payoff fixes — most are a handful of lines against '
+             'a known file and line, and each removes a place the game misleads or hides itself from the '
+             'player.</p><div class="wins">')
+    for i, (t, d) in enumerate(SCOPE_WINS, 1):
+        b.append('<div class="win"><div class="wt"><span class="wc">%02d</span>%s</div>'
+                 '<div class="wd">%s</div></div>' % (i, esc(t), esc(d)))
+    b.append('</div></section>')
+
+    b.append('<div class="foot">Generated by <code>gen_design.py</code> · grounded in a source review of '
+             'the shipped build, not the shipped build itself.<br><b>Every gameplay number is an unsimmed '
+             'placeholder.</b> This is planning — what a full game needs, not a promise of what ships. '
+             '· <a href="index.html">← back to the workspace</a></div>')
+    b.append('</div>')
+
+    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+            "<title>Dorf Company — Full Game Scope</title>\n<style>%s</style></head>\n"
+            "<body>\n%s\n</body></html>\n" % (css, "".join(b)))
+
 # ================================================================ write
 FILES = [
     ("index.html", s_index),
+    ("scope.html", s_scope),
     ("foundations/palette.html", s_palette),
     ("foundations/status-glyphs.html", s_status),
     ("components/card.html", s_card_anatomy),
