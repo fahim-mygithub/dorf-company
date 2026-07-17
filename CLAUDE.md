@@ -12,6 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Engine: **Godot 4.7-stable**, `gl_compatibility` renderer, 1280×720 viewport.
 
+**Class model — RESOLVED (2026-07-17):** nine classes across THREE ARCHETYPES (tank/support/dps),
+each with one **Class Power** fired from an orb on its portrait. See Current state.
+
 **Party-combat model — RESOLVED (2026-06-30):** per-character decks + per-character energy, a clean player→enemy phase structure, and 3 simultaneous enemies with preferred-target orders + Taunt redirect (the spec's Slice 2). The party is now **Warrior (tank) / Cleric (support) / Sorcerer (dps)** — Paladin was replaced by Cleric, and the Momentum/Surge/Devotion resource system was dropped for synergy temp-effects (Mark/Channel/Aura/Fortify/Retaliate/Shield). See Current state. (The archetype framing below predates this and is aspirational lore, not the built model.)
 
 ## The three-source authority split (read this first)
@@ -47,7 +50,18 @@ Treat "looks right" as a screenshot you actually took. The full editor/runtime t
 - **Each reusable effect = a self-contained scene under `scenes/vfx/`**, instanced via `add_scene_instance` and freed with `queue_free()` after its lifetime.
 - **Prefer inspector properties over hardcoded script values** — set visual properties (colors, sizes, transforms) via `update_property` so they stay visible/tweakable in the inspector; use GDScript only when the value must be dynamic.
 - **The MCP server is NOT committed** — only the addon (`addons/godot_mcp/`) is. `/server/` and `node_modules/` are gitignored. The server build lives outside the project per its INSTALL.md.
-- **Disable editor script auto-reload during agent sessions.**
+- **⚠ If you edit a `.gd` file OUTSIDE the editor while that script is open in it, TURN AUTO-RELOAD ON
+  FIRST** — otherwise the editor holds a stale buffer and **silently flushes it back over your edits**
+  the next time you `play_scene`. This bit hard on 2026-07-17: a whole file's worth of changes to
+  `overworld.gd` was reverted mid-session, and only a later `grep` caught it (the tests had already
+  gone green against the fixed file). It is the `.tscn` rule above, for scripts.
+  Check with `get_open_scripts`; fix with
+  `EditorInterface.get_editor_settings().set_setting("text_editor/behavior/files/auto_reload_scripts_on_external_change", true)`.
+  Then **re-grep for your own markers after any `play_scene`** — a green test proves nothing about a
+  file the editor overwrote afterwards.
+  (The older advice here said to *disable* auto-reload during agent sessions. That protects a running
+  scene from mid-run reloads, and it is exactly what causes this. Prefer reload-on; if you must
+  disable it, do not hand-edit `.gd` at the same time.)
 
 ## Status-condition visual grammar
 
@@ -66,6 +80,7 @@ addons/godot_mcp/             # MCP Pro plugin (committed) — provides the live
   references/shaders.md        # shader sources to create via create_shader (canvas_item)
 scenes/{combat,vfx}/          # combat scenes; reusable VFX scenes
 scripts/{combat,ui,vfx}/     # combat systems; reusable UI (card.gd, threat_arrows.gd); VFX scripts
+  combat/class_powers.gd      # the 9 Class Powers + their hooks (combat.gd only routes the tap)
 assets/{shaders,sprites}/     # shader sources; sprite art
 resources/cards/              # card .tres resources
 godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + instructions); not part of the game
@@ -79,7 +94,68 @@ godot-mcp-pro-v1.15.0/        # the MCP Pro package (server + addon source + ins
   `node godot-mcp-pro-v1.15.0/server/build/cli.js --help` (groups: project, scene, node, script, editor, input, runtime). Always start with `--help`.
 - There is currently **no GDScript test runner, lint, or build step** wired up — the game is built and verified interactively through the MCP Pro loop, not a CLI test suite.
 
-## Current state (2026-07-12) — MULTIPLAYER: co-op combat + the co-op CAMPAIGN
+## Current state (2026-07-17) — THE THREE CLASS ARCHETYPES: 9 classes, 9 Class Powers
+
+The three published design sheets (`design/cards/{class,support,dps}.html`) are **shipped**.
+Plan + every design/engine contradiction and its resolution: `docs/plans/2026-07-17-class-archetypes-plan.md`.
+
+- **`role` is now the ARCHETYPE** — `tank` / `support` / `dps` (it used to double as the class id). A
+  new **`cls`** key carries the class id. ⚠ `combat.gd`'s `crew_results` emitted `{"cls": a["role"]}`;
+  the campaign index-matches and never read it, so it was dead data — which is exactly why it would
+  have rotted silently. Enemy targeting keys off `role`: `_first_living_role("tank"/"support")`,
+  `_first_living_nontank()`.
+- **A Class Power is a second lever beside the hand** — `power` + `power_cd` on the party dict, fired
+  by tapping your own dwarf's orb. `scripts/combat/class_powers.gd` owns all nine + the hooks;
+  `combat.gd` only routes the tap. Co-op adds ONE wire event, **`submit_power`** (distinct from
+  `submit_action`/`combat_ready`/`resync`/`ready`/`apply_snapshot`/`match_over` and the campaign's
+  `camp_*` on the shared `Net` autoload).
+  ⚠ **`_on_power` MUST gate on `_seat_ended`; `_on_action` does not and gets away with it by
+  ACCIDENT** — ending discards your hand, so `_hand_index_of` returns -1 and the play dies on its own.
+  A power has no card. Both suites assert this.
+- **The 10-class roster.** `PARTY_ORDER` (warrior/cleric/sorcerer) is the canonical trio and is
+  **unchanged** — the campaign gates its High job on it, the sim was tuned against it, and all four
+  harnesses hardcode it. `warrior` takes **Action Surge** (the shipped Warrior *is* the Fighter
+  archetype in simple form), so the default trio ships one power from each archetype. New
+  **`ROLL_POOL`** (all 10) feeds lobby rolls + campaign recruits.
+  - tank ⚔️ Warrior/Fighter (Action Surge) · Barbarian (Enrage) · Paladin (Divine Smite)
+  - support 📿 Cleric (Channel Divinity, passive) · Bard (Bardic Performance) · Druid (Wild Shape)
+  - dps 🗡️ Sorcerer (Metamagic) · Rogue (Assassin's Mark) · Monk (Flurry of Blows)
+- **Guard IS the shipped `block` field** — a rename, never a second pool. It already soaks
+  (`_enemy_attack`) and already pulls threat (`_pick_tankiest` sorts by block first). `gain_guard` is
+  an alias arm on the `block` op. All party-side Guard writes funnel through **`_gain_guard()`**, so
+  the Barbarian's "rage replaces Guard" is one early-return, not a rule every caller must remember.
+- **`school`** (`block`/`physical`/`spell`) is on every card — a SECOND axis beside `type`, because
+  Strike and Bolt are both attacks. The Druid's forms and the Sorcerer's Metamagic read it.
+- **Momentum stays**, and stops pretending to be a DPS meter: it counts "did you attack this turn",
+  which is exactly the Barbarian's rage upkeep. (`momentum_strike` is also in `CLASS_REWARDS`.)
+- **Devotion is now PERSISTENT** (banked, not zeroed each phase) — a 3-turn cooldown you can't save
+  across is a tax, not a cooldown. The legacy `divine_smite` card is easier to fuel as a result.
+- **Traps that bite** (each cost a real bug, each is now asserted):
+  - **`def["cost"]` can be the STRING `"X"`** (Whirlwind). Comparing String to int is a RUNTIME ERROR,
+    not a review finding. Never read it raw — go through `_affordable` / `Powers.cost_of` / `_pool_of`.
+  - **An op that loops the enemies inside an `all_enemies` card is N²** — `_apply_play` already loops.
+  - **Quicken must consume on SCHOOL match, never a cost delta**: `empower` is a live 0-cost spell, and
+    `maxi(0, 0-2) == 0 ==` its printed cost, so a delta check silently never fires.
+  - **Twin re-runs the whole effect array**, so it is gated to spells that fan out nowhere
+    (`_twinnable`) — `arc_lightning` carries a `dmg_all` INSIDE its effect.
+  - **`_start_player_phase` ordering matters exactly once**: a Heightened spell resolves PRE-draw.
+  - **`MOUSE_FILTER_STOP` only catches taps in the node's own rect** — a modal must be full-screen or
+    the card fan stays live underneath it.
+- **Verification — `scenes/test/powers_verify.tscn` is SOLO, deterministic and needs no Supabase**
+  (a request with no `net` key never touches `Net`), so prefer it for rules work:
+  `Godot_v4.7-stable_win64_console.exe --headless --path . res://scenes/test/powers_verify.tscn`
+  **combat_verify 50/50 · campaign_verify 81/81 · powers_verify 103/103.**
+  ⚠ `_first_living_role("support")` is **structurally invisible to combat_verify** — its 2-seat crew
+  (warrior+sorcerer) has no support dwarf, so the lookup returns `{}` either way. `powers_verify`
+  carries the 3-seat case. Fast syntax gate: `--headless --check-only --script <file>` (combat.gd
+  errors on `Net` there — that's the autoload missing, not a defect).
+- **Unsimmed, and the number to sim first:** every number is a placeholder. **Bear** is the blow-out —
+  a 3-block hand is +15 Guard for zero energy, every turn, for 3 turns, and you still play the blocks.
+  The Druid tithe (−2 hand) is paid ONCE: hands are discarded and redrawn to a fresh 5 each turn, so
+  turns 2–3 pay out free. The sheet already names the lever (cost 2 cards → 3). `dorf_sim.py` has not
+  seen any of this.
+
+## Prior state (2026-07-12) — MULTIPLAYER: co-op combat + the co-op CAMPAIGN
 
 - **Entry is the MAIN MENU** (`scenes/menu/main_menu.tscn`, the Pages root): Solo Play · Host Room ·
   Join Room. Host/Join dial **Supabase Realtime Broadcast** (`scripts/net/net.gd` — native

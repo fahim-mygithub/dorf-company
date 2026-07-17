@@ -8,6 +8,7 @@ extends Control
 ## Resolution order (Db op semantics): base -> +flat (Channel/Aura) -> xMark -> block,hp -> Retaliate.
 
 const Db := preload("res://scripts/combat/card_db.gd")
+const Powers := preload("res://scripts/combat/class_powers.gd")
 const Card := preload("res://scripts/ui/card.gd")
 const Threat := preload("res://scripts/ui/threat_arrows.gd")
 const MOMENTUM_HIT := preload("res://scenes/vfx/momentum_hit.tscn")
@@ -76,6 +77,13 @@ var pc_block: Array = []
 var pc_energy: Array = []
 var pc_outline: Array = []
 var pc_minis: Array = []   # per-slot container for the tiny hand row (non-active dwarves)
+var pc_power: Array = []       # the Class Power orb on each portrait
+var pc_power_lbl: Array = []   # its gate readout (cooldown / 📿 / 🧿 charge)
+## A targeted power (Smite / Assassin's Mark / Flurry) is ARMED by tapping the orb, then aimed by
+## tapping an enemy — the same two-tap grammar as a target card, so there is nothing new to learn.
+var power_armed := false
+var choice_box: Control          # the 3-way pick (Metamagic's shapes, Wild Shape's forms)
+var choice_btns: Array = []
 
 var threat: Node2D
 var intent_panel: Control       # hover/tap explainer for an enemy's telegraphed move
@@ -247,6 +255,31 @@ func _build_ui() -> void:
 	overlay.add_child(overlay_btn)
 	overlay.visible = false
 
+	# The Class Power 3-way pick. A FULL-SCREEN dim, not a floating panel: MOUSE_FILTER_STOP only
+	# catches taps inside the node's own rect, so a panel over the middle of the board would leave the
+	# card fan at y≈930 live underneath it — you could "choose" and play a card with the same tap.
+	# z_index lifts it over the threat arrows, which are a Node2D drawn across the whole board.
+	choice_box = ColorRect.new()
+	choice_box.color = Color(0.03, 0.02, 0.05, 0.88)
+	choice_box.size = Vector2(720, 1280)
+	choice_box.mouse_filter = Control.MOUSE_FILTER_STOP
+	choice_box.z_index = 50
+	choice_box.visible = false
+	add_child(choice_box)
+	var ch_panel := ColorRect.new()
+	ch_panel.color = Color(0.09, 0.08, 0.13, 1.0)
+	ch_panel.position = Vector2(24, 300)
+	ch_panel.size = Vector2(672, 344)
+	ch_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	choice_box.add_child(ch_panel)
+	var ch_lbl := Label.new()
+	ch_lbl.text = "Choose"
+	ch_lbl.add_theme_font_size_override("font_size", 17)
+	ch_lbl.position = Vector2(48, 314)
+	ch_lbl.size = Vector2(624, 24)
+	ch_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	choice_box.add_child(ch_lbl)
+
 func _build_enemy_slot(i: int) -> void:
 	var pos: Vector2 = EN_POS[i]
 	var e := _emoji(pos, Vector2(96, 76), 50)
@@ -274,6 +307,22 @@ func _build_party_slot(i: int) -> void:
 	var e := _emoji(pos, Vector2(110, 70), 50)
 	e.gui_input.connect(_on_party_input.bind(i))
 	pc_emoji.append(e)
+	# The CLASS POWER orb — a Hearthstone-style hero power on the portrait, a second lever beside the
+	# hand. It sits in the gutter to the RIGHT of the emoji (which spans pos.x±55) and clear of every
+	# label: name at y-58, hp/block/energy at y+38/+58/+76, the mini row at y=798. Added AFTER the
+	# emoji so it is above it in the tree and wins the 11px where the two rects overlap.
+	var orb := Label.new()
+	orb.position = pos + Vector2(44, -18)
+	orb.size = Vector2(36, 36)
+	orb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	orb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	orb.add_theme_font_size_override("font_size", 19)
+	orb.mouse_filter = Control.MOUSE_FILTER_STOP
+	orb.gui_input.connect(_on_orb_input.bind(i))
+	add_child(orb)
+	pc_power.append(orb)
+	# The gate readout under the orb — the cooldown, the 📿 it needs, the 🧿 casts it is waiting on.
+	pc_power_lbl.append(_label("", Vector2(pos.x + 20, pos.y + 20), Vector2(84, 16), 11, true))
 	pc_name.append(_label("", Vector2(pos.x - 80, pos.y - 58), Vector2(160, 20), 14))
 	pc_hp.append(_label("", Vector2(pos.x - 80, pos.y + 38), Vector2(160, 20), 16))
 	pc_block.append(_label("", Vector2(pos.x - 80, pos.y + 58), Vector2(160, 18), 14))
@@ -338,8 +387,8 @@ func _start_combat() -> void:
 		var cls: Dictionary = Db.CLASSES[cid]
 		var deck: Array = (spec.get("deck", cls["deck"]) as Array).duplicate()
 		deck.shuffle()
-		party.append({
-			"role": cls["role"], "name": spec.get("name", cls["name"]), "emoji": cls["emoji"],
+		var pc: Dictionary = {
+			"role": cls["role"], "cls": cid, "name": spec.get("name", cls["name"]), "emoji": cls["emoji"],
 			"hp": int(spec.get("hp", cls["max_hp"])), "max_hp": int(spec.get("max_hp", cls["max_hp"])), "block": 0,
 			"energy": cls["energy"], "max_energy": cls["energy"],
 			# A crew member sent in at 0 HP (a downed dwarf on a hex expedition) starts as a benched slot.
@@ -352,7 +401,14 @@ func _start_combat() -> void:
 			# side+slot is the entity's WIRE ADDRESS: the pair every fx event is aimed with. Static
 			# for the life of the fight, so unlike an event it is safe riding an entity dict.
 			"node": pc_emoji[i], "slot": i, "side": "party",
-		})
+			# The Bard's song is held with this and nothing else: the (kind,idx) address of every play
+			# this turn. An AoE carries ONE address, so "AoE counts as 1" needs no code.
+			"targets_turn": [], "tithe_pending": false,
+		}
+		# The Class Power's own state, per class. A dwarf whose class has no power still carries the
+		# keys (power == "") so the snapshot shape never varies by class.
+		pc.merge(Powers.fresh_state(str(cls.get("power", ""))))
+		party.append(pc)
 
 	enemies = []
 	var enc: Array = request.get("enemies", Db.ENCOUNTER)
@@ -380,6 +436,8 @@ func _start_combat() -> void:
 			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
 			"pref": ed["pref"], "alive": true, "marked": false, "forced": false,
 			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
+			"stun": 0,                    # Stunning Strike: loses its next action
+			"am_owner": -1, "am_tick": 0, "am_turns": 0,   # the Rogue's Assassin's Mark (owner seat)
 			"moves": mvs, "move_i": (randi() % mvs.size()) if not mvs.is_empty() else 0,   # random offset desyncs duplicates
 			"rage": 0,                    # permanent +atk from Howl (rage_all)
 			"intent_target": -1, "node": en_emoji[i], "slot": i, "side": "enemy",
@@ -388,6 +446,8 @@ func _start_combat() -> void:
 	turn = 0
 	taunt_last_turn = -99
 	phase = ""
+	power_armed = false
+	choice_box.visible = false
 	overlay.visible = false
 	intent_open = -1
 	intent_panel.visible = false
@@ -423,14 +483,33 @@ func _start_combat() -> void:
 func _fresh_temp() -> Dictionary:
 	# fortify -> Retaliate +2 (persists through enemy phase); fortify_guard -> next Guard +5 (consumed)
 	# next_attack_bonus (Whetstone) / double_next (Empower) / retain_block (Bracing Stance) are one-turn flags.
+	# smite_bonus (Vow of Wrath) / pay_with_guard (Reforge) / x_paid (what an X-cost card really spent).
 	return {"retaliate": 0, "fortify": false, "fortify_guard": false, "channel_charges": 0, "channel_bonus": 0,
-		"next_attack_bonus": 0, "double_next": false, "retain_block": false}
+		"next_attack_bonus": 0, "double_next": false, "retain_block": false,
+		"smite_bonus": 0, "pay_with_guard": false, "x_paid": 0}
 
 # ================================================================ Phase flow
+## FOUR PASSES, AND THE ORDER OF THEM IS LOAD-BEARING. It used to be one loop, which quietly broke
+## three things at once: a Heightened spell resolves INSIDE this function, so anything reset after it
+## erased what it just did, and anything a dwarf granted the PARTY was zeroed again by the next
+## dwarf's own reset.
 func _start_player_phase() -> void:
 	turn += 1
+	# PASS 1 — every GLOBAL reset, before ANY resolution. A held spell lands in pass 2 and a held Mark
+	# must survive it; a held attack must read this turn's buffs, not last turn's.
+	for e: Dictionary in enemies:
+		e["marked"] = false
+		e["forced"] = false
+		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
+	party_attack_buff = 0
+	attacks_this_turn = 0
+	power_armed = false
+	if choice_box != null:
+		choice_box.visible = false
+	# PASS 2 — per-dwarf reset, then draw.
 	for a: Dictionary in party:
 		if not a["alive"]:
+			a["raging"] = false   # a downed dwarf can't hold a stance, and will never run its upkeep
 			continue
 		# Bracing Stance: block set to keep through the next turn instead of zeroing.
 		if not bool(a["temp"].get("retain_block", false)):
@@ -439,17 +518,31 @@ func _start_player_phase() -> void:
 		a["temp"] = _fresh_temp()
 		a["shield"] = 0
 		a["momentum"] = 0
-		a["devotion"] = 0
+		# Devotion is NOT zeroed: the Paladin banks it BETWEEN Smites, and a 3-turn cooldown you
+		# cannot save across is not a cooldown, it is a tax. (The legacy divine_smite card gets
+		# easier to fuel as a result — unsimmed, and recorded in the plan.)
 		a["attacks_this_turn"] = 0
 		a["played_turn"] = []
 		a["vulnerable"] = maxi(0, int(a.get("vulnerable", 0)) - 1)   # Expose/Hex wears off
+		# Ticks the cooldown and fires any Heightened spell. Ordering matters exactly once and this is
+		# it — a held spell must land before the hand it was meant to set up is dealt.
+		Powers.on_phase_start_pre_draw(self, a)
 		_draw_cards(a, HAND_SIZE)
-	for e: Dictionary in enemies:
-		e["marked"] = false
-		e["forced"] = false
-		e["vulnerable"] = maxi(0, int(e.get("vulnerable", 0)) - 1)   # Vulnerable counts down each turn (Burn ticks separately)
-	party_attack_buff = 0
-	attacks_this_turn = 0
+	# A Heightened spell can KILL THE LAST ENEMY from inside pass 2 — _resolve_held_spell calls
+	# _check_end, which sets phase="win" and (nested) has already emitted combat_finished. Falling
+	# through would stamp phase="playerTurn" back over the win and hand the campaign a fight that
+	# reported itself finished and then kept running.
+	if phase == "win" or phase == "lose":
+		return
+	# PASS 3 — the Druid's form reads the hand it was just dealt, so it cannot run before pass 2 ends.
+	# It also PAYS THE PARTY (🦅 Hawk), which is why it cannot live inside pass 2: a later dwarf's
+	# block reset would wipe what an earlier Druid just granted.
+	for a: Dictionary in party:
+		if a["alive"]:
+			Powers.on_phase_start_post_draw(self, a)
+	# PASS 4 — party-wide. AFTER party_attack_buff is zeroed: the Bard's song rides that same channel,
+	# so it has to be applied on top of the reset rather than wiped by it.
+	Powers.on_phase_start_party(self)
 	selected_uid = ""
 	# Nobody has called the new turn yet. (SOLO writes this too, and simply never reads it.)
 	_seat_ready = []
@@ -466,6 +559,8 @@ func _on_end_turn() -> void:
 		return
 	if mode == Mode.SOLO:
 		for a: Dictionary in party:
+			if a["alive"]:
+				Powers.on_seat_upkeep(self, a)   # rage lapses / the song breaks — before the hand goes
 			for c: String in a["hand"]:
 				a["discard"].append(c)
 			a["hand"].clear()
@@ -511,6 +606,9 @@ func _authority_set_ready(seat: int) -> void:
 		return
 	_seat_ready[seat] = true
 	var a: Dictionary = party[seat]
+	# The stance upkeep is PER SEAT because ending is per seat: co-op has no party-wide end of turn to
+	# hang it on, and inventing one would lapse a Barbarian's rage on someone else's clock.
+	Powers.on_seat_upkeep(self, a)
 	for c: String in a["hand"]:
 		a["discard"].append(c)
 	a["hand"].clear()
@@ -546,6 +644,11 @@ func _enemy_phase() -> void:
 			e["burn"] = maxi(0, b - 1)
 			_flash(e)
 			_impact(e, b)
+	# The Assassin's Mark bleeds on the same beat as Burn, and for the same reason it can: status
+	# damage writes hp directly and never routes through _deal_enemy, which would subtract block
+	# first. That is precisely what "ignores armour completely" means, and Burn is the precedent.
+	if Powers.tick_marks(self):
+		any_burn = true
 	if any_burn:
 		_refresh()
 		_net_board()
@@ -560,6 +663,16 @@ func _enemy_phase() -> void:
 		await get_tree().create_timer(0.45).timeout
 		if epoch != combat_epoch:
 			return
+		# 💫 Stunned: it loses this action. move_i does NOT advance — the move it was telegraphing is
+		# the move it still owes, so the intent label stays honest. The beat is broadcast before the
+		# skip, or the client renders the stun fused into next turn's board.
+		if int(e.get("stun", 0)) > 0:
+			e["stun"] = int(e["stun"]) - 1
+			_flash(e)
+			_log("💫 %s is stunned — it loses its turn." % e["name"])
+			_refresh()
+			_net_board()
+			continue
 		_do_enemy_move(e, _enemy_move(e))
 		e["move_i"] = int(e["move_i"]) + 1   # rotation advances; the intent label now telegraphs next turn
 		_refresh()
@@ -642,14 +755,14 @@ func _do_enemy_move(e: Dictionary, mv: Dictionary) -> void:
 ## correctly. Byte-identical to the old party[0/1/2] logic for the canonical W/C/S trio.
 func _enemy_target(e: Dictionary) -> Dictionary:
 	if e["forced"]:
-		var w: Dictionary = _first_living_role("warrior")   # Taunt -> a Warrior
+		var w: Dictionary = _first_living_role("tank")   # Taunt -> a tank
 		if not w.is_empty():
 			return w
 	match e["pref"]:
 		"tankiest":
 			return _pick_tankiest()
 		"healer_dps":
-			var c: Dictionary = _first_living_role("cleric")     # Healer first
+			var c: Dictionary = _first_living_role("support")    # Healer first
 			if not c.is_empty():
 				return c
 			var nt: Dictionary = _first_living_nontank()         # then any non-tank (DPS)
@@ -669,7 +782,7 @@ func _first_living_role(role: String) -> Dictionary:
 
 func _first_living_nontank() -> Dictionary:
 	for a: Dictionary in party:
-		if a["alive"] and a["role"] != "warrior":
+		if a["alive"] and a["role"] != "tank":
 			return a
 	return {}
 
@@ -696,10 +809,22 @@ func _pick_lowest_hp() -> Dictionary:
 ## intents and render absolute snapshots. Snapshots are MERGED field-by-field into the local
 ## dicts — never assigned over them, because `node` (the live Label), `deck` and `hand` are
 ## local-only keys that a wholesale replace would null out.
+## Every int leaf that crosses the wire. JSON hands back FLOATS, so a key missing from this list
+## arrives as 3.0 where the engine expects 3 — and `3.0 == 3` is true in GDScript, which is exactly
+## why the bug hides: it only surfaces on a `%d` format or a match, long after the snapshot landed.
+## Class Power state (class_powers.gd fresh_state) must stay mirrored here — see Powers.int_keys(),
+## which combat_verify asserts against this list so the two cannot drift.
 const _INT_KEYS := ["slot", "hp", "max_hp", "block", "shield", "energy", "max_energy",
 	"vulnerable", "momentum", "devotion", "attacks_this_turn",
-	"atk", "burn", "move_i", "rage", "intent_target"]
-const _INT_KEYS_TEMP := ["retaliate", "channel_charges", "channel_bonus", "next_attack_bonus"]
+	"atk", "burn", "move_i", "rage", "intent_target",
+	# --- Class Powers (2026-07-17) ---
+	"power_cd", "power_turn", "communion", "rage_turn", "streak", "casts",
+	"smite_charge", "mercy_charge", "shift_turns", "tithe_owed", "meta_charge",
+	"held_idx", "regen",
+	# --- enemy-side: the Assassin's Mark + Stun ---
+	"am_owner", "am_tick", "am_turns", "stun"]
+const _INT_KEYS_TEMP := ["retaliate", "channel_charges", "channel_bonus", "next_attack_bonus",
+	"smite_bonus", "x_paid"]
 
 # ---------------------------------------------------------------- The FX rider (M3b)
 ## Absolute snapshots tell a client WHAT the board is; they cannot tell it what just HAPPENED.
@@ -828,8 +953,16 @@ func _apply_snapshot(snap: Dictionary, force := false) -> void:
 		_request_resync()   # gap — still apply it, absolute snapshots are idempotent
 	_last_board_seq = seq
 	var g: Dictionary = snap.get("globals", {})
+	var was_turn: int = turn
 	phase = str(g.get("phase", phase))
 	turn = int(g.get("turn", turn))
+	# A CLIENT never runs _start_player_phase — that is host-only — so the local UI latches it sets
+	# would never reset. Without this an armed power survives the whole enemy phase and hijacks the
+	# first enemy tap of the next turn, and an open pick strands the player over a stale board.
+	if turn != was_turn:
+		power_armed = false
+		if choice_box != null:
+			choice_box.visible = false
 	party_attack_buff = int(g.get("party_attack_buff", party_attack_buff))
 	taunt_last_turn = int(g.get("taunt_last_turn", taunt_last_turn))
 	attacks_this_turn = int(g.get("attacks_this_turn", attacks_this_turn))
@@ -878,6 +1011,19 @@ func _make_action(seat: int, uid: String, hand_index: int, target_kind: String, 
 ## resolved on the host all funnel through here — a networked play is bit-identical to a local one.
 func _apply_play(a: Dictionary, idx: int, cid: String, def: Dictionary, target_kind: String, target_idx: int) -> void:
 	_spend(a, idx)
+	# The Bard's song, banked before anything resolves so a kill can't rob you of the target you
+	# legitimately touched. (kind,idx) IS the distinct key — an AoE carries one address, so it counts
+	# once no matter how many it hits, and nobody had to write that rule.
+	Powers.on_target_touched(self, a, target_kind, target_idx)
+	# ⏳ Heighten: the spell does NOT fire now. It is held and lands twice at the start of your next
+	# turn. Held BEFORE resolving, and after _spend — you pay for it this turn either way.
+	if str(a.get("meta_pick", "")) == "heighten" and str(def.get("school", "")) == "spell":
+		a["meta_pick"] = ""
+		a["held_cid"] = cid
+		a["held_idx"] = target_idx if target_kind == "enemy" else -1
+		_log("⏳ %s holds %s — it lands twice next turn." % [a["name"], def["name"]])
+		_finish_play(a, def, cid)
+		return
 	match target_kind:
 		"all":
 			for e: Dictionary in enemies:
@@ -889,7 +1035,43 @@ func _apply_play(a: Dictionary, idx: int, cid: String, def: Dictionary, target_k
 			_resolve(def, a, party[target_idx])
 		_:
 			_resolve(def, a, {})   # self / party: the ops loop over the party internally
+	# 🌀 Twinned: re-run against a SECOND enemy. Gated hard to a single-target enemy spell whose
+	# effect fans out nowhere — arc_lightning carries a dmg_all INSIDE its effect, and re-running that
+	# would hit the whole board twice off one Twin.
+	if str(a.get("meta_pick", "")) == "twin" and str(def.get("school", "")) == "spell":
+		a["meta_pick"] = ""
+		if target_kind == "enemy" and _twinnable(def):
+			var second: int = _second_enemy(target_idx)
+			if second >= 0:
+				_log("🌀 %s twins %s onto %s." % [a["name"], def["name"], enemies[second]["name"]])
+				_resolve(def, a, enemies[second])
 	_finish_play(a, def, cid)
+
+## A spell can be Twinned only if every op in it aims at the ONE target it was pointed at. Anything
+## that fans out on its own (dmg_all, party_block, party_buff, heal_party) would double-apply.
+func _twinnable(def: Dictionary) -> bool:
+	for op: Array in def["effect"]:
+		if str(op[0]) in ["dmg_all", "party_block", "party_buff", "heal_party", "dmg_x"]:
+			return false
+	return true
+
+func _second_enemy(not_idx: int) -> int:
+	for i: int in range(enemies.size()):
+		if i != not_idx and enemies[i]["alive"]:
+			return i
+	return -1
+
+## The Druid's tithe: this card goes back into the DECK, not the discard, and is NOT replaced. The
+## −2 hand IS the price of the form. You choose which two, so it isn't a mulligan — it's a tithe you
+## get to aim, and the two you hand back are the two your form was never going to pay for.
+func _pay_tithe(a: Dictionary, idx: int) -> void:
+	var cid: String = a["hand"][idx]
+	a["deck"].append(cid)
+	a["deck"].shuffle()
+	a["hand"].remove_at(idx)
+	a["hand_uids"].remove_at(idx)
+	a["tithe_owed"] = maxi(0, int(a["tithe_owed"]) - 1)
+	_log("🐾 %s hands %s back to the deck (%d to go)." % [a["name"], Db.CARDS[cid]["name"], int(a["tithe_owed"])])
 
 ## Every tap routes here. CLIENT sends an intent and mutates nothing; AUTHORITY/SOLO resolve.
 func _try_play(seat: int, uid: String, target_kind: String, target_idx: int) -> void:
@@ -901,9 +1083,10 @@ func _try_play(seat: int, uid: String, target_kind: String, target_idx: int) -> 
 		return
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
+	var owes: bool = int(a.get("tithe_owed", 0)) > 0
 	if mode == Mode.CLIENT:
-		if def["cost"] > a["energy"]:   # courtesy check only; the authority re-validates everything
-			_log("Not enough energy for %s." % def["name"])
+		if not owes and Powers.cost_of(a, def) > _pool_of(a) and not Powers.is_x_cost(def):
+			_log("Not enough energy for %s." % def["name"])   # courtesy only; the authority re-validates
 			return
 		Net.send_message("submit_action", _make_action(seat, uid, idx, target_kind, target_idx))
 		selected_uid = ""
@@ -914,9 +1097,65 @@ func _try_play(seat: int, uid: String, target_kind: String, target_idx: int) -> 
 	if mode == Mode.AUTHORITY and not _barrier_open:
 		_log("Waiting for the other players…")
 		return
+	if owes:
+		_pay_tithe(a, idx)
+		_refresh()
+		_net_board()
+		return
 	if not _can_play(a, cid, def):
 		return
 	_apply_play(a, idx, cid, def, target_kind, target_idx)
+	_net_board()
+
+# ---------------------------------------------------------------- Class Powers
+## Every power tap routes here — the mirror of _try_play. CLIENT sends an intent and mutates nothing.
+func _try_power(seat: int, choice: String, t_idx: int) -> void:
+	if seat < 0 or seat >= party.size() or phase != "playerTurn":
+		return
+	if mode == Mode.CLIENT:
+		if not Powers.can_fire(self, party[seat]):   # courtesy only; the authority re-validates all of it
+			var why: String = Powers.gate_reason(party[seat])
+			if why != "":
+				_log(why)
+			return
+		Net.send_message("submit_power", {"seat": seat, "peer_id": Net.ensure_peer_id(),
+			"choice": choice, "target_idx": t_idx, "nonce": _next_nonce()})
+		selected_uid = ""
+		_refresh()
+		return
+	if mode == Mode.AUTHORITY and not _barrier_open:
+		_log("Waiting for the other players…")
+		return
+	if _seat_ended(seat):
+		return
+	if not Powers.fire(self, seat, choice, t_idx):
+		var why2: String = Powers.gate_reason(party[seat])
+		if why2 != "":
+			_log(why2)
+		return
+	_refresh()
+	_net_board()
+
+## Authority: validate a client's power tap. Nothing here trusts the client — same boundary as a card.
+##
+## ⚠ THE _seat_ended GATE IS LOAD-BEARING, AND _on_action DOES NOT HAVE ONE. _on_action gets away with
+## it by ACCIDENT: ending discards your hand, so _hand_index_of returns -1 and the play dies on its
+## own. A power has no card, so nothing would stop an ended seat firing one.
+func _on_power(act: Dictionary) -> void:
+	if not _barrier_open or phase != "playerTurn":
+		return
+	var seat: int = int(act.get("seat", -1))
+	if seat < 0 or seat >= party.size():
+		return
+	if not _peer_owns_seat(str(act.get("peer_id", "")), seat):
+		return
+	if not party[seat]["alive"] or _seat_ended(seat):
+		return
+	var saved: String = selected_uid   # a teammate's power must not drop the host's own armed card
+	if not Powers.fire(self, seat, str(act.get("choice", "")), int(act.get("target_idx", -1))):
+		return
+	selected_uid = saved
+	_refresh()
 	_net_board()
 
 ## Authority: validate a client's action, resolve it, broadcast. Nothing here trusts the client.
@@ -934,6 +1173,13 @@ func _on_action(act: Dictionary) -> void:
 	var idx: int = _hand_index_of(a, str(act.get("card_uid", "")))
 	if idx < 0:
 		return   # unknown or already-played uid — never slot-substitute
+	# A Druid owing its form the tithe is PAYING with this tap, not playing. The card uid is already
+	# the address, so the tithe needs no modal and no second intent — it reuses this one whole.
+	if int(a.get("tithe_owed", 0)) > 0:
+		_pay_tithe(a, idx)
+		_refresh()
+		_net_board()
+		return
 	var cid: String = a["hand"][idx]
 	var def: Dictionary = Db.CARDS[cid]
 	if not _can_play(a, cid, def):
@@ -971,6 +1217,9 @@ func _on_net_message(event: String, payload: Dictionary) -> void:
 	if mode == Mode.AUTHORITY:
 		match event:
 			"submit_action": _on_action(payload)
+			# Distinct from every other event on the shared Net autoload — including the campaign's
+			# camp_* namespace, which a NESTED fight rides alongside.
+			"submit_power": _on_power(payload)
 			"combat_ready": _authority_on_combat_ready(payload)
 			"resync": _authority_on_resync(payload)
 			"ready": _authority_set_ready(int(payload.get("seat", -1)))
@@ -1057,6 +1306,81 @@ func _client_match_over(payload: Dictionary) -> void:
 func _to_lobby() -> void:
 	get_tree().change_scene_to_file("res://scenes/menu/lobby.tscn")
 
+# ================================================================ Class Power input
+## Tapping your own orb. The three shapes a power can take, and they never combine — a power with a
+## 3-way pick never also needs a target, which is why one tap is always enough to disambiguate.
+func _on_orb_input(event: InputEvent, idx: int) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	get_viewport().set_input_as_handled()   # never fall through to the portrait underneath
+	if phase != "playerTurn":
+		return
+	# You only ever fire your own. In SOLO the active dwarf is the one you are piloting.
+	var mine: int = my_seat if mode != Mode.SOLO else active_idx
+	if idx != mine:
+		# SOLO pilots every dwarf, so the orb of a non-active one is just part of that portrait: tap it
+		# to switch, exactly as tapping the emoji does. In co-op you only ever fire your own.
+		if mode == Mode.SOLO:
+			_on_party_clicked(idx)
+		else:
+			_log("That's not your dwarf's power.")
+		return
+	var a: Dictionary = party[idx]
+	if not Powers.can_fire(self, a):
+		var why: String = Powers.gate_reason(a)
+		if why != "":
+			_log(why)
+		return
+	var p: Dictionary = Powers.power_def(a)
+	if not (p.get("choices", []) as Array).is_empty():
+		_open_choice(idx)
+		return
+	if str(p.get("target", "")) == "enemy":
+		power_armed = true
+		selected_uid = ""     # arming a power disarms a card; the reticle can only mean one thing
+		_log("%s — tap an enemy." % str(p["name"]))
+		_refresh()
+		return
+	_try_power(idx, "", -1)
+
+## The 3-way pick. Built in code like every other screen here, and shown over the hand — the cards
+## underneath are unreachable while it is up, which is the point: the tap is not ambiguous.
+func _open_choice(seat: int) -> void:
+	var p: Dictionary = Powers.power_def(party[seat])
+	var choices: Array = p.get("choices", [])
+	for b: Button in choice_btns:
+		b.queue_free()
+	choice_btns = []
+	for i: int in range(choices.size()):
+		var o: Dictionary = choices[i]
+		var b := Button.new()
+		b.text = "%s  %s\n%s" % [str(o["emoji"]), str(o["name"]), str(o["tip"])]
+		b.position = Vector2(48, 346 + i * 76)
+		b.size = Vector2(624, 68)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.add_theme_font_size_override("font_size", 13)
+		b.pressed.connect(_on_choice.bind(seat, str(o["key"])))
+		choice_box.add_child(b)
+		choice_btns.append(b)
+	# A full-screen modal with no way out is a soft-lock: nothing else on the board is reachable while
+	# it is open, so opening the pick by accident would end your turn for you.
+	var cancel := Button.new()
+	cancel.text = "Cancel"
+	cancel.position = Vector2(48, 346 + choices.size() * 76 + 8)
+	cancel.size = Vector2(624, 40)
+	cancel.add_theme_font_size_override("font_size", 13)
+	cancel.pressed.connect(_close_choice)
+	choice_box.add_child(cancel)
+	choice_btns.append(cancel)
+	choice_box.visible = true
+
+func _close_choice() -> void:
+	choice_box.visible = false
+
+func _on_choice(seat: int, key: String) -> void:
+	choice_box.visible = false
+	_try_power(seat, key, -1)
+
 # ================================================================ Card play
 func _on_party_input(event: InputEvent, idx: int) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -1084,11 +1408,20 @@ func _on_party_clicked(idx: int) -> void:
 		_hand_anim = "switch"      # new hand pops from the tapped dwarf...
 		_switch_from = active_idx  # ...and the old one's mini row animates back in
 	active_idx = idx
+	# Disarm BOTH latches, for the same reason: they belonged to the dwarf you just left. An armed
+	# power that survives the switch aims the NEW dwarf's power at your next enemy tap.
 	selected_uid = ""
+	power_armed = false
 	_refresh()
 
 func _on_enemy_clicked(idx: int) -> void:
 	if phase != "playerTurn" or not enemies[idx]["alive"]:
+		return
+	# An armed power aims exactly like an armed card.
+	if power_armed:
+		power_armed = false
+		_try_power(my_seat if mode != Mode.SOLO else active_idx, "", idx)
+		_refresh()
 		return
 	if selected_uid == "":
 		return
@@ -1120,6 +1453,7 @@ func _on_card_clicked(card) -> void:
 		_try_play(active_idx, card.uid, ("all" if tgt == "all_enemies" else "self"), -1)
 		return
 	if selected_uid != card.uid:
+		power_armed = false   # arming a card disarms a power, exactly as an orb tap disarms a card
 		selected_uid = card.uid                  # inspect + arm target card
 		_log("%s — %s" % [def["name"], _select_hint(def)])
 		_refresh()
@@ -1134,18 +1468,55 @@ func _select_hint(def: Dictionary) -> String:
 		"ally_or_enemy": return "tap an ally to heal, or an enemy to strike"
 		_: return ""
 
-func _can_play(a: Dictionary, cid: String, def: Dictionary) -> bool:
-	if def["cost"] > a["energy"]:
-		_log("Not enough energy for %s." % def["name"])
+## What this card costs THIS dwarf right now, and out of which pool. Never read def["cost"] directly:
+## it can be the string "X", and comparing a String to an int in GDScript is not a bug you find in
+## review — it is a runtime error in the middle of a fight.
+func _pool_of(a: Dictionary) -> int:
+	return int(a["block"]) if bool(a["temp"].get("pay_with_guard", false)) else int(a["energy"])
+
+## Can this dwarf pay for this card right now? The ONE affordability read — _can_play gates on it and
+## the hand renders playability with it, so a card can never look playable and then be refused.
+## Three things move the answer off the printed number: an X cost (a String), Reforge (which pool
+## pays), and Quicken (the price). A Druid owing its form the tithe can "play" anything: the tap
+## hands the card back instead.
+func _affordable(a: Dictionary, def: Dictionary) -> bool:
+	if int(a.get("tithe_owed", 0)) > 0:
+		return true
+	if Powers.is_x_cost(def):
+		return _pool_of(a) > 0
+	return Powers.cost_of(a, def) <= _pool_of(a)
+
+func _can_play(a: Dictionary, _cid: String, def: Dictionary) -> bool:
+	if not _affordable(a, def):
+		if Powers.is_x_cost(def):
+			_log("%s needs something to spend." % def["name"])
+		else:
+			_log("Not enough %s for %s." % ["Guard" if bool(a["temp"].get("pay_with_guard", false)) else "energy", def["name"]])
 		return false
-	if cid == "taunt" and turn - taunt_last_turn < 2:
-		_log("Taunt is recovering — not two turns in a row.")
+	# Was hardcoded to `cid == "taunt"`; the Barbarian's Bellow is the same card in a different kit,
+	# so the limiter is read off the data instead of the id.
+	if str(def.get("limiter", "")) == "no_repeat" and turn - taunt_last_turn < 2:
+		_log("%s is recovering — not two turns in a row." % def["name"])
 		return false
 	return true
 
 func _spend(a: Dictionary, idx: int) -> void:
 	var cid: String = a["hand"][idx]
-	a["energy"] -= Db.CARDS[cid]["cost"]
+	var def: Dictionary = Db.CARDS[cid]
+	var guard: bool = bool(a["temp"].get("pay_with_guard", false))
+	var paid: int = _pool_of(a) if Powers.is_x_cost(def) else Powers.cost_of(a, def)
+	# Stamp what was ACTUALLY paid — dmg_x reads this, never the printed cost.
+	a["temp"]["x_paid"] = paid
+	if guard:
+		a["block"] = maxi(0, int(a["block"]) - paid)
+		a["temp"]["pay_with_guard"] = false   # Reforge is one card, not a stance
+	else:
+		a["energy"] = int(a["energy"]) - paid
+	# Quicken is consumed on the SCHOOL match, not on a cost delta: `empower` is a live 0-cost spell,
+	# and maxi(0, 0-2) == 0 == its printed cost, so a delta check would never fire on it and the pick
+	# would survive the very spell it was meant to shape.
+	if str(a.get("meta_pick", "")) == "quicken" and str(def.get("school", "")) == "spell":
+		a["meta_pick"] = ""
 	a["hand"].remove_at(idx)
 	a["hand_uids"].remove_at(idx)
 	a["played_turn"].append(cid)   # ghosted in the mini row until next player phase
@@ -1154,9 +1525,15 @@ func _finish_play(a: Dictionary, def: Dictionary, cid: String) -> void:
 	a["discard"].append(cid)
 	if def.get("is_attack", false):
 		attacks_this_turn += 1                             # party-wide count for Finisher
-		a["momentum"] = int(a.get("momentum", 0)) + 1      # Warrior: per-char attacks this turn (Momentum Strike)
+		# Momentum counts attacks you played THIS turn. The DPS sheet dropped it as a meter, but that
+		# is exactly what the Barbarian's rage upkeep has to read — so it stays as what it measures.
+		a["momentum"] = int(a.get("momentum", 0)) + 1
 	else:
-		a["devotion"] = int(a.get("devotion", 0)) + 1      # Cleric: per-char skills this turn (Divine Smite spend)
+		a["devotion"] = int(a.get("devotion", 0)) + 1      # banked, spent by the Paladin's Smite
+	# The one per-cast hook: charges every Sorcerer's Metamagic off ANY seat's spell, and drives the
+	# Cleric's whole passive aura. Fired here because this is where every play — SOLO, host tap, and a
+	# client's action resolved on the host — already funnels.
+	Powers.on_card_resolved(self, a, def)
 	selected_uid = ""
 	_log("%s played %s." % [a["name"], def["name"]])
 	_refresh()
@@ -1189,16 +1566,61 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 			"damage_scaling":
 				var base: int = op[2] + op[3] * attacks_this_turn
 				_attack(a, target, base * mult, true)
-			"block":
+			# gain_guard is a pure ALIAS of block. Guard IS this field: it already soaks in
+			# _enemy_attack and already pulls threat in _pick_tankiest. The alias exists only so the
+			# Tank sheet's card text can say "Guard" without a second pool behind it.
+			"block", "gain_guard":
 				var bonus: int = 0
 				if a["temp"]["fortify_guard"] and fortifiable:
 					bonus = 5
 					a["temp"]["fortify_guard"] = false   # consume the +5; Retaliate +2 persists
-				a["block"] += int(op[1]) * mult + bonus
+				_gain_guard(a, int(op[1]) * mult + bonus)
 			"party_block":
 				for x: Dictionary in party:
 					if x["alive"]:
-						x["block"] += int(op[1]) * mult
+						_gain_guard(x, int(op[1]) * mult)
+			"heal_party":
+				for x: Dictionary in party:
+					if x["alive"]:
+						x["hp"] = mini(int(x["max_hp"]), int(x["hp"]) + int(op[1]) * mult)
+			"dmg_per_guard":
+				# Cash the wall in: op[1] damage per op[2] Guard held. Modelled on dmg_per_momentum.
+				_attack(a, target, int(float(a["block"]) * float(op[1]) / float(op[2])) * mult, is_atk)
+			"dmg_x":
+				# X-cost. Reads what _spend ACTUALLY paid, never the printed cost. Single-target on
+				# purpose: _apply_play already loops the enemies for an all_enemies card, so an op
+				# that looped them again would be N-squared.
+				_attack(a, target, int(a["temp"].get("x_paid", 0)) * mult, is_atk)
+			"pay_with_guard":
+				a["temp"]["pay_with_guard"] = true
+			"bank_communion":
+				# NOT multiplied by mult — Empower doubles numbers, not resource tags.
+				a["communion"] = mini(Powers.COMMUNION_MAX, int(a.get("communion", 0)) + int(op[1]))
+			"buff_ally_next":
+				if not target.is_empty() and target.get("role", "") != "":
+					target["temp"]["next_attack_bonus"] = int(target["temp"].get("next_attack_bonus", 0)) + int(op[1]) * mult
+			"heal_ally_next":
+				if not target.is_empty() and target.get("role", "") != "":
+					target["regen"] = int(target.get("regen", 0)) + int(op[1]) * mult
+			"shuffle_random_into_deck":
+				for i: int in range(int(op[1])):
+					if (a["hand"] as Array).is_empty():
+						break
+					var r: int = randi() % (a["hand"] as Array).size()
+					a["deck"].append(a["hand"][r])
+					a["hand"].remove_at(r)
+					a["hand_uids"].remove_at(r)
+				a["deck"].shuffle()
+			"bard_free_target":
+				# A CONSTANT key, so Refrain can only ever be worth one distinct target no matter how
+				# many times it is played.
+				Powers.on_target_touched(self, a, "free", -1)
+			"if_form":
+				if str(a.get("form", "")) == str(op[1]):
+					_run_ops(op[2], a, target, mult, is_atk, false)
+			"if_assassin_mark":
+				if not target.is_empty() and int(target.get("am_turns", 0)) > 0:
+					_run_ops(op[1], a, target, mult, is_atk, false)
 			"self_damage", "self_dmg":
 				a["hp"] = maxi(0, a["hp"] - int(op[1]))     # a cost — ignores block, not doubled by Empower
 				if a["hp"] <= 0:
@@ -1219,14 +1641,9 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 					_attack(a, target, int(op[1]) * mult, false)
 			"apply_status":
 				if op[1] == "marked":
-					target["marked"] = true
+					_apply_enemy_status(target, "marked", 1)
 			"apply":
-				if not target.is_empty() and target.get("alive", false):
-					match op[1]:
-						"burn":
-							target["burn"] = int(target.get("burn", 0)) + int(op[2])
-						"vulnerable":
-							target["vulnerable"] = int(target.get("vulnerable", 0)) + int(op[2])
+				_apply_enemy_status(target, str(op[1]), int(op[2]) if op.size() > 2 else 1)
 			"force_target_all":
 				for e: Dictionary in enemies:
 					e["forced"] = true
@@ -1241,6 +1658,9 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 					"channel":
 						a["temp"]["channel_charges"] = op[3]
 						a["temp"]["channel_bonus"] = op[2]
+					"smite_bonus":
+						# Accumulates: the Paladin ships TWO Vows, and swearing both should stack.
+						a["temp"]["smite_bonus"] = int(a["temp"].get("smite_bonus", 0)) + int(op[2]) * mult
 			"buff_next_attack":
 				a["temp"]["next_attack_bonus"] = int(a["temp"].get("next_attack_bonus", 0)) + int(op[1]) * mult
 			"retain_block":
@@ -1266,6 +1686,33 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 				if not target.is_empty() and not target.get("alive", true):
 					_run_ops(op[1], a, target, mult, is_atk, false)
 
+## Guard/block onto a dwarf. THE one write path, so the Barbarian's "rage replaces Guard" is a single
+## early-return instead of a rule every caller has to remember — including an ally's Consecrate
+## landing on him, which is the correct read of "can no longer gain Guard".
+func _gain_guard(a: Dictionary, v: int) -> void:
+	if v == 0 or not a.get("alive", false) or Powers.blocks_guard(a):
+		return
+	a["block"] = int(a["block"]) + v
+
+## THE one place a status lands on an enemy. Every route funnels here — a card's `apply`, Mark, the
+## Rogue's bleed — because the Monk's refund reads this and a missed site is a dead refund the player
+## cannot see. Guarded: the shipped apply_status wrote `marked` onto anything, corpse or not.
+func _apply_enemy_status(e: Dictionary, kind: String, n: int) -> void:
+	if e.is_empty() or not e.get("alive", false) or e.get("role", "") != "":
+		return   # empty target, a corpse, or an ALLY dict — none of them can carry an enemy status
+	match kind:
+		"marked":
+			e["marked"] = true
+		"burn":
+			e["burn"] = int(e.get("burn", 0)) + n
+		"vulnerable":
+			e["vulnerable"] = int(e.get("vulnerable", 0)) + n
+		"stun":
+			e["stun"] = int(e.get("stun", 0)) + n
+		_:
+			return   # an unknown status is not a status, and must not refund a Flurry
+	Powers.on_status_applied(self, e)
+
 ## Damage to an ENEMY (resolution order: base -> +flat -> xMark -> xVulnerable -> block,hp).
 func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> void:
 	if enemy.is_empty() or not enemy.get("alive", false):
@@ -1279,11 +1726,16 @@ func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> vo
 			amt += int(a["temp"]["next_attack_bonus"])
 			a["temp"]["next_attack_bonus"] = 0
 		amt += party_attack_buff
+		amt += Powers.attack_flat_bonus(a)   # Barbarian: +4 while raging AND Bloodied
 	if enemy["marked"]:
 		amt = int(round(amt * Db.MARK_MULT))
 	if int(enemy.get("vulnerable", 0)) > 0:
 		amt = int(round(amt * VULN_MULT))
 	_deal_enemy(enemy, amt)
+	# The Assassin's Mark is fed from both ends here: an ally's hit buys it a turn, the owner's hit
+	# buys it a tick. May run on an enemy this hit just killed — harmless only because every reader
+	# of the mark gates on `alive`, which is the invariant the placement leans on.
+	Powers.on_attack_landed(self, a, enemy)
 	_flash(enemy)
 	_impact(enemy, amt)
 
@@ -1302,6 +1754,9 @@ func _enemy_attack(e: Dictionary, t: Dictionary, base: int = -1) -> void:
 	var raw: int = base if base >= 0 else int(e["atk"])
 	if int(t.get("vulnerable", 0)) > 0:
 		raw = int(round(raw * VULN_MULT))
+	# Barbarian resistance sits between xVulnerable and the shield: base -> xVuln -> xHALF -> shield
+	# -> block -> hp. It is a CEIL, so a 1-damage chip can never round down to free.
+	raw = Powers.incoming_scale(t, raw)
 	var dmg: int = maxi(0, raw - int(t["shield"]))
 	var blocked: int = mini(t["block"], dmg)
 	t["block"] -= blocked
@@ -1357,10 +1812,13 @@ func _check_end() -> bool:
 func _end(won: bool) -> void:
 	phase = "win" if won else "lose"
 	selected_uid = ""
+	power_armed = false
+	if choice_box != null:
+		choice_box.visible = false   # z_index 50 would paint a stale pick over the win screen
 	if not request.is_empty():
 		var crew_results: Array = []
 		for a: Dictionary in party:
-			crew_results.append({"name": a["name"], "cls": a["role"], "survived": a["alive"], "hp_end": a["hp"], "max_hp": a["max_hp"]})
+			crew_results.append({"name": a["name"], "cls": a.get("cls", a["role"]), "survived": a["alive"], "hp_end": a["hp"], "max_hp": a["max_hp"]})
 		combat_finished.emit({"success": won, "crew_results": crew_results, "payout_won": won})
 		return
 	overlay_label.text = "The dwarves delivered.\nQuarterly demon targets met." if won else "Liquidation.\nThe contract is void."
@@ -1459,6 +1917,18 @@ func _refresh_party() -> void:
 				st += "⚔️%d " % a["momentum"]
 			if int(a.get("devotion", 0)) > 0:
 				st += "🙏%d " % a["devotion"]
+			if int(a.get("communion", 0)) > 0:
+				st += "📿%d " % a["communion"]
+			if bool(a.get("raging", false)):
+				st += "😤 "
+			if bool(a.get("performing", false)):
+				st += "🎶%d/%d " % [(a.get("targets_turn", []) as Array).size(), Powers.PERFORM_TARGETS]
+			if str(a.get("form", "")) != "":
+				st += "%s%d " % [Db._form_emoji(str(a["form"])).left(2).strip_edges(), int(a.get("shift_turns", 0))]
+			if str(a.get("meta_pick", "")) != "":
+				st += "🌀%s " % str(a["meta_pick"]).left(1).to_upper()
+			if str(a.get("held_cid", "")) != "":
+				st += "⏳ "
 			if int(a["temp"].get("next_attack_bonus", 0)) > 0:
 				st += "🪨+%d " % a["temp"]["next_attack_bonus"]
 			if bool(a["temp"].get("double_next", false)):
@@ -1470,6 +1940,40 @@ func _refresh_party() -> void:
 			pc_hp[i].text = "DOWNED"
 			pc_block[i].text = ""
 			pc_energy[i].text = ""
+		_refresh_orb(i, a, alive)
+
+## The Class Power orb. It is a BUTTON when it is yours and ready, and a READOUT otherwise — and the
+## thing that decides which is Powers.can_fire, the exact predicate the host re-validates the tap
+## with. What you see and what the host allows physically cannot drift apart.
+func _refresh_orb(i: int, a: Dictionary, alive: bool) -> void:
+	var p: Dictionary = Powers.power_def(a)
+	if p.is_empty() or not alive:
+		pc_power[i].text = ""
+		pc_power_lbl[i].text = ""
+		return
+	pc_power[i].text = str(p["emoji"])
+	var mine: int = my_seat if mode != Mode.SOLO else active_idx
+	var lit: bool = i == mine and phase == "playerTurn" and Powers.can_fire(self, a)
+	if bool(p.get("passive", false)):
+		# It fires ITSELF — so it never lights up as tappable. The readout is the whole interface.
+		pc_power[i].modulate = Color(1, 0.92, 0.5)
+		pc_power_lbl[i].text = "%d/%d" % [int(a.get("casts", 0)) % Powers.CHANNEL_EVERY, Powers.CHANNEL_EVERY]
+	elif lit:
+		pc_power[i].modulate = Color(1, 1, 1)         # lit: yours, and firable right now
+		pc_power_lbl[i].text = "READY"
+	else:
+		pc_power[i].modulate = Color(0.42, 0.40, 0.48)   # dark: on cooldown, not yours, or unpaid
+		pc_power_lbl[i].text = _orb_gate(a, p)
+
+## What the orb's gate is waiting on, in the fewest characters that still say which thing.
+func _orb_gate(a: Dictionary, p: Dictionary) -> String:
+	if int(a.get("power_cd", 0)) > 0:
+		return "⏳%d" % int(a["power_cd"])
+	if int(p.get("charge", 0)) > 0:
+		return "🧿%d/%d" % [int(a.get("meta_charge", 0)), int(p["charge"])]
+	if int(p.get("communion", 0)) > 0 and int(a.get("communion", 0)) < int(p["communion"]):
+		return "📿%d/%d" % [int(a.get("communion", 0)), int(p["communion"])]
+	return ""
 
 # ---------------------------------------------------------------- Intent telegraph
 ## Compact always-on readout of the latched move, with LIVE numbers (rage + target Vulnerable).
@@ -1611,8 +2115,15 @@ func _refresh_panel() -> void:
 		var a: Dictionary = party[active_idx]
 		var aura: String = "   📣+%d atk" % party_attack_buff if party_attack_buff > 0 else ""
 		active_label.text = "%s  %s   ⚡%d/%d%s" % [a["emoji"], a["name"], a["energy"], a["max_energy"], aura]
-		if mode == Mode.SOLO:
-			hint_label.text = "Tap a dwarf to switch • tap a card to play (target cards: tap a target)"
+		# The two states that CHANGE what a tap means get the hint line to themselves — a player
+		# holding a reticle or owing a tithe needs to be told, not left to discover it.
+		var me: Dictionary = party[my_seat] if mode != Mode.SOLO else a
+		if int(me.get("tithe_owed", 0)) > 0:
+			hint_label.text = "🐾 Hand %d card(s) back to your deck — tap them" % int(me["tithe_owed"])
+		elif power_armed:
+			hint_label.text = "%s — tap an enemy to aim it" % str(Powers.power_def(me).get("name", "Power"))
+		elif mode == Mode.SOLO:
+			hint_label.text = "Tap a dwarf to switch • tap a card to play • tap the orb for its power"
 		elif not Net.is_online():
 			hint_label.text = "Reconnecting…"
 		elif _seat_ended(my_seat):
@@ -1653,8 +2164,11 @@ func _rebuild_hand() -> void:
 		var uid: String = uids[i] if i < uids.size() else ""
 		var def: Dictionary = Db.CARDS[cid]
 		var face: Dictionary = Db.describe(def, a, party_attack_buff, attacks_this_turn)
-		var cooldown: bool = cid == "taunt" and turn - taunt_last_turn < 2
-		var playable: bool = def["cost"] <= a["energy"] and not cooldown
+		# Read the cost through _pool_of/cost_of, never raw: it can be the string "X", and comparing a
+		# String to an int is a runtime error. Reforge also moves which pool pays, and Quicken moves
+		# the price — so "can I afford this?" is never just the printed number.
+		var cooldown: bool = str(def.get("limiter", "")) == "no_repeat" and turn - taunt_last_turn < 2
+		var playable: bool = _affordable(a, def) and not cooldown
 		var t: float = float(i) - float(n - 1) / 2.0
 		var rot: float = deg_to_rad(t * 5.0)
 		var bc := Vector2(360.0 + t * spacing, 196.0 + absf(t) * 9.0)
@@ -1771,7 +2285,8 @@ func _mk_mini(def: Dictionary, played: bool) -> Control:
 func _update_cursor() -> void:
 	var arm: Dictionary = _armed_def()
 	var needs_target: bool = arm.get("target", "") in ["enemy", "ally", "ally_or_enemy"]
-	var targeting: bool = phase == "playerTurn" and selected_uid != "" and needs_target
+	# An armed POWER aims with the same reticle as an armed card — it is the same gesture.
+	var targeting: bool = phase == "playerTurn" and ((selected_uid != "" and needs_target) or power_armed)
 	if targeting == _cursor_on:
 		return
 	_cursor_on = targeting
