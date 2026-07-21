@@ -29,3 +29,7 @@ user://*.png
 /screenshots/
 
 # NOTE: export_presets.cfg IS committed (CI needs the Web preset) — it is intentionally not ignored.
+
+# Research artifacts — internal reference only, never shipped (third-party product UI)
+visual-corpus/
+scholar-build/
