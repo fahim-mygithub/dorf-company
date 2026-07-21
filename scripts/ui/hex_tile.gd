@@ -5,12 +5,12 @@ extends Control
 ## objective affordance). Purely visual; the owner wires input and content labels.
 
 var radius := 50.0
-var lift := 6.0                          # bevel thickness below the top face
+var lift := 8.0                          # bevel thickness below the top face — a chunkier board piece
 var flat := false                        # walls: no thickness, sits IN the board
 var fill := Color(0.24, 0.26, 0.24)
-var side := Color(0.09, 0.09, 0.11)
-var outline := Color(0, 0, 0, 0.55)
-var rim := Color(1, 1, 1, 0.10)
+var side := Color(0.13, 0.08, 0.05)      # walnut edge: the tiles read as carved wooden pieces on felt
+var outline := Color(0, 0, 0, 0.60)
+var rim := Color(1.0, 0.93, 0.78, 0.16)  # warm light catching the two upper edges
 var ring := Color(0, 0, 0, 0)            # ring base color; alpha comes from ring_alpha
 var hoverable := false
 

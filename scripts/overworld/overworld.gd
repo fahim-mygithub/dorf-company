@@ -15,7 +15,7 @@ const HexTile := preload("res://scripts/ui/hex_tile.gd")
 
 # ============================================================ Economy (tunable)
 const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
-                              # LONGER reach month 12 solvent — the fee now forces greedier jobs (A1/A2).
+							  # LONGER reach month 12 solvent — the fee now forces greedier jobs (A1/A2).
 const FEE_BASE := 55          # rent is now MONTHLY (a month holds up to 3 campaigns), so a higher base
 const FEE_STEP := 10          # fee rises this much each month
 const FEE_PERIOD := 1         # rent due EVERY month
@@ -80,8 +80,8 @@ const HEX_COLS := 6                # offset-hex grid width  (border cols are wal
 const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
 const HEX_R := 50.0                # pointy-top hex radius (px): width = R*sqrt(3), row pitch = R*1.5
 const DANGER_STEP := 0.21         # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.21/1.42)
-                                  # 0.30->0.225->0.21 (scaling audit v2/v3): at 0.30 the d3 band was a
-                                  # 0%-win wall; 0.21 lifts every worst-corner comp past the >=2% gate
+								  # 0.30->0.225->0.21 (scaling audit v2/v3): at 0.30 the d3 band was a
+								  # 0%-win wall; 0.21 lifts every worst-corner comp past the >=2% gate
 const HEX_POST_FIGHT_HEAL := 5    # living crew patch up after a WON combat hex — chains were pure attrition
 const DS_SUCCESS_NEEDED := 3       # death saves: 3 successes -> stable (benched, lives)
 const DS_FAIL_NEEDED := 3          # 3 failures -> dead (LOSS_ENABLED path)
@@ -163,6 +163,7 @@ var exp_contract: Dictionary = {}   # the contract being run as an expedition
 var exp_crew: Array = []            # the fixed 3 crew dwarves for this expedition
 var hexes: Dictionary = {}          # "col,row" -> hex dict (offset coords; kind/danger/resolved/objective)
 var hex_cur := ""                   # current hex key
+var hex_sel := ""                   # LOCAL preview target (the tile whose Writ is open) — never networked
 var exp_loot_gold := 0              # side-gold collected this expedition (paid out on extract/rescue)
 var hex_loot: Array = []            # card ids offered on a reward tile
 var hex_loot_pick := -1
@@ -1305,6 +1306,7 @@ func _open_expedition(c: Dictionary) -> void:
 	exp_crew = c["crew"].duplicate()   # shallow: elements are the roster dicts (carried HP/status persists)
 	carried = []
 	exp_loot_gold = 0
+	hex_sel = ""
 	for d in exp_crew:                 # reset per-expedition death-save state; carried HP stays as-is
 		d["downed"] = false
 		d["stable"] = false
@@ -1441,20 +1443,28 @@ func _hex_px(cc: int, rr: int) -> Vector2:
 	return Vector2(x0 + w * (float(cc) + 0.5 * float(rr & 1)), 300.0 + HEX_R * 1.5 * float(rr))
 
 func _build_hexcrawl() -> void:
+	# A preview that is no longer a reachable neighbour (we moved, or state changed) is stale — drop it.
+	if hex_sel != "" and not (hexes.has(hex_sel) and _hex_neighbors(hex_cur).has(hex_sel)):
+		hex_sel = ""
 	_mklabel("— EXPEDITION —", Vector2(0, 168), Vector2(720, 26), 20, screen_root)
 	var c := exp_contract
 	var modtxt: String = ("  ·  %s %s" % [c["mod"]["emoji"], c["mod"]["name"]]) if c.has("mod") else ""
 	_mklabel("%s  ·  %s%s" % [c["title"], c["loc_name"], modtxt], Vector2(0, 196), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	_mklabel("Route to 🏁 the captive. Icons hint the tile; ☠ = how tough. Detour for loot if you dare.", Vector2(0, 220), Vector2(720, 18), 12, screen_root, true, Color(0.7, 0.7, 0.75))
-	# war-table backdrop: the board sits on a dark framed panel instead of floating
-	_rect(Vector2(48, 240), Vector2(624, 432), Color(0.05, 0.06, 0.08), screen_root)
-	_rect(Vector2(48, 240), Vector2(624, 2), Color(0.72, 0.58, 0.30, 0.30), screen_root)
-	_rect(Vector2(48, 670), Vector2(624, 2), Color(0.72, 0.58, 0.30, 0.30), screen_root)
-	_rect(Vector2(48, 240), Vector2(2, 432), Color(0.72, 0.58, 0.30, 0.30), screen_root)
-	_rect(Vector2(670, 240), Vector2(2, 432), Color(0.72, 0.58, 0.30, 0.30), screen_root)
+	# Diorama backdrop: a felt playmat set into a walnut table — the board is a physical thing.
+	_rect(Vector2(40, 240), Vector2(640, 440), Color(0.17, 0.11, 0.06), screen_root)   # walnut table frame
+	_rect(Vector2(44, 244), Vector2(632, 432), Color(0.10, 0.07, 0.04), screen_root)   # inner shadow lip
+	_rect(Vector2(52, 250), Vector2(616, 420), Color(0.09, 0.20, 0.15), screen_root)   # green felt playmat
+	# brass edging on the wood frame
+	_rect(Vector2(48, 246), Vector2(624, 2), Color(0.82, 0.66, 0.36, 0.60), screen_root)
+	_rect(Vector2(48, 672), Vector2(624, 2), Color(0.82, 0.66, 0.36, 0.45), screen_root)
+	_rect(Vector2(48, 246), Vector2(2, 428), Color(0.82, 0.66, 0.36, 0.45), screen_root)
+	_rect(Vector2(670, 246), Vector2(2, 428), Color(0.82, 0.66, 0.36, 0.45), screen_root)
 	for k in hexes:
 		_build_hex_tile(k)
+	_build_party_tokens()
 	_build_exp_crew_strip()
+	_build_writ()
 	_mklabel("loot bag  +%dg  ·  🏁 the rescue pays the real money" % exp_loot_gold, Vector2(24, 1112), Vector2(430, 18), 12, screen_root, false, Color(0.85, 0.8, 0.55))
 	var ex := Button.new()
 	ex.text = "🏳️ Extract (+%dg)" % exp_loot_gold
@@ -1505,6 +1515,8 @@ func _build_hex_tile(key: String) -> void:
 		tile.ring = Color(C_COIN.r, C_COIN.g, C_COIN.b, 0.95)
 	elif can_move:
 		tile.ring = Color(C_AMBER.r, C_AMBER.g, C_AMBER.b, 0.80)
+	if key == hex_sel:
+		tile.ring = Color(1, 1, 1, 0.95)                    # the tile you're reading the Writ for
 	screen_root.add_child(tile)
 	var glyph := ""
 	if wall:
@@ -1536,16 +1548,68 @@ func _build_hex_tile(key: String) -> void:
 			sk += "☠"
 		_mklabel(sk, Vector2(0, sz.y * 0.5 + 12), Vector2(sz.x, 16), 12, tile, true, Color(0.95, 0.5, 0.5))
 
-func _build_exp_crew_strip() -> void:
-	_mklabel("crew", Vector2(0, 716), Vector2(720, 18), 12, screen_root, true, Color(0.8, 0.8, 0.85))
-	var n := exp_crew.size()
-	var startx := 360 - (n - 1) * 120
+## Diorama: the crew stand on their tile as coin-metal tokens (steel / gold / arcane), with a
+## translucent ghost token on the tile whose Writ is open — the proposed next step made physical.
+func _build_party_tokens() -> void:
+	if not hexes.has(hex_cur):
+		return
+	var cur_px := _hex_px(int(hexes[hex_cur]["q"]), int(hexes[hex_cur]["r"]))
+	# Lay the cluster out FROM the crew size — co-op seats up to 4, and a hardcoded 3-slot ring put
+	# the fourth dwarf exactly on top of the first.
+	var n: int = exp_crew.size()
+	var r: float = 12.0 if n <= 3 else 9.0
+	var spread: float = 17.0 if n <= 3 else 24.0
 	for i in range(n):
-		_build_exp_crew_token(exp_crew[i], startx + i * 240, 800)
+		var t: float = 0.0 if n <= 1 else (float(i) / float(n - 1)) * 2.0 - 1.0   # -1 .. 1 across the tile
+		_coin_token(cur_px + Vector2(t * spread, 14.0 - absf(t) * 4.0), _class_col(str(exp_crew[i]["cls"])), r, false)
+	if hex_sel != "" and hexes.has(hex_sel):
+		_coin_token(_hex_px(int(hexes[hex_sel]["q"]), int(hexes[hex_sel]["r"])), Color(0.92, 0.90, 0.96), 10.0, true)
+
+func _coin_token(center: Vector2, col: Color, r: float, ghost: bool) -> void:
+	var p := Panel.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(col.r, col.g, col.b, 0.45) if ghost else col
+	sb.set_corner_radius_all(int(r))
+	sb.set_border_width_all(2)
+	sb.border_color = Color(1, 1, 1, 0.55) if ghost else Color(0, 0, 0, 0.55)
+	if not ghost:
+		sb.shadow_color = Color(0, 0, 0, 0.5)
+		sb.shadow_size = 3
+		sb.shadow_offset = Vector2(0, 2)
+	p.add_theme_stylebox_override("panel", sb)
+	p.position = center - Vector2(r, r)
+	p.size = Vector2(r * 2.0, r * 2.0)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen_root.add_child(p)
+
+func _build_exp_crew_strip() -> void:
+	# No "crew" caption: the coin cards sit directly under the board and are opaque, so a label in the
+	# gap is drawn over anyway. Spacing scales with n — co-op seats up to 4, and a fixed 240 pitch
+	# threw the outer cards off a 720-wide screen.
+	var n := exp_crew.size()
+	var gap: float = minf(240.0, 690.0 / float(maxi(n, 1)))
+	var startx: float = 360.0 - (float(n) - 1.0) * gap * 0.5
+	for i in range(n):
+		_build_exp_crew_token(exp_crew[i], int(roundf(startx + float(i) * gap)), 758)
 
 func _build_exp_crew_token(d: Dictionary, cx: int, cy: int) -> void:
 	var col: Color = _class_col(str(d["cls"]))
-	_rect(Vector2(cx - 66, cy - 66), Vector2(132, 168), Color(col.r, col.g, col.b, 0.16), screen_root)
+	# Diorama: each dwarf is a coin-metal card struck in their class metal (same language as power_orb.gd).
+	var card := Panel.new()
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color(0.13, 0.11, 0.09, 0.96)
+	cs.set_corner_radius_all(10)
+	cs.set_border_width_all(2)
+	cs.border_color = Color(col.r, col.g, col.b, 0.90)
+	cs.shadow_color = Color(0, 0, 0, 0.45)
+	cs.shadow_size = 4
+	cs.shadow_offset = Vector2(0, 3)
+	card.add_theme_stylebox_override("panel", cs)
+	card.position = Vector2(cx - 66, cy - 66)
+	card.size = Vector2(132, 168)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen_root.add_child(card)
+	_rect(Vector2(cx - 56, cy - 58), Vector2(112, 3), Color(col.r, col.g, col.b, 0.55), screen_root)   # rim accent
 	var emo := _mkemoji(Vector2(cx, cy - 28), Vector2(96, 70), 44, screen_root)
 	emo.text = Db.CLASSES[d["cls"]]["emoji"]
 	var dead: bool = d["status"] == "lost"
@@ -1573,16 +1637,170 @@ func _build_exp_crew_token(d: Dictionary, cx: int, cy: int) -> void:
 		_rect(Vector2(cx - 42, cy + 44), Vector2(84 * frac, 9), hpcol, screen_root)
 		_mklabel("%d/%d" % [int(d["hp"]), int(d["max_hp"])], Vector2(cx - 66, cy + 56), Vector2(132, 16), 11, screen_root, true, hpcol)
 
+# ---------------------------------------------------------- The Writ (consequence readout)
+## What a tile costs and pays, in plain words, BEFORE you commit — the gap every hex-crawl fills and
+## Dorf did not. Reads from state (hex_sel, or the open hex ring), so a client draws the same panel.
+func _hex_stakes(h: Dictionary) -> Dictionary:
+	var kind: String = str(h.get("kind", ""))
+	var dgr: int = int(h.get("danger", 0))
+	var out: Dictionary = {"kind": kind, "danger": dgr, "title": "", "lines": []}
+	# A cleared tile has nothing left to pay or cost — _enter_hex gates EVERY payload on `resolved`,
+	# and the tile itself already shows ✔️ with no ☠. Backtracking must not re-advertise the fight.
+	if bool(h.get("resolved", false)) and kind != "objective":
+		out["title"] = "Ground you already hold"
+		out["lines"] = [["", "cleared — the step costs only time"]]
+		return out
+	match kind:
+		"combat":
+			out["title"] = "Contested ground"
+			out["lines"] = [["danger", ("☠".repeat(dgr)) if dgr > 0 else "—"],
+				["win", "the crew patches +%d HP" % HEX_POST_FIGHT_HEAL],
+				["lose", "a dwarf hauled to the wagon"]]
+		"reward":
+			out["title"] = "A cache"
+			out["lines"] = [["take", "coin for the bag, or a card to learn"]]
+		"event":
+			out["title"] = "A sealed door"
+			out["lines"] = [["choice", "force it for coin (risk), or play it safe"]]
+		"objective":
+			out["title"] = "The captive"
+			out["lines"] = [["rescue", "the real payout — and the run ends here"]]
+		_:
+			out["title"] = "A quiet passage"
+			out["lines"] = [["", "nothing waiting"]]
+	return out
+
+## 8-wind bearing from one tile to another, off pixel positions (avoids offset-coord headaches).
+func _hex_bearing(from_key: String, to_key: String) -> String:
+	if not hexes.has(from_key) or not hexes.has(to_key):
+		return ""
+	var a := _hex_px(int(hexes[from_key]["q"]), int(hexes[from_key]["r"]))
+	var b := _hex_px(int(hexes[to_key]["q"]), int(hexes[to_key]["r"]))
+	var d := b - a
+	if d.length() < 0.5:
+		return ""
+	var idx: int = int(round(rad_to_deg(atan2(-d.y, d.x)) / 45.0)) % 8   # screen-y is down; flip for north
+	if idx < 0:
+		idx += 8
+	return ["E", "NE", "N", "NW", "W", "SW", "S", "SE"][idx]
+
+func _build_writ() -> void:
+	# YOUR pick outranks the open plan. Proposing a different tile REPLACES that proposal and resets
+	# its ayes (see _ring_intent) — that is the only way the crew can change its mind, and it also
+	# stops the board (white ring + ghost token, both keyed off hex_sel) contradicting this button.
+	var wkey := ""
+	if hex_sel != "" and hexes.has(hex_sel) and _hex_neighbors(hex_cur).has(hex_sel):
+		wkey = hex_sel
+	elif not ring.is_empty() and str(ring.get("kind", "")) == "hex" and hexes.has(str(ring.get("arg", ""))):
+		wkey = str(ring["arg"])
+	if wkey == "":
+		return
+	var h: Dictionary = hexes[wkey]
+	var st: Dictionary = _hex_stakes(h)
+	var bearing: String = _hex_bearing(hex_cur, wkey)
+	# Layout budget: the co-op crew_bar is fixed chrome at y1006..1080, so the Writ must land above it
+	# — same geometry in SOLO (where the bar is hidden) so the screen never shifts between modes.
+	var px := 40.0
+	var py := 872.0
+	var pw := 640.0
+	var ph := 128.0
+	# An aged-paper contract laid on the table, sealed in wax.
+	_rect(Vector2(px + 5, py + 7), Vector2(pw, ph), Color(0, 0, 0, 0.38), screen_root)        # drop shadow
+	_rect(Vector2(px, py), Vector2(pw, ph), Color(0.88, 0.83, 0.68), screen_root)             # parchment
+	_rect(Vector2(px, py), Vector2(pw, 3), Color(0.74, 0.66, 0.48), screen_root)              # worn top edge
+	_rect(Vector2(px, py + ph - 3), Vector2(pw, 3), Color(0.74, 0.66, 0.48), screen_root)     # worn bottom edge
+	_rect(Vector2(px + 14, py - 10), Vector2(104, 22), Color(0.49, 0.16, 0.13), screen_root)  # wax tab
+	_mklabel("THE WRIT", Vector2(px + 14, py - 9), Vector2(104, 20), 11, screen_root, true, Color(0.96, 0.90, 0.78))
+	var head: String = str(st["title"])
+	if bearing != "":
+		head += "   ·   1 hex %s" % bearing
+	_mklabel(head, Vector2(px + 18, py + 18), Vector2(pw - 36, 26), 20, screen_root, false, Color(0.20, 0.14, 0.07))
+	var ly := py + 48
+	for pair: Array in (st["lines"] as Array):
+		var lab: String = str(pair[0])
+		var val: String = str(pair[1])
+		var ink := Color(0.34, 0.26, 0.14)
+		if lab == "danger":
+			# ☠ is a COLR/CPAL emoji and the fonts import with modulate_color_glyphs=false, so
+			# font_color CANNOT tint it — it always paints its own pale palette, which is ~1:1 against
+			# parchment. Back the row with a dark chip so the skulls actually read.
+			_rect(Vector2(px + 14, ly - 3), Vector2(168, 22), Color(0.16, 0.13, 0.09, 0.92), screen_root)
+			ink = Color(0.93, 0.90, 0.82)
+		_mklabel(("%s:  %s" % [lab, val]) if lab != "" else val, Vector2(px + 18, ly), Vector2(356, 18), 13, screen_root, false, ink)
+		ly += 22
+	# Commit lives on the Writ, not the tile: a mis-tap on the board only ever changes what you read.
+	var on_this: bool = not ring.is_empty() and str(ring.get("kind", "")) == "hex" and str(ring.get("arg", "")) == wkey
+	var ayed: bool = on_this and (ring["ayes"] as Array).has(my_seat)
+	var bx := px + pw - 262
+	# Vote pips: one coin per required seat, struck in that seat's metal, lit when they have ayed.
+	if mode != Mode.SOLO and on_this:
+		var req: Array = ring["required"]
+		var ayes: Array = ring["ayes"]
+		var sx := bx + (246.0 - float(req.size()) * 20.0) * 0.5
+		for i in range(req.size()):
+			var seat: int = int(req[i])
+			var scol: Color = _class_col(str(roster[seat].get("cls", "warrior"))) if seat < roster.size() else Color(0.60, 0.60, 0.65)
+			var lit: bool = ayes.has(seat)
+			_coin_token(Vector2(sx + float(i) * 20.0 + 10.0, py + 56), scol if lit else Color(scol.r * 0.40, scol.g * 0.40, scol.b * 0.45), 7.0, not lit)
+	if mode != Mode.SOLO and ayed:
+		_mklabel("proposed — waiting for the crew", Vector2(bx, py + ph - 46), Vector2(246, 20), 13, screen_root, true, Color(0.42, 0.30, 0.14))
+		return
+	var b := Button.new()
+	var ring_hex: String = str(ring.get("arg", "")) if (not ring.is_empty() and str(ring.get("kind", "")) == "hex") else ""
+	if mode == Mode.SOLO:
+		b.text = "MARCH ->"
+	else:
+		b.text = "COUNTER-PROPOSE" if (ring_hex != "" and ring_hex != wkey) else "PROPOSE THE MARCH"
+	b.add_theme_font_size_override("font_size", 18)
+	b.position = Vector2(bx, py + ph - 58)
+	b.size = Vector2(246, 48)
+	b.disabled = busy
+	b.add_theme_stylebox_override("normal", _wax_style(Color(0.49, 0.16, 0.13)))
+	b.add_theme_stylebox_override("hover", _wax_style(Color(0.61, 0.23, 0.18)))
+	b.add_theme_stylebox_override("pressed", _wax_style(Color(0.37, 0.11, 0.09)))
+	b.add_theme_stylebox_override("disabled", _wax_style(Color(0.32, 0.26, 0.22)))
+	b.add_theme_color_override("font_color", Color(0.96, 0.90, 0.78))
+	b.add_theme_color_override("font_hover_color", Color(1.0, 0.97, 0.90))
+	b.pressed.connect(_commit_hex.bind(wkey))
+	screen_root.add_child(b)
+
+## Wax-seal button face (fresh box per state — duplicating a StyleBox loses its static type).
+func _wax_style(bg: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.set_corner_radius_all(5)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(0.30, 0.09, 0.07)
+	return sb
+
 # ---------------------------------------------------------- Hex movement + resolution
+## Tap a reachable tile to PREVIEW it (open its Writ). Committing is the Writ's button, so a mis-tap
+## on the board only ever changes what you're reading — it never marches.
 func _on_hex_input(event: InputEvent, key: String) -> void:
 	if busy or state != "HEX":
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if hexes[key]["kind"] != "wall" and _hex_neighbors(hex_cur).has(key):
-			if mode != Mode.SOLO:
-				_intent("hex", key)   # pushing deeper risks everyone — the whole crew has to agree
-				return
-			await _enter_hex(key)
+			hex_sel = key
+			_clear_screen()
+			_build_hexcrawl()
+			_refresh_hud()
+
+## Fire the previewed move: SOLO steps in; co-op puts it to the crew as a ring proposal.
+func _commit_hex(key: String) -> void:
+	if busy or state != "HEX":
+		return
+	if not hexes.has(key) or str(hexes[key]["kind"]) == "wall" or not _hex_neighbors(hex_cur).has(key):
+		return
+	if mode != Mode.SOLO:
+		_intent("hex", key)   # pushing deeper risks everyone — the whole crew has to agree
+		if state == "HEX" and not busy:
+			_clear_screen()
+			_build_hexcrawl()
+			_refresh_hud()
+		return
+	hex_sel = ""
+	await _enter_hex(key)
 
 ## The 🚩 marching between two tiles. PURE cosmetic: it moves a throwaway token and never touches
 ## hex_cur, which is exactly what lets a client replay it against a board it has already rendered.
@@ -2291,7 +2509,10 @@ func _apply_snap(s: Dictionary) -> void:
 	selected_contract = int(s.get("selected_contract", -1))
 	shop_stock = _norm(s.get("shop_stock", []))
 	hexes = _norm(s.get("hexes", {}))
+	var prev_cur := hex_cur
 	hex_cur = str(s.get("hex_cur", ""))
+	if hex_cur != prev_cur:
+		hex_sel = ""   # the board moved under us (or a new expedition started) — a stale preview isn't mine to keep
 	exp_contract = _norm(s.get("exp_contract", {}))
 	exp_loot_gold = int(s.get("exp_loot_gold", 0))
 	hex_loot = _norm(s.get("hex_loot", []))
