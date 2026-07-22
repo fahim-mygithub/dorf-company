@@ -12,6 +12,8 @@ extends Control
 const Db := preload("res://scripts/combat/card_db.gd")
 const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
 const HexTile := preload("res://scripts/ui/hex_tile.gd")
+const WritScene := preload("res://scripts/ui/writ_scene.gd")
+const TutorialScript := preload("res://scripts/overworld/tutorial_summoning.gd")
 
 # ============================================================ Economy (tunable)
 const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
@@ -49,18 +51,26 @@ const CLASS_REWARDS := {
 }
 # Phase 5: contract modifiers — one data tag reshapes BOTH the job offer (payout) and the fight
 # (enemy scale), so "which job" carries more variety from the same 3 enemies. Cheapest recomb axis.
-const MODIFIERS := [
-	{"key": "elite",     "name": "Elite",     "emoji": "👑", "scale": 1.50, "pay": 1.3, "tip": "A champion leads them — much tougher, pays more."},
-	{"key": "lucrative", "name": "Lucrative", "emoji": "💰", "scale": 1.10, "pay": 1.7, "tip": "A rich contract — big payout, only a touch harder."},
-	{"key": "grim",      "name": "Grim",      "emoji": "💀", "scale": 1.25, "pay": 1.15, "tip": "Something worse waits below — harder, a little more coin."},
+## A hazard belongs to a ZONE for the day, not to one job — every contract posted in the Warrens
+## carries the Warrens' hazard. That is what makes the zone the first decision on the board: not
+## "which job" but "where is it safe to work today". It is stored on each contract under the SAME
+## `mod` key the per-contract modifier used, so every downstream reader (payout, enemy scale, the
+## Writ) is unchanged.
+const ZONE_HAZARDS := [
+	{"key": "clear",     "name": "Clear",     "emoji": "🌤️", "scale": 1.00, "pay": 1.00, "tip": "Quiet today. Nothing the crew has not handled before."},
+	{"key": "elite",     "name": "Warband",   "emoji": "👑", "scale": 1.50, "pay": 1.30, "tip": "A champion is abroad — much tougher, pays more."},
+	{"key": "lucrative", "name": "Rich Seam", "emoji": "💰", "scale": 1.10, "pay": 1.70, "tip": "Word of a rich seam — big payout, only a touch harder."},
+	{"key": "grim",      "name": "Grim",      "emoji": "💀", "scale": 1.25, "pay": 1.15, "tip": "Something worse has moved in — harder, a little more coin."},
+	{"key": "flooded",   "name": "Flooded",   "emoji": "🌊", "scale": 1.15, "pay": 1.10, "tip": "The low runs are underwater. Slow going, mean fights."},
+	{"key": "fogbound",  "name": "Fogbound",  "emoji": "🌫️", "scale": 1.05, "pay": 1.25, "tip": "You cannot see a hand ahead — but neither can they."},
 ]
-const MOD_CHANCE := 0.45
+const CONTRACTS_POSTED := 6   # spread over 4 zones, so a zone can hold 0-3 and clustering is real
 const DWARF_STRENGTH := 3     # flat in MVP (class only drives emoji/color)
 
 const DANGER := {"low": 8, "med": 13, "high": 15}     # crew_strength + 2d6 must reach this
 const PAYOUT := {"low": 25, "med": 80, "high": 100}   # low 30->25 (Phase 0): safe grind now insufficient
 const DURATION := {"low": 1, "med": 2, "high": 1}
-const CREW_SIZE := {"low": 1, "med": 3, "high": 3}    # low = crew_size-1 lifeline
+const CREW_SIZE := {"low": 2, "med": 3, "high": 3}    # low was 1 while it was a dice roll; it is a real expedition now
 const WOUND_CHANCE := {"low": 0.05, "med": 0.20, "high": 0.35}
 const LOSS_CHANCE := {"low": 0.0, "med": 0.04, "high": 0.12}
 const FAILURE_PAYOUT_MULT := 0.5
@@ -78,6 +88,13 @@ const USE_REAL_COMBAT := true # Phase 1 mesh: the top size-3 (High) contract lau
 const EXPEDITIONS := true          # Med/High fight contracts open an expedition (not one fight).
 const HEX_COLS := 6                # offset-hex grid width  (border cols are wall)
 const HEX_ROWS := 5                # offset-hex grid height (border rows are wall) -> 4x3 = 12 passable
+## Board size per tier. Low is a SHORT expedition rather than a dice roll: a real map with real
+## attrition, but half the tiles, so it stays the cheap job that makes rent without costing the same
+## real time as a Deep Delve.
+const HEX_DIMS := {"low": Vector2i(6, 4), "med": Vector2i(6, 5), "high": Vector2i(6, 5)}
+## You may only walk out at a marked 🏳️ point (or by finishing the job). Fewer of them deeper in the
+## danger band is the whole cost of a High contract: the exits thin out as the job gets worse.
+const EXTRACT_POINTS := {"low": 2, "med": 2, "high": 1}
 const HEX_R := 50.0                # pointy-top hex radius (px): width = R*sqrt(3), row pitch = R*1.5
 const DANGER_STEP := 0.21         # combat enemy_scale = 1 + (danger-1)*step  (danger 1/2/3 -> 1.0/1.21/1.42)
 								  # 0.30->0.225->0.21 (scaling audit v2/v3): at 0.30 the d3 band was a
@@ -195,7 +212,10 @@ const STABLE_HP_FRAC := 0.25  # a dwarf who survives their death saves comes hom
 const HELLO_SEC := 3.0        # client heartbeat
 const ABSENT_SEC := 12.0      # silent this long and the seat stops blocking the ring (AFK escape hatch)
 const INTENT_RETRY_SEC := 1.2 # broadcast is fire-and-forget: keep knocking until the host acks
-const RING_KINDS := ["embark", "hex", "extract", "event", "endmonth"]
+## Every shared consequence is the table's. `loot` joined because a card leaving the tile is company
+## property being assigned, and `restart` because one seat wiping the company for everyone was the
+## single most destructive un-voted action on the board.
+const RING_KINDS := ["embark", "hex", "extract", "event", "endmonth", "loot", "loot_skip", "restart", "hire"]
 
 var mode: int = Mode.SOLO
 var request: Dictionary = {}     # lobby/harness handoff; set BEFORE add_child (parsed in _ready)
@@ -204,6 +224,7 @@ var seat_count := 1
 var seats: Array = []            # [{name, cls, present}] — seat i pilots roster[i], for the whole campaign
 var ring: Dictionary = {}        # the open proposal: {pid, kind, arg, by, required:[seat], ayes:[seat]}
 var carried: Array = []          # co-op: the fallen, riding the wagon, still rolling death saves
+var crew_claim: Array = []       # co-op: seat i -> roster index it has claimed for the next job (-1 = none)
 var fight_req: Dictionary = {}   # non-empty = a fight is live; the host-rolled request EVERY peer runs
 var outcome: Dictionary = {}     # view-model for the OUTCOME screen (clients can't replay the beats)
 var over_kind := ""              # GAMEOVER reason, replicated
@@ -224,6 +245,8 @@ var _cur_fid := 0
 
 # ============================================================ UI refs
 var crew_bar: Control            # co-op: the seat pips + the open proposal (chrome; survives _clear_screen)
+var writ: Control                # THE SUMMONING and any future cutscene (chrome, topmost, modal)
+var _tut_done := false           # per NODE, so a restart never replays it but a fresh campaign does
 var screen_root: Control
 var hud: Control
 var overlay: ColorRect
@@ -238,6 +261,8 @@ var hud_fee: Label
 var hud_next: Label
 var hud_month: Label
 var fee_pips: Array = []
+var hud_endmonth: Button            # lives in the HUD, under the pips it spends
+var sheet: Control                  # chrome: the open venue sub-menu (see "Venue sub-menus")
 var continue_btn: Button
 var hex_flag: Label                 # the current-tile 🚩 glyph; hidden while the move token animates
 
@@ -372,6 +397,22 @@ func _build_chrome() -> void:
 	crew_bar.visible = mode != Mode.SOLO
 	add_child(crew_bar)
 
+	# The venue sub-menu. Chrome for the same reason crew_bar is: _clear_screen must not take it, and
+	# a CLIENT's per-snapshot _render must not blink it away while someone is reading it.
+	sheet = Control.new()
+	sheet.size = Vector2(720, 1280)
+	sheet.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sheet.visible = false
+	add_child(sheet)
+
+	# Added LAST so it is topmost. It is full-screen MOUSE_FILTER_STOP while visible, which is what
+	# makes a focus beat safe: the highlighted control shows through the scrim hole but cannot be
+	# pressed. Sibling of screen_root, so _clear_screen and a client's _render never touch it.
+	writ = WritScene.new()
+	writ.visible = false
+	writ.finished.connect(_on_writ_finished)
+	add_child(writ)
+
 func _on_overlay_btn() -> void:
 	if mode == Mode.CLIENT:
 		_intent("restart", "")
@@ -393,9 +434,20 @@ func _build_hud() -> void:
 	hud_next.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	fee_pips = []
 	for j in range(CAMPAIGNS_PER_MONTH):
-		fee_pips.append(_rect(Vector2(500 + j * 26, 86), Vector2(20, 18), C_GREEN, hud))
-	_mklabel("jobs left", Vector2(490, 108), Vector2(140, 16), 11, hud, false, Color(0.7, 0.7, 0.75))
-	hud_month = _mklabel("", Vector2(260, 120), Vector2(200, 24), 15, hud)
+		fee_pips.append(_rect(Vector2(500 + j * 26, 82), Vector2(20, 16), C_GREEN, hud))
+	_mklabel("jobs left", Vector2(490, 100), Vector2(140, 14), 11, hud, false, Color(0.7, 0.7, 0.75))
+	# End Month sits directly under the jobs-left pips because it is the same fact from the other
+	# side: the pips say how many jobs are left, this button spends every one of them at once. It is
+	# HUD chrome, so it survives _clear_screen and _refresh_hud alone decides where it belongs.
+	# Deliberately not a big target — ending early forfeits the rest of the month.
+	hud_endmonth = Button.new()
+	hud_endmonth.text = "⏭️ End Month"
+	hud_endmonth.add_theme_font_size_override("font_size", 15)
+	hud_endmonth.position = Vector2(468, 118)
+	hud_endmonth.size = Vector2(228, 34)
+	hud_endmonth.pressed.connect(_on_rest)
+	hud.add_child(hud_endmonth)
+	hud_month = _mklabel("", Vector2(240, 120), Vector2(200, 24), 15, hud)
 
 # ============================================================ HUD refresh
 func _band_for(v: int) -> Color:
@@ -425,6 +477,10 @@ func _refresh_hud() -> void:
 	hud_fee.add_theme_color_override("font_color", C_RED if treasury < fee else Color(0.9, 0.9, 0.9))
 	hud_next.text = "next  %dg" % (fee + FEE_STEP)
 	hud_month.text = "Month %d / %d" % [month, WIN_MONTH]
+	if is_instance_valid(hud_endmonth):
+		# Only the town can end a month. Every other screen is inside something you already started.
+		hud_endmonth.visible = state == "DASHBOARD"
+		hud_endmonth.disabled = busy
 	for j in range(fee_pips.size()):
 		var p: ColorRect = fee_pips[j]
 		p.color = C_GREEN if j < campaigns_left else Color(0.25, 0.25, 0.3)
@@ -446,6 +502,8 @@ func _new_run() -> void:
 	selected_contract = -1
 	ring = {}
 	carried = []
+	crew_claim = []
+	_ensure_claims()
 	fight_req = {}
 	outcome = {}
 	over_kind = ""
@@ -465,6 +523,53 @@ func _new_run() -> void:
 	overlay.visible = false
 	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
 	_enter_dashboard()
+	_maybe_play_tutorial()
+
+# ============================================================ THE SUMMONING (opening cutscene)
+## Plays once when a fresh campaign opens. NOT awaited and NOT networked: the scene is linear, so
+## it has no shared state to agree on — every peer runs all 28 beats locally at its own reading
+## pace. The dashboard is already built underneath; the writ layer is modal, so nothing can be
+## touched until it finishes. Add a choice here and you inherit the ring, the pips and the deadlock
+## timer along with it.
+func _maybe_play_tutorial() -> void:
+	if _tut_done or not is_instance_valid(writ):
+		return
+	_tut_done = true
+	writ.play(TutorialScript.beats(), _writ_ctx())
+
+func _on_writ_finished() -> void:
+	_refresh_hud()
+
+## `@us` — resolved PER CLIENT, never sent. Solo has no single avatar (you run all three dorfs),
+## so it falls back to the human manager; in co-op it is THIS seat's own dorf, which is why every
+## player sees themselves holding the resume.
+func _writ_ctx() -> Dictionary:
+	var us_name := "You"
+	var us_art := "🧍"
+	var us_metal := C_COIN
+	if mode != Mode.SOLO:
+		for d in roster:
+			if int(d.get("seat", -1)) == my_seat:
+				us_name = str(d.get("name", "You"))
+				us_art = str(Db.CLASSES[d["cls"]]["emoji"])
+				us_metal = _class_col(str(d["cls"]))
+				break
+	return {"us_name": us_name, "us_art": us_art, "us_metal": us_metal,
+		"cast": TutorialScript.CAST, "focus_rects": _focus_rects()}
+
+## Named rects rather than coordinates in the script, so a layout change moves the spotlight
+## instead of breaking it. A name with no entry here degrades to a plain un-highlighted beat,
+## which is how a beat pointing at another screen still reads.
+func _focus_rects() -> Dictionary:
+	var r := {
+		"hud_treasury": Rect2(8, 16, 300, 100),      # coin + the big number + the solvency band
+		"hud_rent": Rect2(348, 14, 292, 70),         # fee + "next due"
+	}
+	if state == "DASHBOARD":
+		r["roster"] = Rect2(30, 388, 660, 192)       # the dwarf tokens, all four columns
+		r["contract_board"] = Rect2(202, 1142, 336, 86)
+		r["end_month"] = Rect2(16, 1142, 196, 86)
+	return r
 
 ## Total by construction: a class added later renders grey instead of crashing the screen.
 func _class_col(cls: String) -> Color:
@@ -477,30 +582,45 @@ func _make_dwarf(dname: String, cls: String) -> Dictionary:
 		"deck": (Db.CLASSES[cls]["deck"] as Array).duplicate(),
 		"downed": false, "stable": false, "ds_success": 0, "ds_fail": 0}
 
+## The board is posted BY ZONE. Indices 0/1/2 are still low/med/high in that order — the co-op
+## verifier addresses contracts[2] as the heavy job and the snapshot ships the array by index — and
+## the rest fill in behind them so a zone can hold anywhere from nothing to three.
 func _regen_contracts() -> void:
-	contracts = [_make_contract("low"), _make_contract("med"), _make_contract("high")]
-	# Phase 1: the High job is a REAL fight, but only when a canonical W/C/S trio is fieldable
-	# (keeps combat's role-indexed logic valid until Phase 3 de-indexes it).
-	# Phase 3: combat is role-based (de-indexed), so ANY 3 ready dwarves can crew a fight.
-	# Co-op fields the whole table (2-4), so the "enough dwarves for a real fight" bar is the seat count.
-	var need: int = 3 if mode == Mode.SOLO else roster.size()
-	if USE_REAL_COMBAT and _ready_count() >= need:
-		contracts[1]["fight"] = true   # Med — the standard fight
-		contracts[2]["fight"] = true   # High — heavier comp + scaled (see Db.ENCOUNTERS_BY_TIER)
-		for i in [1, 2]:               # Phase 5: sometimes a modifier reshapes the fight contract
-			if randf() < MOD_CHANCE:
-				contracts[i]["mod"] = MODIFIERS[randi() % MODIFIERS.size()]
+	# One hazard per zone, rerolled with the board. Shuffled without replacement, so four zones on
+	# the same day never all read "Grim" and the map is worth looking at.
+	var hz: Array = ZONE_HAZARDS.duplicate()
+	hz.shuffle()
+	var zone_mod: Array = []
+	for i in range(LOCATIONS.size()):
+		zone_mod.append(hz[i % hz.size()])
 
-func _make_contract(tier: String) -> Dictionary:
+	var bag := ["low", "med", "high"]
+	bag.shuffle()
+	contracts = []
+	for t in ["low", "med", "high"]:
+		contracts.append(_make_contract(t, randi() % LOCATIONS.size()))
+	for i in range(CONTRACTS_POSTED - 3):
+		contracts.append(_make_contract(str(bag[i % bag.size()]), randi() % LOCATIONS.size()))
+	for c in contracts:
+		c["mod"] = zone_mod[int(c["zone"])]
+		# EVERY contract is an expedition now — the low-tier dice roll is gone, so there is no job
+		# that cannot cost you a dwarf. It still needs a crew that can actually be fielded; a company
+		# worn down below that falls back to the dice path rather than being locked off the board.
+		c["fight"] = USE_REAL_COMBAT and _ready_count() >= int(c["crew_size"])
+
+func _make_contract(tier: String, zone: int) -> Dictionary:
 	var titles: Array = TITLES[tier]
-	var loc: Dictionary = LOCATIONS[randi() % LOCATIONS.size()]
-	# Co-op: a fight contract fields EVERY seat (nobody sits a job out). Low stays the 1-dwarf
-	# dice lifeline it is in solo, so its risk/reward curve is unchanged.
+	var loc: Dictionary = LOCATIONS[zone]
+	# Co-op fields EVERY seat on every job — nobody sits an expedition out, including a Low one now
+	# that it is a real map.
 	var cs: int = int(CREW_SIZE[tier])
-	if mode != Mode.SOLO and tier != "low":
-		cs = roster.size()
+	if mode != Mode.SOLO:
+		# One body per player. It used to be the whole roster, which is only the same number while
+		# the pool cannot grow — and the pool grows now.
+		cs = maxi(1, seat_count)
 	return {
 		"tier": tier,
+		"zone": zone,
 		"title": titles[randi() % titles.size()],
 		"loc_emoji": loc["emoji"],
 		"loc_name": loc["name"],
@@ -536,6 +656,8 @@ func _enter_dashboard() -> void:
 		return
 	selected_contract = -1
 	state = "DASHBOARD"
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
+	shop_sel = -1
 	_clear_screen()
 	_build_dashboard()
 	_refresh_hud()
@@ -551,6 +673,7 @@ func _on_view_contracts() -> void:
 
 func _do_view_contracts() -> void:
 	selected_contract = -1
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
 	state = "CONTRACTS"
 	_clear_screen()
 	_build_contracts()
@@ -565,27 +688,12 @@ func _on_back_dashboard() -> void:
 	_enter_dashboard()
 
 # ============================================================ Screen: Dashboard
+## DASHBOARD is now THE TOWN. The state id is deliberately unchanged: it is on the wire in every
+## snapshot and asserted by campaign_verify, and renaming it would be a protocol change to buy
+## nothing. `_build_dwarf_token` below is kept — it already renders the field-standard roster
+## grammar and is the basis for the Ledger.
 func _build_dashboard() -> void:
-	_mklabel("— DORF & CO. —", Vector2(0, 190), Vector2(720, 30), 24, screen_root)
-	_mklabel("Your crew. Send them to make rent — or lose them.", Vector2(0, 226), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
-	_mklabel("%d campaign%s left this month · rent %dg due at month end" % [campaigns_left, "" if campaigns_left == 1 else "s", fee], Vector2(0, 256), Vector2(720, 20), 14, screen_root, true, C_AMBER if campaigns_left <= 1 else Color(0.72, 0.84, 0.95))
-	var cx := [96, 272, 448, 624]
-	for i in range(roster.size()):
-		_build_dwarf_token(roster[i], cx[i], 470)
-	var vc := Button.new()
-	vc.text = "📜  View Contracts"
-	vc.add_theme_font_size_override("font_size", 22)
-	vc.position = Vector2(210, 1150)
-	vc.size = Vector2(320, 70)
-	vc.pressed.connect(_on_view_contracts)
-	screen_root.add_child(vc)
-	var rest := Button.new()
-	rest.text = "⏭️ End Month"
-	rest.add_theme_font_size_override("font_size", 17)
-	rest.position = Vector2(24, 1150)
-	rest.size = Vector2(180, 70)
-	rest.pressed.connect(_on_rest)
-	screen_root.add_child(rest)
+	_build_town()
 
 func _build_dwarf_token(d: Dictionary, cx: int, cy: int) -> void:
 	var status: String = d["status"]
@@ -624,20 +732,148 @@ func _build_dwarf_token(d: Dictionary, cx: int, cy: int) -> void:
 			_mklabel("%d/%d" % [int(d["hp"]), int(d["max_hp"])], Vector2(cx - 58, cy + 100), Vector2(116, 16), 11, screen_root, true, hpcol)
 
 # ============================================================ Screen: Contracts
-func _build_contracts() -> void:
-	_mklabel("— CONTRACTS —", Vector2(0, 176), Vector2(720, 26), 20, screen_root)
-	_mklabel("Pick one job. Weigh payout against danger and time.", Vector2(0, 206), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
-	var xs := [12, 252, 492]
+## The Guild Hall keeps its contract cards — a contract is a document you read, not an object you
+## bump into — but the room is drawn behind them so the hall is a place you walked into.
+## THE BOARD IS A MAP. Work is posted by ZONE, so the first decision is not "which of these three
+## jobs" but "where is it safe to work today" — a pin per zone, coloured by the worst tier posted
+## there, counting what is on offer and naming the hazard that covers all of it. Tapping a pin opens
+## that zone's ledger. The hall stays visible the whole time.
+## Card centres. The top row clears the vellum's own title strip (y248..274) — the cards are 92 tall
+## and hang from centre-46, so anything above y322 runs over the heading.
+const ZONE_PIN := [Vector2(238, 332), Vector2(474, 324), Vector2(252, 452), Vector2(486, 460)]
+
+func _zone_contracts(z: int) -> Array:
+	var out: Array = []
 	for i in range(contracts.size()):
-		_build_contract_card(i, xs[i])
-	_build_shop_panel()
-	var back := Button.new()
-	back.text = "◀ Back"
-	back.add_theme_font_size_override("font_size", 18)
-	back.position = Vector2(30, 1150)
-	back.size = Vector2(150, 64)
-	back.pressed.connect(_on_back_dashboard)
-	screen_root.add_child(back)
+		if int((contracts[i] as Dictionary).get("zone", 0)) == z:
+			out.append(i)
+	return out
+
+## Every contract in a zone carries the same hazard, so the zone's hazard IS any of theirs. Deriving
+## it keeps it off the wire — a zone with no work has no hazard to state.
+func _zone_hazard(z: int) -> Dictionary:
+	for i in _zone_contracts(z):
+		return (contracts[i] as Dictionary).get("mod", {})
+	return {}
+
+## The worst tier posted in a zone. That is what the pin's colour means, because the thing you need
+## to know at a glance is whether this zone can kill you, not what the average job pays.
+func _zone_tier(z: int) -> String:
+	var worst := ""
+	for i in _zone_contracts(z):
+		var t := str(contracts[i]["tier"])
+		if t == "high" or (t == "med" and worst != "high") or worst == "":
+			worst = t
+	return worst
+
+func _build_contracts() -> void:
+	# The room prints its own title from the spec. Printing a second one here stacked two headers on
+	# the same two lines — so this one is the FALLBACK's header, and only the fallback gets it.
+	if not _build_room("guild"):
+		_build_venue_header("— THE GUILD HALL —", "Pick one job. Weigh payout against danger and time.")
+		var xs := [12, 252, 492]
+		for i in range(mini(contracts.size(), 3)):
+			_build_contract_card(i, xs[i])
+		_build_back_to_town()
+		return
+	_build_zone_map()
+	_build_back_to_town()
+
+func _build_zone_map() -> void:
+	# The cork behind the board runs x158..562 / y240..516; the vellum sits inside it.
+	_rect(Vector2(166, 248), Vector2(388, 260), Color(0.80, 0.73, 0.58), screen_root)
+	_rect(Vector2(166, 248), Vector2(388, 6), Color(0.66, 0.59, 0.45), screen_root)
+	_mklabel("THE COMPANY'S REACH", Vector2(166, 256), Vector2(388, 18), 12, screen_root, true,
+		Color(0.42, 0.35, 0.24))
+	# routes between the zones, so the map reads as places connected rather than four floating dots
+	for pair in [[0, 1], [0, 2], [1, 3], [2, 3], [0, 3]]:
+		var a: Vector2 = ZONE_PIN[pair[0]]
+		var b: Vector2 = ZONE_PIN[pair[1]]
+		var mid: Vector2 = (a + b) * 0.5
+		var d: Vector2 = (b - a)
+		var seg := ColorRect.new()
+		seg.color = Color(0.55, 0.47, 0.34, 0.55)
+		seg.size = Vector2(d.length(), 2)
+		seg.position = mid - Vector2(d.length(), 2) * 0.5
+		seg.rotation = d.angle()
+		seg.pivot_offset = Vector2(d.length(), 2) * 0.5
+		seg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		screen_root.add_child(seg)
+	for z in range(LOCATIONS.size()):
+		_build_zone_pin(z)
+
+func _build_zone_pin(z: int) -> void:
+	var idxs: Array = _zone_contracts(z)
+	var tier: String = _zone_tier(z)
+	var hz: Dictionary = _zone_hazard(z)
+	var c: Vector2 = ZONE_PIN[z]
+	var pin := Control.new()
+	pin.position = c - Vector2(66, 46)
+	pin.size = Vector2(132, 96)
+	pin.mouse_filter = Control.MOUSE_FILTER_STOP
+	pin.gui_input.connect(_on_zone_input.bind(z))
+	screen_root.add_child(pin)
+	var col: Color = DANGER_BANNER.get(tier, Color(0.52, 0.48, 0.42))
+	# A pinned card on the vellum. It carries the same brass edge every tappable thing in a room
+	# does — a zone pin is a control, so it obeys the same rule the props and the dwarves do.
+	_rect(Vector2(3, 4), Vector2(132, 92), Color(0, 0, 0, 0.42), pin)
+	_rect(Vector2.ZERO, Vector2(132, 92), Color(0.88, 0.83, 0.70), pin)
+	_rect(Vector2.ZERO, Vector2(132, 5), col, pin)
+	_mkemoji(Vector2(26, 30), Vector2(44, 40), 24, pin).text = str(LOCATIONS[z]["emoji"])
+	# the count disc, struck in the zone's WORST tier — what you need at a glance is whether this
+	# zone can kill you, not what the average job there pays
+	_rect(Vector2(84, 12), Vector2(34, 34), Color(0, 0, 0, 0.35), pin)
+	_rect(Vector2(82, 10), Vector2(34, 34), col, pin)
+	_mklabel(str(idxs.size()) if not idxs.is_empty() else "—", Vector2(82, 16), Vector2(34, 24), 17,
+		pin, true, Color(0.08, 0.07, 0.06))
+	_mklabel(str(LOCATIONS[z]["name"]), Vector2(2, 52), Vector2(128, 20), 14, pin, true,
+		Color(0.20, 0.15, 0.09) if not idxs.is_empty() else Color(0.50, 0.44, 0.35))
+	if idxs.is_empty():
+		_mklabel("no work posted", Vector2(2, 72), Vector2(128, 16), 11, pin, true, Color(0.52, 0.46, 0.36))
+	else:
+		_mklabel("%s %s" % [str(hz.get("emoji", "")), str(hz.get("name", ""))], Vector2(2, 72),
+			Vector2(128, 16), 11, pin, true, Color(0.46, 0.29, 0.10))
+	_brass_edge(pin, Vector2(132, 92))
+
+func _on_zone_input(event: InputEvent, z: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if not busy:
+			_open_sheet("zone", z)
+
+## The room chassis paints this edge round every tappable prop. A contract slip is a Control rather
+## than a spec prop, so it paints its own — same grammar, same metal, so "brass edge means you can
+## touch it" holds on both sides of the seam.
+func _brass_edge(parent: Control, sz: Vector2) -> void:
+	var b := Color(0.72, 0.55, 0.24)
+	_rect(Vector2.ZERO, Vector2(sz.x, 2), b, parent)
+	_rect(Vector2(0, sz.y - 2), Vector2(sz.x, 2), b, parent)
+	_rect(Vector2.ZERO, Vector2(2, sz.y), b, parent)
+	_rect(Vector2(sz.x - 2, 0), Vector2(2, sz.y), b, parent)
+	var hi := Color(0.91, 0.78, 0.53)
+	for c in [Vector2.ZERO, Vector2(sz.x - 16, 0), Vector2(0, sz.y - 3), Vector2(sz.x - 16, sz.y - 3)]:
+		_rect(c, Vector2(16, 3), hi, parent)
+
+## SOLO takes the job; co-op puts it to the table. The wire protocol is untouched — the first press
+## is still the free `select` that lights the job for everyone, the second is still the `embark`
+## ring that needs every present seat to agree.
+func _on_contract_take(i: int) -> void:
+	if busy or state != "CONTRACTS" or i < 0 or i >= contracts.size():
+		return
+	var c: Dictionary = contracts[i]
+	if _ready_count() < int(c["crew_size"]):
+		_msg("Not enough ready dwarves — need %d." % int(c["crew_size"]))
+		return
+	if mode != Mode.SOLO:
+		if selected_contract != i:
+			_intent("select", str(i))
+			_msg("%s is on the table — press again to call the vote." % str(c["title"]))
+			return
+		_intent("embark", str(i))
+		_close_sheet()
+		return
+	selected_contract = i
+	_close_sheet()
+	_embark()
 
 func _build_contract_card(i: int, x: int) -> void:
 	var c: Dictionary = contracts[i]
@@ -714,7 +950,7 @@ func _embark() -> void:
 	current = c
 	if USE_REAL_COMBAT and c.get("fight", false):
 		if mode != Mode.SOLO:
-			current["crew"] = roster.duplicate()   # co-op: the crew IS the table — no crew-select screen
+			current["crew"] = _crew_for_expedition()   # each seat's claim, auto-filled where unclaimed
 			_open_expedition(c)
 			return
 		if CREW_SELECT:
@@ -1359,13 +1595,14 @@ func _bfs_dist(start: String) -> void:
 ## A fixed 6x5 offset grid: border ring = impassable WALL, 4x3 = 12 passable interior.
 ## Entry at a corner, objective on the farthest passable tile (visible), rest telegraphed.
 func _gen_hex_map(_c: Dictionary) -> void:
+	var dim: Vector2i = HEX_DIMS.get(str(_c.get("tier", "med")), Vector2i(HEX_COLS, HEX_ROWS))
 	hexes = {}
-	for rr in range(HEX_ROWS):
-		for cc in range(HEX_COLS):
-			var wall: bool = cc == 0 or cc == HEX_COLS - 1 or rr == 0 or rr == HEX_ROWS - 1
+	for rr in range(dim.y):
+		for cc in range(dim.x):
+			var wall: bool = cc == 0 or cc == dim.x - 1 or rr == 0 or rr == dim.y - 1
 			hexes[_hex_key(cc, rr)] = {"q": cc, "r": rr, "kind": ("wall" if wall else "empty"),
-				"danger": 0, "resolved": wall, "objective": false, "dist": 0}
-	var entry: String = _hex_key(1, HEX_ROWS - 2)   # bottom-left interior corner
+				"danger": 0, "resolved": wall, "objective": false, "dist": 0, "extract": false}
+	var entry: String = _hex_key(1, dim.y - 2)   # bottom-left interior corner
 	hexes[entry]["kind"] = "entry"
 	hexes[entry]["resolved"] = true
 	hex_cur = entry
@@ -1383,6 +1620,33 @@ func _gen_hex_map(_c: Dictionary) -> void:
 	hexes[objk]["kind"] = "objective"
 	hexes[objk]["objective"] = true
 	hexes[objk]["resolved"] = false
+
+	# EXTRACT POINTS. You can no longer walk out from wherever you happen to be standing — leaving
+	# is a PLACE, which is what turns the board from "push until it feels dicey" into a route you
+	# commit to. They are marked from the start, like the objective, because the whole point of a
+	# visible board is that you can plan the way out before you take the first step.
+	var passable: Array = []
+	for k in hexes:
+		var hh: Dictionary = hexes[k]
+		if hh["kind"] == "wall" or k == entry or bool(hh["objective"]):
+			continue
+		passable.append(k)
+	passable.sort_custom(func(a, b): return int(hexes[a]["dist"]) < int(hexes[b]["dist"]))
+	var want: int = int(EXTRACT_POINTS.get(str(_c.get("tier", "med")), 1))
+	var picks: Array = []
+	if passable.size() > 0:
+		# One shallow bail-out, one deep. With a single point (High) you get only the deep one, so a
+		# heavy contract means committing most of the way across before there is any way home.
+		if want >= 2:
+			picks.append(passable[clampi(int(float(passable.size()) * 0.3), 0, passable.size() - 1)])
+		var deep: String = passable[clampi(int(float(passable.size()) * 0.72), 0, passable.size() - 1)]
+		if not picks.has(deep):
+			picks.append(deep)
+	for k in picks:
+		hexes[k]["kind"] = "extract"
+		hexes[k]["extract"] = true
+		hexes[k]["resolved"] = true
+
 	# assign telegraphed content to the remaining interior tiles
 	var rest: Array = []
 	for k in hexes:
@@ -1437,10 +1701,24 @@ func _living_up() -> Array:
 	return up
 
 # ---------------------------------------------------------- Hex map render
+## Board size varies by tier now, so it is DERIVED from the hexes themselves rather than read off a
+## constant. That keeps it off the wire: a client centres the board correctly from the snapshot it
+## already receives, with no new field to forget to send.
+func _hex_dims() -> Vector2i:
+	var mc := 0
+	var mr := 0
+	for k in hexes:
+		mc = maxi(mc, int(hexes[k]["q"]))
+		mr = maxi(mr, int(hexes[k]["r"]))
+	return Vector2i(mc + 1, mr + 1)
+
 func _hex_px(cc: int, rr: int) -> Vector2:
+	var dim := _hex_dims()
 	var w := HEX_R * sqrt(3.0)                                   # pointy-top hex width
-	var x0 := 360.0 - w * (float(HEX_COLS) + 0.5) * 0.5 + w * 0.5  # center the board (odd rows shove right)
-	return Vector2(x0 + w * (float(cc) + 0.5 * float(rr & 1)), 300.0 + HEX_R * 1.5 * float(rr))
+	var x0 := 360.0 - w * (float(dim.x) + 0.5) * 0.5 + w * 0.5   # center the board (odd rows shove right)
+	# A short board is centred vertically in the same felt, so a Low map does not sit high and lonely.
+	var y0 := 300.0 + (5.0 - float(dim.y)) * HEX_R * 0.75
+	return Vector2(x0 + w * (float(cc) + 0.5 * float(rr & 1)), y0 + HEX_R * 1.5 * float(rr))
 
 func _build_hexcrawl() -> void:
 	# A preview that is no longer a reachable neighbour (we moved, or state changed) is stale — drop it.
@@ -1466,14 +1744,28 @@ func _build_hexcrawl() -> void:
 	_build_exp_crew_strip()
 	_build_writ()
 	_mklabel("loot bag  +%dg  ·  🏁 the rescue pays the real money" % exp_loot_gold, Vector2(24, 1112), Vector2(430, 18), 12, screen_root, false, Color(0.85, 0.8, 0.55))
-	var ex := Button.new()
-	ex.text = "🏳️ Extract (+%dg)" % exp_loot_gold
-	ex.add_theme_font_size_override("font_size", 18)
-	ex.position = Vector2(430, 1146)
-	ex.size = Vector2(266, 70)
-	ex.disabled = busy
-	ex.pressed.connect(_on_extract)
-	screen_root.add_child(ex)
+	# You leave from a PLACE, not from a button that is always there. Standing on a 🏳️ point offers
+	# the way out; anywhere else the board tells you where the exits are and how many are left.
+	if bool((hexes.get(hex_cur, {}) as Dictionary).get("extract", false)):
+		var ex := Button.new()
+		ex.text = "🏳️ Extract (+%dg)" % exp_loot_gold
+		ex.add_theme_font_size_override("font_size", 18)
+		ex.position = Vector2(430, 1146)
+		ex.size = Vector2(266, 70)
+		ex.disabled = busy
+		ex.pressed.connect(_on_extract)
+		screen_root.add_child(ex)
+	else:
+		var left := 0
+		for k in hexes:
+			if bool((hexes[k] as Dictionary).get("extract", false)):
+				left += 1
+		# _mklabel clips rather than reflows, so this one is explicitly told to wrap — it is the only
+		# place the new rule is explained, and a half-sentence would be worse than no sentence.
+		var hint := _mklabel("No way out here — make for a 🏳️ (%d on this map), or finish the job."
+			% left, Vector2(396, 1140), Vector2(300, 76), 13, screen_root, true, Color(0.78, 0.74, 0.62))
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 func _build_hex_tile(key: String) -> void:
 	var h: Dictionary = hexes[key]
@@ -1500,6 +1792,8 @@ func _build_hex_tile(key: String) -> void:
 		tile.fill = Color(0.30, 0.44, 0.58)
 	elif kind == "objective":
 		tile.fill = Color(0.46, 0.36, 0.13)
+	elif kind == "extract":
+		tile.fill = Color(0.16, 0.34, 0.36)   # a cold way-out colour, distinct from the gold goal
 	elif resolved:
 		tile.fill = Color(0.17, 0.21, 0.18)
 	elif kind == "combat":
@@ -1513,6 +1807,8 @@ func _build_hex_tile(key: String) -> void:
 	# pulsing highlight ring replaces the old rect frames: gold = the goal, amber = reachable
 	if kind == "objective":
 		tile.ring = Color(C_COIN.r, C_COIN.g, C_COIN.b, 0.95)
+	elif kind == "extract":
+		tile.ring = Color(0.45, 0.86, 0.88, 0.85)
 	elif can_move:
 		tile.ring = Color(C_AMBER.r, C_AMBER.g, C_AMBER.b, 0.80)
 	if key == hex_sel:
@@ -1525,6 +1821,8 @@ func _build_hex_tile(key: String) -> void:
 		glyph = "🚩"
 	elif kind == "objective":
 		glyph = "🏁"
+	elif kind == "extract":
+		glyph = "🏳️"           # checked BEFORE `resolved`: an exit stays an exit after you pass it
 	elif resolved:
 		glyph = "✔️"
 	elif kind == "combat":
@@ -1790,7 +2088,7 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 func _commit_hex(key: String) -> void:
 	if busy or state != "HEX":
 		return
-	if not hexes.has(key) or str(hexes[key]["kind"]) == "wall" or not _hex_neighbors(hex_cur).has(key):
+	if not _hex_step_allowed(key):
 		return
 	if mode != Mode.SOLO:
 		_intent("hex", key)   # pushing deeper risks everyone — the whole crew has to agree
@@ -1929,7 +2227,11 @@ func _hex_combat(danger: int, e: int) -> void:
 	_msg("The ambush is broken — the crew patches up." if result["success"] else "The crew is overrun…")
 
 # ---------------------------------------------------------- Reward tile (loot -> loot bag / a card)
+## Same shape as _open_hex_event: we stop and wait for a player. Loot only escaped the deadlock by
+## accident — it rides `_apply_free`, which has no busy guard — so clearing it here makes `busy` mean
+## one thing on every waiting screen instead of two.
 func _open_hex_reward(e: int) -> void:
+	busy = false
 	if randf() < 0.35:                    # a coin cache instead of a card
 		var g := HEX_REWARD_GOLD + (randi() % 12)
 		exp_loot_gold += g
@@ -1964,21 +2266,12 @@ func _roll_hex_loot() -> Array:
 func _build_hex_reward() -> void:
 	_mklabel("— SPOILS —", Vector2(0, 200), Vector2(720, 28), 22, screen_root)
 	var xs := [40, 268, 496]
-	if mode != Mode.SOLO:
-		# Co-op: one card leaves this tile. Tap it and it is YOURS — first claim wins, so talk fast.
-		_mklabel("One card leaves this room. Claim it and it joins YOUR deck — first tap wins.",
-			Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
-		for i in range(hex_loot.size()):
-			_build_hex_loot_card(i, xs[i])
-		var skip2 := Button.new()
-		skip2.text = "Leave it"
-		skip2.add_theme_font_size_override("font_size", 18)
-		skip2.position = Vector2(285, 1150)
-		skip2.size = Vector2(150, 62)
-		skip2.pressed.connect(_on_hexloot_skip)
-		screen_root.add_child(skip2)
-		return
-	_mklabel("Take a card for the company — then the dwarf who learns it.", Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	# Co-op used to be "first tap wins, for YOUR deck". Spoils are company property, so both modes now
+	# take the same two-step — pick the card, then the dwarf — and in co-op that pair is what the
+	# table votes on.
+	_mklabel("Take a card for the company — then the dwarf who learns it." if mode == Mode.SOLO
+		else "Pick a card, then who learns it — the table votes on the pair.",
+		Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	for i in range(hex_loot.size()):
 		_build_hex_loot_card(i, xs[i])
 	_mklabel("give to:", Vector2(0, 720), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
@@ -2037,9 +2330,8 @@ func _on_hexloot_card_input(event: InputEvent, i: int) -> void:
 	if state != "HEXREWARD":
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if mode != Mode.SOLO:
-			_intent("loot", str(i))   # claims it for MY dwarf
-			return
+		# Picking the card is LOCAL in both modes — it is half a proposal, not a decision. The intent
+		# only goes out once a recipient names the other half.
 		hex_loot_pick = i
 		_msg("%s — now tap the dwarf who learns it." % Db.CARDS[hex_loot[i]]["name"])
 		_clear_screen()
@@ -2052,12 +2344,19 @@ func _on_hexloot_target_input(event: InputEvent, d: Dictionary) -> void:
 		if hex_loot_pick < 0:
 			_msg("Pick a card first.")
 			return
-		var cid: String = hex_loot[hex_loot_pick]
-		d["deck"].append(cid)
-		_msg("%s learned %s." % [d["name"], Db.CARDS[cid]["name"]])
-		hex_loot = []
-		hex_loot_pick = -1
-		await _resume_hex(run_epoch)
+		# Resolve the tapped dwarf to a ROSTER index — the strip is built from exp_crew, which is a
+		# subset of the pool, so its position is not the roster position.
+		var ri := -1
+		for k in range(roster.size()):
+			if is_same(roster[k], d):
+				ri = k
+				break
+		if ri < 0:
+			return
+		if mode != Mode.SOLO:
+			_intent("loot", "%d:%d" % [hex_loot_pick, ri])
+			return
+		await _claim_loot(ri, hex_loot_pick)
 
 func _on_hexloot_skip() -> void:
 	if state != "HEXREWARD":   # guard parity with the other loot handlers (no double-fire after rebuild)
@@ -2075,6 +2374,13 @@ func _do_hexloot_skip() -> void:
 
 # ---------------------------------------------------------- Event tile
 func _open_hex_event(_e: int) -> void:
+	# ⚠ CLEARING busy IS LOAD-BEARING, and its absence was a hard co-op lock. `_enter_hex` sets
+	# busy=true for the march, and this arm RETURNS without resolving anything — only `_resume_hex`
+	# clears it, and we never reach it. The event choice is a RING, and `_ring_intent`'s first line
+	# is `if busy: return`, so every seat's vote was swallowed silently, forever: no pip, no message,
+	# and HEXEVENT has no extract button to leave by. `busy` means "a resolution is in flight", not
+	# "a screen is open" — waiting on a decision is the opposite of busy.
+	busy = false
 	state = "HEXEVENT"   # choices re-capture run_epoch on click
 	_clear_screen()
 	_build_hex_event()
@@ -2132,8 +2438,28 @@ func _do_event_choice(risky: bool) -> void:
 	await _resume_hex(e)
 
 # ---------------------------------------------------------- Extract / resolve
+## Standing on a marked way out. THE ONE PREDICATE — the button, the ring gate and the ring's own
+## resolution all ask this, because a rule enforced only where the UI hides a button is not a rule:
+## a client reaches `_intent("extract","")` directly and never runs _on_extract at all. This is the
+## same trap CLAUDE.md records for `_on_power` vs `_on_action`, and campaign_verify caught it here.
+func _extract_allowed() -> bool:
+	return bool((hexes.get(hex_cur, {}) as Dictionary).get("extract", false))
+
+## A legal step: a real tile, passable, and ADJACENT to where the crew actually stands. Same
+## reasoning as _extract_allowed — _commit_hex checks all three, but a client's intent never runs
+## _commit_hex, so without this the wire accepts a proposal to teleport anywhere on the board.
+func _hex_step_allowed(key: String) -> bool:
+	if not hexes.has(key) or not hexes.has(hex_cur):
+		return false
+	if str(hexes[key]["kind"]) == "wall":
+		return false
+	return _hex_neighbors(hex_cur).has(key)
+
 func _on_extract() -> void:
 	if busy or state != "HEX":
+		return
+	if not _extract_allowed():
+		_msg("You cannot walk out from here — make for a 🏳️ extract point.")
 		return
 	if mode != Mode.SOLO:
 		_intent("extract", "")   # walking out with the loot is the table's call
@@ -2218,33 +2544,45 @@ func _reroll_shop() -> void:
 	pool.shuffle()
 	shop_stock.append({"kind": "card", "cid": pool[0], "cost": SHOP_CARD_COST})
 	shop_stock.append({"kind": "heal", "cost": SHOP_HEAL_COST})
-	if mode == Mode.SOLO:
-		var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
-		var rc: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]   # recruits draw from the full roster
-		shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
-	else:
-		# Co-op has no Recruit: seats are fixed and the wagon rule already refills a dead dwarf.
-		shop_stock.append({"kind": "card", "cid": pool[1], "cost": SHOP_CARD_COST})
+	# Co-op stocks a recruit too now. It used to be pointless — seats were fixed, so a hire would have
+	# benched a PLAYER — but the crew is drawn from a shared pool, so a new hand is a real body anyone
+	# can take onto the next job.
+	var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
+	var rc: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]   # recruits draw from the full roster
+	shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
 
 func _build_shop_panel() -> void:
-	_mklabel("— SHOP —  buying trades against the rent clock", Vector2(0, 866), Vector2(720, 20), 14, screen_root, true, C_COIN)
-	var xs := [24, 264, 504]
+	# Recruit has its own venue, so the shelf carries goods only — one door per purchase. Co-op never
+	# stocks a recruit at all (seats are fixed), so the filter is a no-op there.
+	var idx: Array = []
 	for i in range(shop_stock.size()):
-		_build_shop_slot(i, xs[i])
-	if mode != Mode.SOLO:
-		_mklabel("you buy for YOUR OWN dwarf · a buy that dips under the rent needs the whole crew",
-			Vector2(0, 1010), Vector2(720, 16), 12, screen_root, true, Color(0.7, 0.7, 0.76))
+		if str(shop_stock[i].get("kind", "")) == "recruit":
+			continue
+		idx.append(i)
+	if idx.is_empty():
+		_mklabel("The shelf is bare until the month turns.", Vector2(0, 400), Vector2(720, 24), 16,
+			screen_root, true, Color(0.66, 0.62, 0.55))
 		return
+	var n: int = idx.size()
+	var startx: int = 360 - n * 100
+	for j in range(n):
+		_build_shop_slot(int(idx[j]), startx + j * 200, 300)
 	if shop_sel >= 0 and shop_stock[shop_sel]["kind"] != "recruit":
+		_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+			else "Tap who gets it — then the table votes.",
+			Vector2(0, 436), Vector2(720, 24), 16, screen_root, true, C_AMBER)
 		_build_shop_targets()
+	elif mode != Mode.SOLO:
+		_mklabel("one purse, one vote · pick a good, then say who gets it",
+			Vector2(0, 436), Vector2(720, 18), 13, screen_root, true, Color(0.7, 0.7, 0.76))
 
-func _build_shop_slot(i: int, x: int) -> void:
+func _build_shop_slot(i: int, x: int, y: int = 896) -> void:
 	var s: Dictionary = shop_stock[i]
 	var cost := int(s["cost"])
 	var sold := bool(s.get("sold", false))
 	var afford := treasury >= cost and not sold
 	var slot := Control.new()
-	slot.position = Vector2(x, 896)
+	slot.position = Vector2(x, y)
 	slot.size = Vector2(192, 108)
 	slot.mouse_filter = Control.MOUSE_FILTER_STOP
 	slot.gui_input.connect(_on_shop_input.bind(i))
@@ -2275,7 +2613,7 @@ func _build_shop_slot(i: int, x: int) -> void:
 	_mklabel(("SOLD" if sold else "%dg" % cost), Vector2(0, 88), Vector2(192, 18), 14, slot, true, (Color(0.6, 0.6, 0.6) if sold else (C_COIN if afford else C_RED)))
 
 func _on_shop_input(event: InputEvent, i: int) -> void:
-	if busy or state != "CONTRACTS":
+	if busy or (state != "MARKET" and state != "TAVERN"):
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var s: Dictionary = shop_stock[i]
@@ -2285,15 +2623,17 @@ func _on_shop_input(event: InputEvent, i: int) -> void:
 			_msg("Not enough gold — the rent comes first.")
 			return
 		if mode != Mode.SOLO:
-			_intent("shop", str(i))   # buys for MY dwarf; below the rent line it becomes a ring
+			# Arm only. The intent goes out once a recipient is tapped — see _on_shop_target_input.
+			shop_sel = -1 if shop_sel == i else i
+			_msg("Tap who gets it — then the table votes." if shop_sel >= 0 else "")
+			_rebuild_current()
 			return
 		if s["kind"] == "recruit":
 			_buy_recruit(i)
 			return
 		shop_sel = -1 if shop_sel == i else i
 		_msg("Tap a dwarf below to receive it." if shop_sel >= 0 else "")
-		_clear_screen()
-		_build_contracts()
+		_rebuild_current()
 
 func _buy_recruit(i: int) -> void:
 	var s: Dictionary = shop_stock[i]
@@ -2303,8 +2643,7 @@ func _buy_recruit(i: int) -> void:
 	s["sold"] = true
 	shop_sel = -1
 	_msg("%s joins the company." % s["name"])
-	_clear_screen()
-	_build_contracts()
+	_rebuild_current()
 	_refresh_hud()
 
 func _build_shop_targets() -> void:
@@ -2312,18 +2651,15 @@ func _build_shop_targets() -> void:
 	_mklabel("give to:", Vector2(0, 1016), Vector2(720, 16), 12, screen_root, true, Color(0.85, 0.85, 0.9))
 	var elig: Array = []
 	for d in roster:
-		if s["kind"] == "heal":
-			if d["status"] == "wounded" or (d["status"] == "ready" and int(d["hp"]) < int(d["max_hp"])):
-				elig.append(d)
-		elif d["status"] != "lost":
+		if _eligible_target(d, s):
 			elig.append(d)
 	if elig.is_empty():
-		_mklabel("(no valid dwarf)", Vector2(0, 1040), Vector2(720, 16), 12, screen_root, true, C_AMBER)
+		_mklabel("(no valid dwarf)", Vector2(0, 470), Vector2(720, 18), 13, screen_root, true, C_AMBER)
 		return
 	var n := elig.size()
 	var startx := 360 - (n - 1) * 48
 	for i in range(n):
-		_build_shop_target_token(elig[i], startx + i * 96, 1058)
+		_build_shop_target_token(elig[i], startx + i * 96, 512)
 
 func _build_shop_target_token(d: Dictionary, cx: int, cy: int) -> void:
 	var col: Color = _class_col(str(d["cls"]))
@@ -2338,32 +2674,17 @@ func _build_shop_target_token(d: Dictionary, cx: int, cy: int) -> void:
 	_mklabel(d["name"], Vector2(0, 54), Vector2(80, 16), 10, tok, true, Color(0.9, 0.9, 0.92))
 
 func _on_shop_target_input(event: InputEvent, d: Dictionary) -> void:
-	if busy or state != "CONTRACTS" or shop_sel < 0:
+	if busy or (state != "MARKET" and state != "TAVERN") or shop_sel < 0:
 		return
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var s: Dictionary = shop_stock[shop_sel]
-		if treasury < int(s["cost"]):
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	# Route through the SAME path the room's tap-a-dwarf uses. This arm used to mutate the treasury
+	# and the roster INLINE with no mode check at all — on a client that is a write to host-owned
+	# state, and it had already drifted from _buy_shop's rules once.
+	for i in range(roster.size()):
+		if is_same(roster[i], d):
+			_on_room_dwarf_tapped(i)
 			return
-		if s["kind"] == "card":
-			d["deck"].append(s["cid"])
-			treasury -= int(s["cost"])
-			_tween_treasury_to(treasury)
-			s["sold"] = true
-			shop_sel = -1
-			_msg("%s learned %s." % [d["name"], Db.CARDS[s["cid"]]["name"]])
-		elif s["kind"] == "heal":
-			if d["status"] == "wounded":
-				d["status"] = "ready"
-				d["recover"] = 0
-			d["hp"] = int(d["max_hp"])
-			treasury -= int(s["cost"])
-			_tween_treasury_to(treasury)
-			s["sold"] = true
-			shop_sel = -1
-			_msg("%s is patched up to full." % d["name"])
-		_clear_screen()
-		_build_contracts()
-		_refresh_hud()
 
 
 # ============================================================================================
@@ -2452,7 +2773,8 @@ func _build_snap() -> Dictionary:
 		"shop_stock": shop_stock,
 		"hexes": hexes, "hex_cur": hex_cur, "exp_contract": _strip_crew(exp_contract),
 		"exp_loot_gold": exp_loot_gold, "hex_loot": hex_loot,
-		"ring": ring, "seats": seats, "seat_iseq": _seat_iseq,
+		"ring": ring, "seats": seats, "seat_iseq": _seat_iseq, "crew_claim": crew_claim,
+		"crew_idx": _crew_idx(),
 		"fight": fight_req, "outcome": outcome, "msg": msg_text,
 	}
 
@@ -2501,12 +2823,24 @@ func _apply_snap(s: Dictionary) -> void:
 	months_survived = int(s.get("months_survived", 0))
 	campaigns_left = int(s.get("campaigns_left", 0))
 	busy = bool(s.get("busy", false))
+	var prev_state := state
 	state = str(s.get("state", ""))
+	if state != prev_state:
+		# LOCAL VIEW STATE IS STALE THE MOMENT THE BOARD CHANGES SCREEN. Only the host runs
+		# _enter_venue, so its disarm never happens here — a client that armed a purchase in the
+		# Market and then followed the table to the Tavern kept `shop_sel` set, and the next tap on a
+		# dwarf (to read their deck) silently proposed a shared-gold spend nobody asked for.
+		# `sheet_arg` indexes contracts/roster, and a snapshot can resize both underneath it.
+		shop_sel = -1
+		sheet_key = ""
+		sheet_arg = -1
+		_refresh_sheet()
 	over_kind = str(s.get("over", ""))
 	roster = _norm(s.get("roster", []))
 	carried = _norm(s.get("carried", []))
 	contracts = _norm(s.get("contracts", []))
 	selected_contract = int(s.get("selected_contract", -1))
+	crew_claim = _norm(s.get("crew_claim", []))
 	shop_stock = _norm(s.get("shop_stock", []))
 	hexes = _norm(s.get("hexes", {}))
 	var prev_cur := hex_cur
@@ -2522,7 +2856,14 @@ func _apply_snap(s: Dictionary) -> void:
 	outcome = _norm(s.get("outcome", {}))
 	fight_req = _norm(s.get("fight", {}))
 	current = exp_contract
-	exp_crew = roster          # co-op: the crew IS the table, in seat order
+	# The crew is a SUBSET of the pool now, so it cannot be derived — it rides as roster indices, and
+	# is rebuilt here into references so a client's exp_crew aliases its own roster exactly as the
+	# host's does (HP written through one shows through the other).
+	exp_crew = []
+	for k in _norm(s.get("crew_idx", [])):
+		var ki: int = int(k)
+		if ki >= 0 and ki < roster.size():
+			exp_crew.append(roster[ki])
 	_msg(str(s.get("msg", "")))
 	# The host echoes each seat's applied iseq: that IS the ack, and it is in every snapshot — so a
 	# client can see it even if the one snapshot that first carried it was the one that dropped.
@@ -2545,6 +2886,12 @@ func _apply_snap(s: Dictionary) -> void:
 		_tween_treasury_from(tre_prev, treasury)
 	for f: Variant in (s.get("fx", []) as Array):
 		_replay_fx(f)
+	# A CLIENT never runs _new_run, so this is its equivalent trigger: the first snapshot is the one
+	# that fills the board, and month 0 tells a fresh campaign apart from a rejoin mid-run. It has to
+	# be here rather than earlier because @us reads the roster this snapshot just delivered — before
+	# this line the client does not yet know which dorf is its own.
+	if not had_board and month == 0 and months_survived == 0 and state == "DASHBOARD":
+		_maybe_play_tutorial()
 
 # ---------------------------------------------------------------- Wire
 func _on_net(event: String, p: Dictionary) -> void:
@@ -2638,14 +2985,46 @@ func _authority_intent(p: Dictionary) -> void:
 
 ## Is this decision the whole table's to make? Consequence decides, not the name: a shop buy is
 ## yours alone until it eats the rent money, and then it is everybody's problem.
+## A voted spend has to name BOTH the thing and who gets it: with one shared pool of dwarves the
+## proposer is not automatically the owner, so the table is agreeing to "this, for them".
+## ⚠ MEASURED, not assumed: `int("2:1")` is **21** in GDScript — it discards the separator and
+## CONCATENATES the digit runs, and it does not error. A reader that forgot to split therefore gets a
+## plausible-looking index rather than a crash: usually out of range and so dropped, but on a longer
+## stock `int("1:2") == 12` is a real slot and the wrong good is bought silently. Every reader of a
+## buy arg goes through here, so there is exactly one place to forget.
+func _parse_pair(arg: String) -> Vector2i:
+	var parts := arg.split(":")
+	if parts.size() != 2:
+		return Vector2i(-1, -1)
+	return Vector2i(int(parts[0]), int(parts[1]))
+
 func _is_ring(kind: String, arg: String) -> bool:
+	# Gate BEFORE the ring opens, so a bogus proposal never reaches the table at all. Returning false
+	# drops it: _apply_free has no "extract" arm, so the intent dies here rather than becoming an
+	# instant unilateral extraction.
+	if kind == "extract" and not _extract_allowed():
+		return false
+	if kind == "hex" and (state != "HEX" or not _hex_step_allowed(arg)):
+		return false
+	if kind == "loot":
+		# Same validation the shop gets: a proposal the table cannot actually execute must never
+		# reach the table. A bad arg opens no ring rather than burning a unanimous vote on nothing.
+		var l := _parse_pair(arg)
+		return state == "HEXREWARD" and l.x >= 0 and l.x < hex_loot.size() \
+			and l.y >= 0 and l.y < roster.size()
+	if kind == "restart":
+		return state == "GAMEOVER"
+	if kind == "hire":
+		var hi: int = int(arg)
+		return hi >= 0 and hi < shop_stock.size() 			and str(shop_stock[hi].get("kind", "")) == "recruit" 			and not bool(shop_stock[hi].get("sold", false)) and treasury >= int(shop_stock[hi]["cost"])
 	if RING_KINDS.has(kind):
 		return true
 	if kind == "shop":
-		var i: int = int(arg)
-		if i < 0 or i >= shop_stock.size():
-			return false
-		return treasury - int(shop_stock[i]["cost"]) < fee
+		# EVERY spend out of the shared purse is the table's call — not only the ones that dip under
+		# the rent line. One company, one purse, one vote. A malformed arg opens no ring at all
+		# rather than a ring that resolves to nothing and wastes everyone's aye.
+		var b := _parse_pair(arg)
+		return b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size()
 	return false
 
 func _apply_free(seat: int, kind: String, arg: String) -> void:
@@ -2653,10 +3032,7 @@ func _apply_free(seat: int, kind: String, arg: String) -> void:
 		"nav":
 			if busy:
 				return
-			if arg == "contracts":
-				_do_view_contracts()
-			else:
-				_enter_dashboard()
+			_enter_venue(arg)
 		"select":
 			if busy or state != "CONTRACTS":
 				return
@@ -2665,23 +3041,21 @@ func _apply_free(seat: int, kind: String, arg: String) -> void:
 				return
 			selected_contract = i
 			var c: Dictionary = contracts[i]
-			_msg("%s eyes %s — tap it again to put it to the crew." % [_seat_name(seat), c["title"]])
-			_clear_screen()
-			_build_contracts()
+			_msg("%s eyes %s — press again to call the vote." % [_seat_name(seat), c["title"]])
+			# _rebuild_current, not _build_contracts: the open zone ledger has to redraw too, or the
+			# row that just went on the table still says "Put on the table".
+			_rebuild_current()
 		"continue":
 			if busy:
 				return
 			_do_continue()
-		"loot":
-			_claim_loot(seat, int(arg))
-		"loot_skip":
-			if state == "HEXREWARD":
-				_do_hexloot_skip()
-		"shop":
-			_buy_shop(seat, int(arg))
-		"restart":
-			if state == "GAMEOVER":
-				_new_run()
+		"crew":
+			# Claiming who YOU will pilot is a personal pick, not a shared consequence — the shared
+			# decision is the embark vote that follows. Any pool dwarf can fill any seat; taking one
+			# another seat already holds is refused rather than stealing it.
+			_claim_crew(seat, int(arg))
+		_:
+			pass   # loot / loot_skip / restart are RINGS now — see _resolve_ring
 
 # ---------------------------------------------------------------- The ring
 ## A proposal lights a pip beside every seat and fires only when they are all lit. Proposing IS your
@@ -2733,11 +3107,15 @@ func _resolve_ring(kind: String, arg: String, by: int) -> void:
 			selected_contract = i
 			await _embark()
 		"hex":
-			if state != "HEX" or busy or not hexes.has(arg):
+			# Adjacency re-checked at RESOLUTION, not only at proposal — the board the ring fires
+			# against is the one that counts.
+			if state != "HEX" or busy or not _hex_step_allowed(arg):
 				return
 			await _enter_hex(arg)
 		"extract":
-			if state != "HEX" or busy:
+			# Re-checked at RESOLUTION too, not just at proposal: a ring can be opened legitimately
+			# and fire later, and the board it fires against is the one that counts.
+			if state != "HEX" or busy or not _extract_allowed():
 				return
 			await _finish_expedition("extract", run_epoch)
 		"event":
@@ -2749,8 +3127,23 @@ func _resolve_ring(kind: String, arg: String, by: int) -> void:
 				return
 			await _end_month()
 		"shop":
-			_buy_shop(by, int(arg))
+			# `by` is who PROPOSED it; the recipient rides the arg, because the table just agreed to
+			# a specific dwarf getting it and that need not be the proposer's own.
+			var b := _parse_pair(arg)
+			_buy_shop(b.y, b.x)
 			_push()
+		"loot":
+			# Same shape as a buy: the table agreed to a specific card going to a specific dwarf.
+			var l := _parse_pair(arg)
+			await _claim_loot(l.y, l.x)
+		"loot_skip":
+			if state == "HEXREWARD":
+				await _do_hexloot_skip()
+		"restart":
+			if state == "GAMEOVER":
+				_new_run()
+		"hire":
+			_buy_recruit(int(arg))
 
 func _ring_label(kind: String, arg: String) -> String:
 	match kind:
@@ -2769,11 +3162,41 @@ func _ring_label(kind: String, arg: String) -> String:
 		"endmonth":
 			return "end the month (rent %dg)" % fee
 		"shop":
-			var i2: int = int(arg)
-			if i2 >= 0 and i2 < shop_stock.size():
-				return "spend %dg under the rent line" % int(shop_stock[i2]["cost"])
-			return "spend under the rent line"
+			var b := _parse_pair(arg)
+			if b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size():
+				var under := "" if treasury - int(shop_stock[b.x]["cost"]) >= fee else "  ⚠ under the rent"
+				return "spend %dg on %s for %s%s" % [int(shop_stock[b.x]["cost"]),
+					_good_name(b.x), str(roster[b.y]["name"]), under]
+			return "spend from the purse"
+		"loot":
+			var l := _parse_pair(arg)
+			if l.x >= 0 and l.x < hex_loot.size() and l.y >= 0 and l.y < roster.size():
+				return "give %s to %s" % [str(Db.CARDS[hex_loot[l.x]]["name"]), str(roster[l.y]["name"])]
+			return "claim the spoils"
+		"loot_skip":
+			return "leave the spoils and move on"
+		"restart":
+			return "disband and start a NEW company"
+		"hire":
+			var hi: int = int(arg)
+			if hi >= 0 and hi < shop_stock.size():
+				return "sign %s for %dg" % [str(shop_stock[hi].get("name", "a new hand")),
+					int(shop_stock[hi]["cost"])]
+			return "take on a new hand"
 	return kind
+
+func _good_name(i: int) -> String:
+	if i < 0 or i >= shop_stock.size():
+		return "goods"
+	var s: Dictionary = shop_stock[i]
+	match str(s.get("kind", "")):
+		"card":
+			return str(Db.CARDS[s["cid"]]["name"])
+		"heal":
+			return "a Field Medic"
+		"recruit":
+			return str(s.get("name", "a new hand"))
+	return "goods"
 
 func _on_agree() -> void:
 	if ring.is_empty():
@@ -2887,6 +3310,12 @@ func _render() -> void:
 			_build_dashboard()
 		"CONTRACTS":
 			_build_contracts()
+		"TAVERN":
+			_build_tavern()
+		"MARKET":
+			_build_market()
+		"RECRUIT":
+			_build_recruit()
 		"HEX":
 			_build_hexcrawl()
 		"HEXREWARD":
@@ -2913,6 +3342,929 @@ func _render() -> void:
 		_:
 			_mklabel("Joining the company…", Vector2(0, 600), Vector2(720, 40), 22, screen_root)
 	_refresh_hud()
+
+# ============================================================ Rooms
+## A venue is a full-bleed diegetic ROOM, not a list: the crew and the townsfolk mill about inside
+## it and a price hangs on the object that sells it. Every room — and the town map itself — is the
+## SAME chassis (`room_view.gd`) fed a different pure-data spec, so adding a venue is a JSON file
+## rather than a screen. If a spec is missing or malformed the venue falls back to its list screen,
+## which is why a bad room can never blank a door the player needs.
+const RoomView := preload("res://scripts/ui/room_view.gd")
+const ROOM_DIR := "res://resources/rooms/"
+var _room_cache: Dictionary = {}
+var room_view: Control = null
+
+func _room_spec(key: String) -> Dictionary:
+	if _room_cache.has(key):
+		return _room_cache[key]
+	var path := ROOM_DIR + key + ".json"
+	if not FileAccess.file_exists(path):
+		_room_cache[key] = {}
+		return {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		_room_cache[key] = {}
+		return {}
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	var out: Dictionary = parsed if parsed is Dictionary else {}
+	_room_cache[key] = out
+	return out
+
+## The player's own dwarves, in the shape room_view wants. Only these carry a base plate; the
+## room's own NPCs come from the spec and carry nothing, because they hold no state.
+func _room_dwarves() -> Array:
+	var out: Array = []
+	for i in range(roster.size()):
+		var d: Dictionary = roster[i]
+		if str(d.get("status", "")) == "lost":
+			continue
+		out.append({
+			# ⚠ `ri` is the ROSTER index and it is the whole reason this loop is indexed. The list is
+			# FILTERED (the lost are not drawn), so the position in this array stops matching the
+			# position in `roster` the moment anyone dies — and the tap handler spends gold and opens
+			# decks by that index. Without `ri`, tapping the dwarf at 4 HP heals a different one.
+			"ri": i,
+			"emoji": str(Db.CLASSES[d["cls"]]["emoji"]), "name": str(d["name"]),
+			"hp": int(d["hp"]), "max_hp": int(d["max_hp"]),
+			"status": str(d["status"]), "recover": int(d.get("recover", 0)),
+		})
+	return out
+
+## Live numbers are injected into the spec's props at build time, never authored into the JSON —
+## a price baked into a room file would go stale the moment the shelf sold out.
+func _room_props_priced(sp: Dictionary) -> Array:
+	var out: Array = []
+	for p in sp.get("props", []):
+		var q: Dictionary = (p as Dictionary).duplicate(true)
+		var act := str(q.get("act", "none"))
+		if act.begins_with("shop:"):
+			var kind := act.substr(5)
+			var i := _shop_slot_of(kind)
+			if i < 0:
+				q["price"] = "—"
+				q["sub"] = "nothing in today"
+			elif bool(shop_stock[i].get("sold", false)):
+				q["price"] = "SOLD"
+			else:
+				q["price"] = "%dg" % int(shop_stock[i]["cost"])
+		elif act == "hire":
+			var r := _shop_slot_of("recruit")
+			if r < 0 or mode != Mode.SOLO:
+				q["price"] = "—"
+				q["sub"] = "seats are fixed" if mode != Mode.SOLO else "nobody today"
+			elif bool(shop_stock[r].get("sold", false)):
+				q["price"] = "HIRED"
+			else:
+				q["price"] = "%dg" % int(shop_stock[r]["cost"])
+				q["sub"] = "%s · %s" % [str(shop_stock[r]["name"]), str(Db.CLASSES[shop_stock[r]["cls"]]["name"])]
+		elif act == "contracts":
+			q["price"] = "%d posted" % contracts.size()
+		elif act.begins_with("goto:"):
+			# A door on the town map advertises what is WAITING behind it. Without this the four
+			# buildings carry static flavour and the whole "where do I need to go" layer — which the
+			# list town had — is lost the moment the room replaces it.
+			var vk := act.substr(5)
+			if vk == "guild":
+				vk = "contracts"
+			var st: Array = _venue_status(vk)
+			if str(st[0]) != "":
+				q["price"] = str(st[0])
+				q["price_c"] = str(st[2])
+		out.append(q)
+	return out
+
+## Can this good do anything for this dwarf? One predicate, so the room's tap-a-dwarf targeting and
+## the list screen's target strip can never disagree about who is a valid recipient.
+func _eligible_target(d: Dictionary, s: Dictionary) -> bool:
+	if str(d.get("status", "")) == "lost":
+		return false
+	if str(s.get("kind", "")) == "heal":
+		return str(d["status"]) == "wounded" or int(d["hp"]) < int(d["max_hp"])
+	return true
+
+func _shop_slot_of(kind: String) -> int:
+	for i in range(shop_stock.size()):
+		if str(shop_stock[i].get("kind", "")) == kind:
+			return i
+	return -1
+
+## Returns false when there is no usable spec, so the caller can fall back to its list screen.
+func _build_room(key: String) -> bool:
+	var sp: Dictionary = _room_spec(key)
+	if sp.is_empty() or not sp.has("furniture"):
+		return false
+	var live: Dictionary = sp.duplicate(true)
+	live["props"] = _room_props_priced(sp)
+	var rv: Control = RoomView.new()
+	rv.position = Vector2.ZERO
+	rv.size = Vector2(720, 1280)
+	screen_root.add_child(rv)
+	room_view = rv
+	rv.configure(live, _room_dwarves())
+	rv.prop_tapped.connect(_on_prop_tapped)
+	rv.dwarf_tapped.connect(_on_room_dwarf_tapped)
+	_mklabel(str(sp.get("title", "")), Vector2(0, 170), Vector2(720, 30), 22, screen_root)
+	_mklabel(str(sp.get("sub", "")), Vector2(0, 204), Vector2(720, 20), 14, screen_root, true,
+		Color(0.78, 0.74, 0.66))
+	# A good you have paid attention to but not yet given away is the one piece of MODE the room has,
+	# so it has to say so — otherwise the next tap on a dwarf spends gold without warning.
+	if shop_sel >= 0 and shop_sel < shop_stock.size():
+		_rect(Vector2(120, 1036), Vector2(480, 40), Color(0, 0, 0, 0.62), screen_root)
+		_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+			else "Tap who gets it — then the table votes.",
+			Vector2(120, 1044), Vector2(480, 26), 17, screen_root, true, C_AMBER)
+	return true
+
+## Tapping a thing in a room either MOVES you (a door) or OPENS that thing's sub-menu. Nothing here
+## commits gold: a sheet is where you read the price, and the sheet's own button is where you agree
+## to it. A prop with no action still answers, with its own flavour — a tag that looks tappable and
+## says nothing when tapped reads as broken, which is what an unhandled `none` used to do.
+func _on_prop_tapped(id: String, act: String) -> void:
+	if busy:
+		return
+	if act.begins_with("goto:"):
+		_on_venue(act.substr(5))
+		return
+	match act:
+		"contracts":
+			_on_venue("contracts")
+		"hire":
+			_open_sheet("hire")
+		"roster":
+			_open_sheet("crew")
+		"shop:heal":
+			# In the Tavern the apothecary is the ONLY shelf, so it opens as itself; anywhere else the
+			# same goods belong on one shelf rather than in two half-menus.
+			_open_sheet("apothecary" if state == "TAVERN" else "shelf")
+		"shop:card":
+			_open_sheet("shelf")
+		_:
+			_msg(_prop_flavour(id))
+
+func _prop_flavour(id: String) -> String:
+	for p in _room_spec(_room_key_for_state()).get("props", []):
+		if str((p as Dictionary).get("id", "")) == id:
+			return "%s — %s" % [str(p.get("label", "")), str(p.get("sub", ""))]
+	return ""
+
+func _on_room_dwarf_tapped(idx: int) -> void:
+	if busy or idx < 0 or idx >= roster.size():
+		return
+	# A dwarf tapped while a good is armed IS the purchase target — the two-tap grammar the shop
+	# already used, moved into the room.
+	if shop_sel >= 0 and shop_sel < shop_stock.size():
+		# Re-check SOLD before proposing: an arm can outlive the vote that bought the slot, and
+		# _is_ring only range-checks indices — so without this the table burns a unanimous vote on a
+		# purchase _buy_shop refuses on its first line.
+		if bool(shop_stock[shop_sel].get("sold", false)):
+			shop_sel = -1
+			_msg("Someone already took that one.")
+			_rebuild_current()
+			return
+		# The list shop only ever OFFERED eligible targets, so it could not sell you a bandage for a
+		# dwarf who has nothing to mend. A room offers every dwarf standing in it, so the filter has
+		# to move here or the same 25g quietly buys nothing.
+		if not _eligible_target(roster[idx], shop_stock[shop_sel]):
+			_msg("%s has nothing to mend." % str(roster[idx]["name"]))
+			return
+		if mode != Mode.SOLO:
+			_intent("shop", "%d:%d" % [shop_sel, idx])
+			shop_sel = -1
+			_rebuild_current()
+			return
+		_buy_shop(idx, shop_sel)
+		shop_sel = -1
+		_rebuild_current()
+		return
+	# Walking up to a dwarf and looking at their kit — this is the deck view, and it is the reason
+	# there is no "roster screen" button anywhere. A one-line status message used to be all you got.
+	_open_sheet("dwarf", idx)
+
+# ============================================================ Venue sub-menus (sheets)
+## A SHEET is a building's sub-menu: a modal panel over the room, carrying the numbers the room
+## deliberately does not. The room says WHERE you are and WHO is in it; the sheet says how much, how
+## hurt, how long. That split is what lets a room drop its data panel without losing the data — the
+## exact readouts the venue screens used to print underfoot now live one tap away, on the object
+## that owns them.
+##
+## Sheet state is LOCAL and never networked (the `hex_sel` precedent): opening a menu is not a
+## decision, so it rides no wire event and opens no ring. Anything inside it that IS a decision — a
+## buy, a hire — goes out through the existing intents unchanged.
+var sheet_key := ""
+var sheet_arg := -1        # which dwarf / which contract the open sheet is about
+
+const SHEET_X := 56.0
+const SHEET_W := 608.0
+
+func _open_sheet(kind: String, arg: int = -1) -> void:
+	if busy:
+		return
+	sheet_key = kind
+	sheet_arg = arg
+	_refresh_sheet()
+
+func _close_sheet() -> void:
+	sheet_key = ""
+	sheet_arg = -1
+	_refresh_sheet()
+
+func _refresh_sheet() -> void:
+	if not is_instance_valid(sheet):
+		return
+	for c in sheet.get_children():
+		c.queue_free()
+	sheet.visible = sheet_key != ""
+	match sheet_key:
+		"crew":
+			_sheet_crew()
+		"shelf":
+			_sheet_goods(["card", "heal"], "— THE SHELF —", "Every buy trades against the rent clock.")
+		"apothecary":
+			_sheet_goods(["heal"], "— THE APOTHECARY —", "Wounds clear over months. Coin clears one now.")
+		"hire":
+			_sheet_hire()
+		"dwarf":
+			_sheet_dwarf()
+		"zone":
+			_sheet_zone()
+
+## The scrim is FULL-SCREEN and MOUSE_FILTER_STOP. That is the only thing that stops the room's props
+## and wandering dwarves staying live underneath a panel that merely covers them.
+func _sheet_frame(title: String, sub: String, h: float) -> Control:
+	var scrim := ColorRect.new()
+	scrim.color = Color(0, 0, 0, 0.74)
+	scrim.size = Vector2(720, 1280)
+	scrim.mouse_filter = Control.MOUSE_FILTER_STOP
+	sheet.add_child(scrim)
+	var y: float = clampf(600.0 - h * 0.5, 186.0, 320.0)
+	var panel := Control.new()
+	panel.position = Vector2(SHEET_X, y)
+	panel.size = Vector2(SHEET_W, h)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	sheet.add_child(panel)
+	_rect(Vector2(5, 7), Vector2(SHEET_W, h), Color(0, 0, 0, 0.55), panel)
+	_rect(Vector2.ZERO, Vector2(SHEET_W, h), Color(0.13, 0.11, 0.08), panel)
+	_rect(Vector2.ZERO, Vector2(SHEET_W, 52), Color(0.29, 0.21, 0.11), panel)
+	_rect(Vector2(0, 52), Vector2(SHEET_W, 2), Color(0.72, 0.55, 0.24), panel)
+	_mklabel(title, Vector2(0, 13), Vector2(SHEET_W, 28), 20, panel, true, Color(0.96, 0.91, 0.78))
+	_mklabel(sub, Vector2(16, 62), Vector2(SHEET_W - 32, 20), 14, panel, true, Color(0.72, 0.68, 0.58))
+	var close := Button.new()
+	close.text = "Close"
+	close.add_theme_font_size_override("font_size", 17)
+	close.position = Vector2(SHEET_X + SHEET_W * 0.5 - 90.0, minf(y + h + 18.0, 1196.0))
+	close.size = Vector2(180, 56)
+	close.pressed.connect(_close_sheet)
+	sheet.add_child(close)
+	return panel
+
+func _sheet_crew() -> void:
+	var n: int = maxi(1, roster.size())
+	var rh: float = clampf(520.0 / float(n), 62.0, 104.0)
+	var h: float = 92.0 + rh * float(roster.size()) + 12.0
+	var panel := _sheet_frame("— THE COMPANY —",
+		"%d on the books · tap one to read their deck" % roster.size(), h)
+	var y := 90.0
+	for i in range(roster.size()):
+		_crew_row(roster[i], panel, 12.0, y, SHEET_W - 24.0, rh - 8.0)
+		# The whole row is the target — the ledger lists them, so the ledger is also how you open one.
+		var hit := Control.new()
+		hit.position = Vector2(12, y)
+		hit.size = Vector2(SHEET_W - 24.0, rh - 8.0)
+		hit.mouse_filter = Control.MOUSE_FILTER_STOP
+		hit.gui_input.connect(_on_crew_row_input.bind(i))
+		panel.add_child(hit)
+		y += rh
+
+func _on_crew_row_input(event: InputEvent, i: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_open_sheet("dwarf", i)
+
+## One dwarf, the field-standard way: the bar sits UNDER the name, never over the head, and the
+## condition owns the right third. Parented and sized by the caller, so the tavern's fallback floor
+## and the crew sheet are literally the same row rather than two drifting copies.
+func _crew_row(d: Dictionary, parent: Node, x: float, y: float, w: float, h: float) -> void:
+	var status := str(d["status"])
+	var col: Color = _class_col(str(d["cls"]))
+	_rect(Vector2(x, y), Vector2(w, h), Color(col.r, col.g, col.b, 0.16), parent)
+	var half: float = h * 0.5
+	var emo := _mkemoji(Vector2(x + 46.0, y + half), Vector2(76, minf(70.0, h - 8.0)),
+		int(minf(38.0, half - 6.0)), parent)
+	emo.text = Db.CLASSES[d["cls"]]["emoji"]
+	if status == "wounded":
+		emo.modulate = MOD_WOUNDED
+	elif status == "lost":
+		emo.modulate = MOD_LOST
+	var tx: float = x + 92.0
+	var tw: float = maxf(120.0, w - 92.0 - 190.0)
+	_mklabel(str(d["name"]), Vector2(tx, y + h * 0.10), Vector2(tw, 26), 19, parent, false,
+		Color(0.94, 0.90, 0.80))
+	_mklabel("%s · %s" % [str(Db.CLASSES[d["cls"]]["name"]), str(Db.CLASSES[d["cls"]]["role"]).to_upper()],
+		Vector2(tx, y + h * 0.40), Vector2(tw, 20), 13, parent, false, Color(0.70, 0.66, 0.58))
+	var frac: float = clampf(float(d["hp"]) / maxf(1.0, float(d["max_hp"])), 0.0, 1.0)
+	var hpcol: Color = C_GREEN if frac > 0.6 else (C_AMBER if frac > 0.3 else C_RED)
+	var by: float = y + h * 0.70
+	var barw: float = maxf(80.0, tw - 74.0)
+	_rect(Vector2(tx, by), Vector2(barw, 11), Color(0.22, 0.20, 0.18), parent)
+	_rect(Vector2(tx, by), Vector2(barw * frac, 11), hpcol, parent)
+	_mklabel("%d / %d" % [int(d["hp"]), int(d["max_hp"])], Vector2(tx + barw + 8.0, by - 5.0),
+		Vector2(68, 20), 13, parent, false, hpcol)
+	var cond := "FIT"
+	var ccol := C_GREEN
+	if status == "wounded":
+		cond = "WOUNDED · %dmo" % int(d["recover"])
+		ccol = C_AMBER
+	elif status == "lost":
+		cond = "LOST"
+		ccol = Color(0.55, 0.55, 0.6)
+	_rect(Vector2(x + w - 180.0, y + h * 0.30), Vector2(168, 34), Color(0, 0, 0, 0.34), parent)
+	_mklabel(cond, Vector2(x + w - 180.0, y + h * 0.30 + 7.0), Vector2(168, 22), 14, parent, true, ccol)
+
+## THE DECK VIEW. Until now there was nowhere in the whole campaign to see what a dwarf actually
+## fights with — you bought a card and it vanished into a number. It is reached by walking up to the
+## dwarf and tapping them, in whichever room they are standing in, which is why the Tavern (where the
+## crew are between jobs) is where you would think to look.
+func _sheet_dwarf() -> void:
+	if sheet_arg < 0 or sheet_arg >= roster.size():
+		_close_sheet()
+		return
+	var d: Dictionary = roster[sheet_arg]
+	# A deck is a MULTISET. Printing "Strike" four times is one fact printed four times, so identical
+	# cards collapse to a count — and the order is FIRST SEEN, which puts a card you just bought at
+	# the bottom, where you will look for it.
+	var order: Array = []
+	var count: Dictionary = {}
+	for cid in d.get("deck", []):
+		var k := str(cid)
+		if not count.has(k):
+			count[k] = 0
+			order.append(k)
+		count[k] = int(count[k]) + 1
+	var rows: int = int(ceil(float(order.size()) * 0.5))
+	var coop: bool = mode != Mode.SOLO
+	var h: float = 100.0 + 96.0 + float(rows) * 56.0 + 14.0 + (64.0 if coop else 0.0)
+	var panel := _sheet_frame(str(d["name"]), "%s · %s · %d cards in the deck"
+		% [str(Db.CLASSES[d["cls"]]["name"]), str(Db.CLASSES[d["cls"]]["role"]).to_upper(),
+		(d["deck"] as Array).size()], h)
+	_crew_row(d, panel, 12.0, 92.0, SHEET_W - 24.0, 86.0)
+	var top := 194.0
+	if coop:
+		# ANY pool dwarf can fill ANY seat, so this is where you take one. It is a personal pick and
+		# stays a free intent — the shared decision is the embark vote that follows.
+		_ensure_claims()
+		var holder := _claimed_by(sheet_arg)
+		var take := Button.new()
+		if holder == my_seat:
+			take.text = "◀ Stand down"
+		elif holder >= 0:
+			take.text = "%s is taking them" % _seat_name(holder)
+			take.disabled = true
+		elif not _crewable(d):
+			take.text = "Not fit to march"
+			take.disabled = true
+		else:
+			take.text = "⚔️ I'll take %s" % str(d["name"]).split(" ")[0]
+		take.add_theme_font_size_override("font_size", 17)
+		take.position = Vector2(SHEET_W * 0.5 - 150.0, 190)
+		take.size = Vector2(300, 48)
+		take.pressed.connect(_on_take_crew.bind(sheet_arg))
+		panel.add_child(take)
+		top = 254.0
+	var cw: float = (SHEET_W - 30.0) * 0.5
+	for i in range(order.size()):
+		var cy: float = top + floorf(float(i) * 0.5) * 56.0
+		_sheet_card_chip(str(order[i]), int(count[order[i]]), panel,
+			12.0 + float(i % 2) * (cw + 6.0), cy, cw)
+
+func _on_take_crew(ri: int) -> void:
+	if busy or mode == Mode.SOLO:
+		return
+	_intent("crew", str(ri))
+
+func _sheet_card_chip(cid: String, n: int, panel: Control, x: float, y: float, w: float) -> void:
+	var def: Dictionary = Db.CARDS.get(cid, {})
+	if def.is_empty():
+		return
+	var t := str(def.get("type", "skill"))
+	var tint: Color = {"attack": Color(0.34, 0.17, 0.15), "skill": Color(0.15, 0.25, 0.32),
+		"power": Color(0.26, 0.18, 0.34)}.get(t, Color(0.20, 0.20, 0.24))
+	_rect(Vector2(x, y), Vector2(w, 50), tint, panel)
+	_rect(Vector2(x, y), Vector2(4, 50), Color(0.72, 0.55, 0.24), panel)
+	_mkemoji(Vector2(x + 32, y + 25), Vector2(44, 42), 22, panel).text = str(def.get("emoji", "🃏"))
+	_mklabel(str(def.get("name", cid)), Vector2(x + 58, y + 5), Vector2(w - 108, 22), 15, panel, false,
+		Color(0.94, 0.90, 0.80))
+	_mklabel("%s · %s" % [t, str(def.get("school", "—"))], Vector2(x + 58, y + 28), Vector2(w - 108, 18),
+		11, panel, false, Color(0.72, 0.68, 0.58))
+	if n > 1:
+		_mklabel("x%d" % n, Vector2(x + w - 82, y + 16), Vector2(30, 20), 14, panel, false,
+			Color(0.86, 0.82, 0.72))
+	# `cost` can legitimately be the STRING "X" (Whirlwind), so it is printed, never compared.
+	_rect(Vector2(x + w - 44, y + 10), Vector2(30, 30), Color(0, 0, 0, 0.5), panel)
+	_mklabel(str(def.get("cost", 0)), Vector2(x + w - 44, y + 14), Vector2(30, 22), 15, panel, true, C_COIN)
+
+## THE ZONE LEDGER: everything posted in one place, under the one hazard that covers all of it.
+func _sheet_zone() -> void:
+	if sheet_arg < 0 or sheet_arg >= LOCATIONS.size():
+		_close_sheet()
+		return
+	var z := sheet_arg
+	var idxs: Array = _zone_contracts(z)
+	var hz: Dictionary = _zone_hazard(z)
+	var h: float = 96.0 + 62.0 + maxf(1.0, float(idxs.size())) * 132.0 + 12.0
+	var panel := _sheet_frame("%s  %s" % [str(LOCATIONS[z]["emoji"]), str(LOCATIONS[z]["name"]).to_upper()],
+		"%d contract%s posted today" % [idxs.size(), "" if idxs.size() == 1 else "s"], h)
+	# The hazard is stated ONCE, at the top, because it applies to every job below it — printing it
+	# per row would read as four different hazards.
+	_rect(Vector2(12, 88), Vector2(SHEET_W - 24, 54), Color(0.24, 0.17, 0.07), panel)
+	_rect(Vector2(12, 88), Vector2(4, 54), C_AMBER, panel)
+	if hz.is_empty():
+		_mklabel("Nobody is hiring here today.", Vector2(24, 104), Vector2(SHEET_W - 48, 24), 15,
+			panel, true, Color(0.72, 0.68, 0.58))
+		return
+	_mklabel("TODAY'S HAZARD — %s %s" % [str(hz.get("emoji", "")), str(hz.get("name", ""))],
+		Vector2(24, 94), Vector2(SHEET_W - 48, 22), 14, panel, false, C_AMBER)
+	_mklabel(str(hz.get("tip", "")), Vector2(24, 116), Vector2(SHEET_W - 48, 20), 13, panel, false,
+		Color(0.78, 0.74, 0.64))
+	for j in range(idxs.size()):
+		_sheet_contract_row(int(idxs[j]), panel, 152.0 + float(j) * 132.0)
+
+func _sheet_contract_row(i: int, panel: Control, y: float) -> void:
+	var c: Dictionary = contracts[i]
+	var tier: String = c["tier"]
+	var cs: int = int(c["crew_size"])
+	var ready: int = _ready_count()
+	var takeable: bool = ready >= cs
+	var w: float = SHEET_W - 24.0
+	_rect(Vector2(12, y), Vector2(w, 120), Color(0.17, 0.15, 0.12), panel)
+	_rect(Vector2(12, y), Vector2(6, 120), DANGER_BANNER[tier], panel)
+	if i == selected_contract:
+		_rect(Vector2(12, y), Vector2(w, 3), C_GREEN, panel)
+		_rect(Vector2(12, y + 117), Vector2(w, 3), C_GREEN, panel)
+	_mkemoji(Vector2(56, y + 38), Vector2(56, 48), 26, panel).text = str(c["loc_emoji"])
+	# "HIGH 💀💀💀" is the widest string this chip ever holds; at 11px it overran into the detail
+	# column beside it, so the chip is sized to that worst case rather than to "MED 💀💀".
+	_mklabel("%s %s" % [TIER_LABEL[tier], SKULLS[tier]], Vector2(8, y + 74), Vector2(96, 18), 10,
+		panel, true, DANGER_BANNER[tier])
+	_mklabel(str(c["title"]), Vector2(112, y + 12), Vector2(w - 292, 26), 18, panel, false,
+		Color(0.94, 0.90, 0.80))
+	var eff_pay: int = int(round(float(int(c["payout"])) * (float(c["mod"]["pay"]) if c.has("mod") else 1.0)))
+	var exits: int = int(EXTRACT_POINTS.get(tier, 1))
+	_mklabel("%dg  ·  %d crew  ·  %d of 3 campaigns" % [eff_pay, cs, int(c["duration"])],
+		Vector2(112, y + 42), Vector2(w - 292, 22), 14, panel, false, C_COIN)
+	# The exit count is the honest headline of the new rule, so it is printed on the job itself
+	# rather than discovered once you are already inside the map.
+	_mklabel("%d 🏳️ way%s out  ·  %s" % [exits, "" if exits == 1 else "s",
+		"a real expedition" if c.get("fight", false) else "a dice roll (crew too thin)"],
+		Vector2(112, y + 68), Vector2(w - 292, 22), 13, panel, false, Color(0.74, 0.70, 0.60))
+	if not takeable:
+		_mklabel("need %d ready — you have %d" % [cs, ready], Vector2(112, y + 92), Vector2(w - 292, 20),
+			13, panel, false, C_RED)
+		return
+	if mode != Mode.SOLO:
+		# Say it BEFORE the vote: an unclaimed seat is auto-filled, and the table should know that is
+		# what it is agreeing to rather than discover it on the first tile.
+		var un := _seats_unclaimed()
+		_mklabel("every seat has picked their dwarf" if un == 0
+			else "%d seat%s not picked — they get whoever is spare" % [un, "" if un == 1 else "s"],
+			Vector2(112, y + 92), Vector2(w - 292, 20), 13, panel, false,
+			C_GREEN if un == 0 else C_AMBER)
+	var go := Button.new()
+	if mode == Mode.SOLO:
+		go.text = "Embark"
+	else:
+		go.text = "Call the vote" if i == selected_contract else "Put on the table"
+	go.add_theme_font_size_override("font_size", 16)
+	go.position = Vector2(w - 168, y + 36)
+	go.size = Vector2(168, 48)
+	go.pressed.connect(_on_contract_take.bind(i))
+	panel.add_child(go)
+
+func _sheet_goods(kinds: Array, title: String, sub: String) -> void:
+	var idx: Array = []
+	for i in range(shop_stock.size()):
+		if kinds.has(str(shop_stock[i].get("kind", ""))):
+			idx.append(i)
+	if idx.is_empty():
+		var bare := _sheet_frame(title, sub, 200.0)
+		_mklabel("Nothing in until the month turns.", Vector2(0, 116), Vector2(SHEET_W, 26), 17,
+			bare, true, Color(0.66, 0.62, 0.55))
+		return
+	var foot: float = 34.0 if mode != Mode.SOLO else 0.0
+	var h: float = 92.0 + float(idx.size()) * 120.0 + 12.0 + foot
+	var panel := _sheet_frame(title, sub, h)
+	for j in range(idx.size()):
+		_sheet_good_row(int(idx[j]), panel, 90.0 + float(j) * 120.0)
+	if mode != Mode.SOLO:
+		_mklabel("you buy for YOUR OWN dwarf · a buy that dips under rent needs the crew",
+			Vector2(12, h - 28.0), Vector2(SHEET_W - 24, 18), 12, panel, true, Color(0.7, 0.7, 0.76))
+
+func _sheet_good_row(i: int, panel: Control, y: float) -> void:
+	var s: Dictionary = shop_stock[i]
+	var cost := int(s["cost"])
+	var sold := bool(s.get("sold", false))
+	var afford := treasury >= cost and not sold
+	var w: float = SHEET_W - 24.0
+	_rect(Vector2(12, y), Vector2(w, 110), Color(0.18, 0.16, 0.13), panel)
+	_rect(Vector2(12, y), Vector2(4, 110), Color(0.72, 0.55, 0.24) if afford else Color(0.4, 0.36, 0.3), panel)
+	var emoji := ""
+	var title := ""
+	var desc := ""
+	match str(s["kind"]):
+		"card":
+			emoji = str(Db.CARDS[s["cid"]].get("emoji", "🃏"))
+			title = "Card — %s" % str(Db.CARDS[s["cid"]]["name"])
+			desc = "goes into one dwarf's deck for good"
+		"heal":
+			emoji = "🩹"
+			title = "Field Medic"
+			desc = "one dwarf to full HP, and clears a wound"
+	_mkemoji(Vector2(66, y + 52), Vector2(80, 64), 36, panel).text = emoji
+	_mklabel(title, Vector2(116, y + 18), Vector2(w - 240, 26), 18, panel, false, Color(0.94, 0.90, 0.80))
+	_mklabel(desc, Vector2(116, y + 48), Vector2(w - 240, 20), 13, panel, false, Color(0.70, 0.66, 0.58))
+	_mklabel("SOLD" if sold else "%dg" % cost, Vector2(116, y + 76), Vector2(160, 24), 17, panel, false,
+		Color(0.6, 0.6, 0.6) if sold else (C_COIN if afford else C_RED))
+	if sold:
+		return
+	if not afford:
+		_mklabel("%dg short" % (cost - treasury), Vector2(w - 190, y + 44), Vector2(180, 22), 14,
+			panel, true, C_RED)
+		return
+	var buy := Button.new()
+	buy.text = "Buy"
+	buy.add_theme_font_size_override("font_size", 17)
+	buy.position = Vector2(w - 150, y + 32)
+	buy.size = Vector2(150, 48)
+	buy.pressed.connect(_sheet_buy.bind(i))
+	panel.add_child(buy)
+
+## Buying closes the sheet and hands you back to the room, because the SECOND half of the purchase
+## is picking who gets it — and the people you are picking between are standing right there. Same
+## two-tap grammar the list shop always used, with the room as the target strip.
+func _sheet_buy(i: int) -> void:
+	if busy or i < 0 or i >= shop_stock.size():
+		return
+	var s: Dictionary = shop_stock[i]
+	if bool(s.get("sold", false)):
+		return
+	if treasury < int(s["cost"]):
+		_msg("%dg short — the rent comes first." % (int(s["cost"]) - treasury))
+		return
+	# Co-op takes the SAME two-tap as solo now: arm the good, then tap who gets it. The intent is not
+	# sent until a recipient is named, because the table is voting on "this, for them" — with one
+	# shared pool of dwarves there is no "my dwarf" to default to.
+	shop_sel = i
+	_close_sheet()
+	if mode != Mode.SOLO:
+		_msg("Tap who gets it — then the table votes.")
+	_rebuild_current()
+
+func _sheet_hire() -> void:
+	var ri := _shop_slot_of("recruit")
+	if ri < 0 or bool(shop_stock[ri].get("sold", false)):
+		var pe := _sheet_frame("— THE RECRUITMENT HALL —", "The bench is empty.", 220.0)
+		_mklabel("Nobody else is looking for work this month." if ri >= 0
+			else "Nobody is looking for work this month.",
+			Vector2(0, 116), Vector2(SHEET_W, 26), 17, pe, true, Color(0.78, 0.74, 0.66))
+		return
+	var s: Dictionary = shop_stock[ri]
+	var cost := int(s["cost"])
+	var afford := treasury >= cost
+	var panel := _sheet_frame("— SIGN A NEW HAND —",
+		"A roster you cannot field is the real loss.", 420.0)
+	_mkemoji(Vector2(SHEET_W * 0.5, 150), Vector2(120, 96), 54, panel).text = Db.CLASSES[s["cls"]]["emoji"]
+	_mklabel(str(s["name"]), Vector2(0, 208), Vector2(SHEET_W, 30), 22, panel, true, Color(0.94, 0.90, 0.80))
+	_mklabel("%s · %s" % [str(Db.CLASSES[s["cls"]]["name"]), str(Db.CLASSES[s["cls"]]["role"]).to_upper()],
+		Vector2(0, 242), Vector2(SHEET_W, 22), 15, panel, true, Color(0.70, 0.66, 0.58))
+	_mklabel("%d HP · joins the roster ready to march" % int(Db.CLASSES[s["cls"]]["max_hp"]),
+		Vector2(0, 268), Vector2(SHEET_W, 22), 14, panel, true, Color(0.66, 0.62, 0.55))
+	_mklabel("%dg" % cost, Vector2(0, 300), Vector2(SHEET_W, 30), 22, panel, true,
+		C_COIN if afford else C_RED)
+	if afford:
+		var hire := Button.new()
+		hire.text = "Sign %s — %dg" % [str(s["name"]), cost] if mode == Mode.SOLO \
+			else "Put %s to the crew — %dg" % [str(s["name"]), cost]
+		hire.add_theme_font_size_override("font_size", 18)
+		hire.position = Vector2(SHEET_W * 0.5 - 150.0, 344)
+		hire.size = Vector2(300, 56)
+		hire.pressed.connect(_on_hire.bind(ri))
+		panel.add_child(hire)
+	else:
+		_mklabel("%dg short — the rent comes first." % (cost - treasury), Vector2(0, 356),
+			Vector2(SHEET_W, 24), 15, panel, true, C_RED)
+
+# ============================================================ Screen: The Town
+## The town IS the menu: a venue is a floor you walk onto, not a tab. Time here is FREE and the
+## ROSTER is the constraint, so venue navigation is a plain `nav` intent — never a ring proposal.
+## Consequence decides the tier, and walking into a room costs nothing.
+const VENUES := [
+	# Tips are held to ~40 characters: the copy box is 324px at 15px and does NOT autowrap, so a
+	# longer string is silently CLIPPED, not reflowed.
+	{"key": "contracts", "emoji": "📜", "name": "The Guild Hall",
+		"tip": "Contracts. The job that makes rent."},
+	{"key": "tavern", "emoji": "🍺", "name": "The Tavern",
+		"tip": "Your crew, and what mends them."},
+	{"key": "market", "emoji": "⚒️", "name": "The Market",
+		"tip": "Cards and kit, paid against rent."},
+	{"key": "recruit", "emoji": "📣", "name": "The Recruitment Hall",
+		"tip": "Hire. Roster is what you can field."},
+]
+
+## The state a venue's floor advertises, so the town says what is WAITING in each room rather than
+## just naming it. [text, colour] — colour carries urgency, text carries the count.
+## [text, SCREEN colour, PARCHMENT ink token]. The third element exists because these same words are
+## painted on a prop's parchment tag, and C_GREEN/C_AMBER are bright screen colours that go illegible
+## on cream — a status worth showing is worth being able to read.
+func _venue_status(key: String) -> Array:
+	match key:
+		"contracts":
+			var n := contracts.size()
+			return ["%d ON THE BOARD" % n, C_COIN if n > 0 else Color(0.6, 0.6, 0.64),
+				"brass_lo" if n > 0 else "dim"]
+		"tavern":
+			var hurt := _recovering_count()
+			if hurt > 0:
+				return ["%d MENDING" % hurt, C_AMBER, "warn"]
+			return ["ALL FIT", C_GREEN, "good"]
+		"market":
+			var left := 0
+			for s in shop_stock:
+				if not bool(s.get("sold", false)) and str(s.get("kind", "")) != "recruit":
+					left += 1
+			return ["%d ON THE SHELF" % left, C_COIN if left > 0 else Color(0.6, 0.6, 0.64),
+				"brass_lo" if left > 0 else "dim"]
+		"recruit":
+			for s in shop_stock:
+				if str(s.get("kind", "")) == "recruit" and not bool(s.get("sold", false)):
+					return ["1 WAITING", C_COIN, "brass_lo"]
+			return ["NOBODY TODAY", Color(0.6, 0.6, 0.64), "dim"]
+	return ["", Color.WHITE, "dim"]
+
+## Every venue tap goes through here, so SOLO and co-op take the same path and a client never
+## mutates its own screen — it asks, and renders whatever the next snapshot says.
+func _on_venue(key: String) -> void:
+	if busy:
+		return
+	if mode != Mode.SOLO:
+		_intent("nav", key)
+		return
+	_enter_venue(key)
+
+func _enter_venue(key: String) -> void:
+	# Walking out of a room closes whatever sub-menu was open in it, and disarms a good you armed
+	# but never gave to anyone — an armed purchase must not follow you into the next building.
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
+	shop_sel = -1
+	match key:
+		# "guild" is the ROOM's name and "contracts" is the VENUE's; the town map's prop says
+		# `goto:guild`, so both must land here or the building that makes rent is a dead tap.
+		"contracts", "guild":
+			_do_view_contracts()
+		"tavern":
+			state = "TAVERN"
+			_clear_screen()
+			_build_tavern()
+			_refresh_hud()
+		"market":
+			shop_sel = -1
+			state = "MARKET"
+			_clear_screen()
+			_build_market()
+			_refresh_hud()
+		"recruit":
+			state = "RECRUIT"
+			_clear_screen()
+			_build_recruit()
+			_refresh_hud()
+		_:
+			_enter_dashboard()
+
+## Rebuild whatever screen is currently up. Anything that mutates shared state (a buy, a heal) calls
+## this instead of naming one screen — which is what stopped the shop refresh from being welded to
+## the contracts board when the shop moved out of it.
+func _rebuild_current() -> void:
+	match state:
+		"DASHBOARD":
+			_clear_screen()
+			_build_dashboard()
+		"CONTRACTS":
+			_clear_screen()
+			_build_contracts()
+		"TAVERN":
+			_clear_screen()
+			_build_tavern()
+		"MARKET":
+			_clear_screen()
+			_build_market()
+		"RECRUIT":
+			_clear_screen()
+			_build_recruit()
+	_refresh_sheet()
+
+## Which room spec the screen we are on is standing in. One table, so a prop lookup and a fallback
+## never disagree about where the player is.
+func _room_key_for_state() -> String:
+	match state:
+		"DASHBOARD":
+			return "town"
+		"CONTRACTS":
+			return "guild"
+		"TAVERN":
+			return "tavern"
+		"MARKET":
+			return "market"
+		"RECRUIT":
+			return "recruit"
+	return ""
+
+func _build_town() -> void:
+	# The town map is a room like any other — its four buildings are props whose act is `goto:`.
+	# End Month is NOT built here any more: it lives in the HUD, under the pips it spends.
+	if _build_room("town"):
+		return
+	_build_town_floors()
+
+## The fallback shell: a plain list of floors, used when no town spec is present.
+func _build_town_floors() -> void:
+	_mklabel("— DORF & CO. —", Vector2(0, 174), Vector2(720, 30), 24, screen_root)
+	_mklabel("%d campaign%s left this month · rent %dg due at month end"
+		% [campaigns_left, "" if campaigns_left == 1 else "s", fee],
+		Vector2(0, 208), Vector2(720, 20), 14, screen_root, true,
+		C_AMBER if campaigns_left <= 1 else Color(0.72, 0.84, 0.95))
+	_build_town_ticker()
+	var ys := [352, 508, 664, 820]
+	for i in range(VENUES.size()):
+		_build_venue_floor(VENUES[i], ys[i])
+
+## The roster along the top: who you have, and how hurt. It is the town's headline because the
+## roster is what actually binds — the treasury is already in the HUD.
+func _build_town_ticker() -> void:
+	_rect(Vector2(24, 240), Vector2(672, 92), Color(0.13, 0.12, 0.10), screen_root)
+	var n: int = maxi(1, roster.size())
+	var w: float = 672.0 / float(n)
+	for i in range(roster.size()):
+		var d: Dictionary = roster[i]
+		var cx: float = 24.0 + w * (float(i) + 0.5)
+		var status := str(d["status"])
+		var emo := _mkemoji(Vector2(cx, 272), Vector2(52, 44), 28, screen_root)
+		emo.text = Db.CLASSES[d["cls"]]["emoji"]
+		if status == "wounded":
+			emo.modulate = MOD_WOUNDED
+		elif status == "lost":
+			emo.modulate = MOD_LOST
+		_mklabel(str(d["name"]).split(" ")[0], Vector2(cx - w * 0.5, 296), Vector2(w, 18), 15,
+			screen_root, true, Color(0.88, 0.86, 0.8))
+		var line := "%d/%d" % [int(d["hp"]), int(d["max_hp"])]
+		var col := C_GREEN
+		if status == "wounded":
+			line = "mending %d" % int(d["recover"])
+			col = C_AMBER
+		elif status == "lost":
+			line = "lost"
+			col = Color(0.55, 0.55, 0.6)
+		_mklabel(line, Vector2(cx - w * 0.5, 314), Vector2(w, 16), 13, screen_root, true, col)
+
+func _build_venue_floor(v: Dictionary, y: int) -> void:
+	var floor_ctl := Control.new()
+	floor_ctl.position = Vector2(24, y)
+	floor_ctl.size = Vector2(672, 140)
+	floor_ctl.mouse_filter = Control.MOUSE_FILTER_STOP
+	floor_ctl.gui_input.connect(_on_venue_input.bind(str(v["key"])))
+	screen_root.add_child(floor_ctl)
+	_rect(Vector2.ZERO, Vector2(672, 140), Color(0.17, 0.13, 0.09), floor_ctl)
+	_rect(Vector2.ZERO, Vector2(672, 4), Color(0.42, 0.31, 0.16), floor_ctl)
+	_mkemoji(Vector2(74, 70), Vector2(84, 72), 40, floor_ctl).text = str(v["emoji"])
+	# 132 + 324 = 456 against a status plate starting at 468 -> 12px of gutter. Widening either box
+	# past 324 runs the copy under the plate, which is the defect the mockup audits kept finding.
+	_mklabel(str(v["name"]), Vector2(132, 32), Vector2(324, 30), 22, floor_ctl, false,
+		Color(0.94, 0.90, 0.80))
+	_mklabel(str(v["tip"]), Vector2(132, 70), Vector2(324, 24), 15, floor_ctl, false,
+		Color(0.70, 0.66, 0.58))
+	var st: Array = _venue_status(str(v["key"]))
+	_rect(Vector2(468, 50), Vector2(188, 40), Color(0, 0, 0, 0.34), floor_ctl)
+	_mklabel(str(st[0]), Vector2(468, 58), Vector2(188, 24), 15, floor_ctl, true, st[1])
+
+func _on_venue_input(event: InputEvent, key: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_venue(key)
+
+## Shared venue chrome: a title and the one control every room needs — the way out. The back
+## affordance is weighted over the entry, because free re-entry is the whole point of a free town.
+func _build_venue_header(title: String, sub: String) -> void:
+	_mklabel(title, Vector2(0, 172), Vector2(720, 30), 22, screen_root)
+	_mklabel(sub, Vector2(0, 206), Vector2(720, 20), 14, screen_root, true, Color(0.78, 0.74, 0.66))
+
+func _build_back_to_town() -> void:
+	var back := Button.new()
+	back.text = "◀ The Town"
+	back.add_theme_font_size_override("font_size", 18)
+	back.position = Vector2(24, 1150)
+	back.size = Vector2(200, 70)
+	back.pressed.connect(_on_back_dashboard)
+	screen_root.add_child(back)
+
+# ============================================================ Screen: The Tavern
+## The crew's standing condition, directly above the goods that buy that condition back. The
+## apothecary lives here rather than in the Market because what it sells is ROSTER TIME, and the
+## roster is what binds.
+func _build_tavern() -> void:
+	if _build_room("tavern"):
+		_build_back_to_town()
+		return
+	_build_venue_header("— THE TAVERN —", "Wounds clear over months, not on the job.")
+	# The roster band is FIXED and the rows divide it, so a roster that grows past four still fits
+	# above the apothecary. Letting a row list push into the band below is the scaling failure every
+	# mockup of this screen made.
+	var n: int = maxi(1, roster.size())
+	var rh: int = clampi(int(474.0 / float(n)), 62, 118)
+	var y := 244
+	for d in roster:
+		_build_tavern_row(d, y, rh - 10)
+		y += rh
+	var ay: int = 244 + rh * n + 14
+	_mklabel("— THE APOTHECARY —", Vector2(0, ay), Vector2(720, 22), 16, screen_root, true, C_COIN)
+	var heal_i := -1
+	for i in range(shop_stock.size()):
+		if str(shop_stock[i].get("kind", "")) == "heal":
+			heal_i = i
+			break
+	if heal_i >= 0:
+		_build_shop_slot(heal_i, 264, ay + 32)
+		if shop_sel == heal_i:
+			_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+				else "Tap who gets it — then the table votes.",
+				Vector2(0, ay + 150), Vector2(720, 24), 16, screen_root, true, C_AMBER)
+			_build_shop_targets()
+	else:
+		_mklabel("The shelf is bare until the month turns.", Vector2(0, ay + 40), Vector2(720, 22), 15,
+			screen_root, true, Color(0.66, 0.62, 0.55))
+	_build_back_to_town()
+
+func _build_tavern_row(d: Dictionary, y: int, h: int) -> void:
+	_crew_row(d, screen_root, 24.0, float(y), 672.0, float(h))
+
+# ============================================================ Screen: The Market
+func _build_market() -> void:
+	if _build_room("market"):
+		_build_back_to_town()
+		return
+	_build_venue_header("— THE MARKET —", "Every buy trades against the rent clock.")
+	_build_shop_panel()
+	_build_back_to_town()
+
+# ============================================================ Screen: The Recruitment Hall
+## Recruitment exists because the ROSTER binds. In co-op it deliberately offers nobody: a seat is a
+## player's identity for the whole campaign, so hiring a body for a seat would bench a person.
+func _build_recruit() -> void:
+	if _build_room("recruit"):
+		_build_back_to_town()
+		return
+	_build_venue_header("— THE RECRUITMENT HALL —", "A roster you cannot field is the real loss.")
+	var ri := -1
+	for i in range(shop_stock.size()):
+		if str(shop_stock[i].get("kind", "")) == "recruit":
+			ri = i
+			break
+	if ri < 0:
+		_mklabel("Nobody is looking for work this month.", Vector2(0, 470), Vector2(720, 26), 19,
+			screen_root, true, Color(0.78, 0.74, 0.66))
+		_build_back_to_town()
+		return
+	var s: Dictionary = shop_stock[ri]
+	var sold := bool(s.get("sold", false))
+	var cost := int(s["cost"])
+	_rect(Vector2(180, 300), Vector2(360, 320), Color(0.17, 0.13, 0.09), screen_root)
+	_mkemoji(Vector2(360, 380), Vector2(120, 96), 56, screen_root).text = Db.CLASSES[s["cls"]]["emoji"]
+	_mklabel(str(s["name"]), Vector2(180, 448), Vector2(360, 30), 22, screen_root, true,
+		Color(0.94, 0.90, 0.80))
+	_mklabel("%s · %s" % [str(Db.CLASSES[s["cls"]]["name"]), str(Db.CLASSES[s["cls"]]["role"]).to_upper()],
+		Vector2(180, 482), Vector2(360, 22), 15, screen_root, true, Color(0.70, 0.66, 0.58))
+	_mklabel("%d HP · joins the roster ready" % int(Db.CLASSES[s["cls"]]["max_hp"]),
+		Vector2(180, 512), Vector2(360, 22), 14, screen_root, true, Color(0.66, 0.62, 0.55))
+	var afford := treasury >= cost and not sold
+	_mklabel(("HIRED" if sold else "%dg" % cost), Vector2(180, 556), Vector2(360, 30), 22,
+		screen_root, true, (Color(0.6, 0.6, 0.6) if sold else (C_COIN if afford else C_RED)))
+	if not sold:
+		var hire := Button.new()
+		hire.text = "Sign %s — %dg" % [str(s["name"]), cost]
+		hire.add_theme_font_size_override("font_size", 20)
+		hire.position = Vector2(396, 1150)
+		hire.size = Vector2(300, 70)
+		hire.disabled = not afford
+		hire.pressed.connect(_on_hire.bind(ri))
+		screen_root.add_child(hire)
+		if not afford:
+			_mklabel("%dg short." % (cost - treasury), Vector2(0, 640), Vector2(720, 22), 15,
+				screen_root, true, C_RED)
+	_build_back_to_town()
+
+func _on_hire(i: int) -> void:
+	if busy:
+		return
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
+	if mode != Mode.SOLO:
+		_intent("hire", str(i))   # a new hand is a spend out of the shared purse, so the table decides
+		return
+	_buy_recruit(i)
 
 # ---------------------------------------------------------------- The nested fight
 ## ONE place a fight starts. The host rolls the encounter, publishes it in the snapshot, and every
@@ -2974,28 +4326,144 @@ func _client_join_fight() -> void:
 func _party_scale() -> float:
 	if mode == Mode.SOLO:
 		return 0.0
-	return float(roster.size() - 3) * PARTY_STEP
+	# The term means "how many dwarves are actually FIGHTING". It read roster.size() while the crew
+	# WAS the roster; the pool can outgrow the table now, and a dwarf sitting in the tavern must not
+	# make the enemies on the board harder.
+	var n: int = exp_crew.size() if not exp_crew.is_empty() else maxi(1, seat_count)
+	return float(n - 3) * PARTY_STEP
 
 # ---------------------------------------------------------------- Death without lockout
 ## A dwarf that goes down is hauled onto the WAGON — it keeps rolling its death saves there — and the
-## player takes an HEIR at the same seat on the very next tile. Nobody watches the rest of an
-## expedition. If the original stabilises it takes its seat back at the end, deck and all; the heir
-## was only ever a stand-in. If it bleeds out, the heir keeps the seat and the DECK is what you lost.
+## player picks up a REPLACEMENT at the same seat on the very next tile. Nobody watches the rest of
+## an expedition. The replacement is a spare from the POOL where the company has one, and only a
+## freshly minted heir when it does not. A carried dwarf never leaves the pool, so surviving its
+## saves simply puts it back on its feet, deck and all; bleeding out is what costs you the deck.
+## Identity, not equality: these arrays hold REFERENCES to the same roster dicts, and Dictionary `==`
+## in Godot 4 compares contents — two dwarves rolled with the same name and class would collide.
+## The crew, as positions in the pool. Identity-matched because these ARE roster dicts.
+func _crew_idx() -> Array:
+	var out: Array = []
+	for d in exp_crew:
+		var k := -1
+		for i in range(roster.size()):
+			if is_same(roster[i], d):
+				k = i
+				break
+		out.append(k)
+	return out
+
+func _has_ref(arr: Array, d: Dictionary) -> bool:
+	for x in arr:
+		if is_same(x, d):
+			return true
+	return false
+
+func _crewable(d: Dictionary) -> bool:
+	return str(d.get("status", "")) == "ready" and int(d.get("hp", 0)) > 0
+
+## crew_claim is sized to the table, never to the roster: it is "who each SEAT is taking", so it
+## survives the pool growing and shrinking underneath it.
+func _ensure_claims() -> void:
+	var n: int = maxi(1, seat_count)
+	while crew_claim.size() < n:
+		crew_claim.append(-1)
+	while crew_claim.size() > n:
+		crew_claim.pop_back()
+
+## Which seat, if any, has this roster index. -1 for nobody.
+func _claimed_by(ri: int) -> int:
+	for i in range(crew_claim.size()):
+		if int(crew_claim[i]) == ri:
+			return i
+	return -1
+
+func _claim_crew(seat: int, ri: int) -> void:
+	if mode == Mode.SOLO or busy:
+		return
+	_ensure_claims()
+	if seat < 0 or seat >= crew_claim.size():
+		return
+	if ri < 0 or ri >= roster.size() or not _crewable(roster[ri]):
+		return
+	var holder := _claimed_by(ri)
+	if holder == seat:
+		crew_claim[seat] = -1                       # tapping your own claim releases it
+		_msg("%s stands down." % str(roster[ri]["name"]))
+	elif holder >= 0:
+		_msg("%s is already spoken for by %s." % [str(roster[ri]["name"]), _seat_name(holder)])
+		return
+	else:
+		crew_claim[seat] = ri
+		_msg("%s takes %s." % [_seat_name(seat), str(roster[ri]["name"])])
+	_rebuild_current()
+
+## How many seats still have nobody. The zone ledger reads this so the table can see, before it
+## votes, that somebody has not picked yet.
+func _seats_unclaimed() -> int:
+	_ensure_claims()
+	var n := 0
+	for i in range(crew_claim.size()):
+		var ri: int = int(crew_claim[i])
+		if ri < 0 or ri >= roster.size() or not _crewable(roster[ri]):
+			n += 1
+	return n
+
+## THE CREW IS DRAWN FROM THE POOL, and seat i pilots exp_crew[i]. Combat already indexes its party
+## by seat (`active_idx = my_seat` against `request.crew`), so this array IS the seat binding and
+## there is nowhere else to change. Any pool dwarf can fill any seat.
+##
+## A seat that has claimed nobody is auto-filled, and if the pool cannot fill every seat we MINT an
+## heir rather than leave a player with nothing to pilot — that is the anti-lockout rule the wagon
+## was built for, and it has to survive the pool running dry.
+func _crew_for_expedition() -> Array:
+	var n: int = maxi(1, seat_count)
+	var out: Array = []
+	var taken: Dictionary = {}
+	for i in range(n):
+		var ri: int = int(crew_claim[i]) if i < crew_claim.size() else -1
+		if ri >= 0 and ri < roster.size() and not taken.has(ri) and _crewable(roster[ri]):
+			taken[ri] = true
+			out.append(roster[ri])
+		else:
+			out.append({})
+	for i in range(n):
+		if not (out[i] as Dictionary).is_empty():
+			continue
+		var pick := -1
+		for k in range(roster.size()):
+			if not taken.has(k) and _crewable(roster[k]):
+				pick = k
+				break
+		if pick < 0:
+			roster.append(_make_heir(i))
+			pick = roster.size() - 1
+		taken[pick] = true
+		out[i] = roster[pick]
+	return out
+
+## A downed dwarf leaves the CREW but stays in the POOL — it is riding the wagon, not deleted. Its
+## seat is refilled from the pool if the company has anyone spare, and only otherwise with an heir.
 func _reseat_fallen() -> void:
 	if mode == Mode.SOLO:
 		return
-	var reseated := false
-	for i in range(roster.size()):
-		var d: Dictionary = roster[i]
+	for i in range(exp_crew.size()):
+		var d: Dictionary = exp_crew[i]
 		if not bool(d.get("downed", false)) and str(d["status"]) != "lost":
 			continue
 		d["seat"] = i
-		carried.append(d)
-		roster[i] = _make_heir(i)
-		reseated = true
-		_msg("%s is dragged onto the wagon — %s takes up their axe." % [d["name"], roster[i]["name"]])
-	if reseated:
-		exp_crew = roster
+		if not _has_ref(carried, d):
+			carried.append(d)
+		var rep: Dictionary = {}
+		for k in range(roster.size()):
+			var cand: Dictionary = roster[k]
+			if _crewable(cand) and not _has_ref(exp_crew, cand) and not _has_ref(carried, cand):
+				rep = cand
+				break
+		if rep.is_empty():
+			rep = _make_heir(i)
+			roster.append(rep)
+		exp_crew[i] = rep
+		_msg("%s is dragged onto the wagon — %s takes up their axe." % [d["name"], rep["name"]])
 
 func _make_heir(i: int) -> Dictionary:
 	var cls: String = str(seats[i].get("cls", "warrior")) if i < seats.size() else "warrior"
@@ -3023,65 +4491,86 @@ func _clear_ds(d: Dictionary) -> void:
 	d["ds_success"] = 0
 	d["ds_fail"] = 0
 
-## The expedition is over: the wagon comes home. Whoever survived their saves takes their seat back
-## from the stand-in. Whoever did not is gone — but their SEAT is never left with a corpse in it,
-## because a player staring at a corpse for the rest of the campaign is not playing the game.
+## The expedition is over: the wagon comes home. Whoever survived their saves is patched up and stays
+## on the company's books. Whoever did not is gone, and their deck with them. No seat is ever left
+## holding a corpse — a player staring at one for the rest of the campaign is not playing the game.
 func _wagon_home(kind: String) -> void:
 	for d: Dictionary in carried:
 		if kind == "wipe":
 			_finish_saves(d)   # a wipe gives the dying no more time
-		var si: int = int(d.get("seat", -1))
 		if str(d["status"]) == "lost":
 			_msg("%s never came home. Their deck dies with them." % d["name"])
 			continue
-		if si < 0 or si >= roster.size():
-			continue
 		_clear_ds(d)
 		d["hp"] = maxi(1, int(round(float(d["max_hp"]) * STABLE_HP_FRAC)))
-		roster[si] = d   # back on their feet, deck intact — the heir steps aside
-		_msg("%s is patched up and back in the line." % d["name"])
+		# No roster write at all any more: a carried dwarf never LEFT the pool, it only left the
+		# crew. That is what makes the old double-overwrite (two survivors from one seat, the second
+		# deleting the first) structurally impossible rather than merely guarded against.
+		_msg("%s is patched up and back on the company's books." % d["name"])
 	carried = []
-	# A wipe never reseats (there was nobody left standing to do the dragging), so settle those seats
-	# here too: dead seats get an heir, downed-but-alive seats get up.
-	for i in range(roster.size()):
-		var d2: Dictionary = roster[i]
+	# A wipe never reseats (nobody was left standing to do the dragging), so settle the crew here.
+	for d2: Dictionary in exp_crew:
 		if str(d2["status"]) == "lost":
-			roster[i] = _make_heir(i)
-		elif bool(d2["downed"]) or bool(d2["stable"]):
+			continue
+		if bool(d2["downed"]) or bool(d2["stable"]):
 			_clear_ds(d2)
 			d2["hp"] = maxi(1, int(round(float(d2["max_hp"]) * STABLE_HP_FRAC)))
-	exp_crew = roster
+	# THE DEAD LEAVE THE COMPANY. Under the old seat model a corpse was replaced in place by an heir,
+	# so none ever accumulated; a pool would just collect them — unfieldable entries cluttering every
+	# roster list, for a loss the outcome screen has already reported.
+	var live: Array = []
+	for d3: Dictionary in roster:
+		if str(d3["status"]) != "lost":
+			live.append(d3)
+	roster = live
+	var crew: Array = []
+	for d4: Dictionary in exp_crew:
+		if str(d4["status"]) != "lost":
+			crew.append(d4)
+	exp_crew = crew
+	# ⚠ Claims are ROSTER INDICES, and the purge above just shifted them. A stale claim would not
+	# error — it would silently crew a different dwarf than the one that seat picked.
+	crew_claim = []
+	_ensure_claims()
 
 # ---------------------------------------------------------------- Personal claims (host-side)
-## Loot is PERSONAL: one card leaves the tile and it joins the claimer's own deck. First tap wins —
-## which is a conversation, not a mechanic, and that is the point.
-func _claim_loot(seat: int, i: int) -> void:
+## Spoils are COMPANY property: one card leaves the tile and the table votes on which dwarf learns
+## it. `target` is a ROSTER index, not a seat — with a shared pool the claimer and the recipient are
+## no longer the same person by construction.
+func _claim_loot(target: int, i: int) -> void:
 	if state != "HEXREWARD" or i < 0 or i >= hex_loot.size():
 		return
-	if seat < 0 or seat >= roster.size():
+	if target < 0 or target >= roster.size():
 		return
 	var cid: String = hex_loot[i]
-	var d: Dictionary = roster[seat]
+	var d: Dictionary = roster[target]
 	(d["deck"] as Array).append(cid)
 	_msg("%s claimed %s." % [d["name"], str(Db.CARDS[cid]["name"])])
 	hex_loot = []
 	hex_loot_pick = -1
 	await _resume_hex(run_epoch)
 
-## You buy for your OWN dwarf, out of the SHARED purse. Above the rent line that is nobody's business
-## but yours; below it, _is_ring() has already made the table agree before we ever get here.
-func _buy_shop(seat: int, i: int) -> void:
-	if i < 0 or i >= shop_stock.size() or seat < 0 or seat >= roster.size():
+## The table has ALREADY agreed, in _is_ring/_resolve_ring, to this good going to this dwarf.
+## `target` is a ROSTER index carried in the proposal — never the proposer's seat, because with one
+## shared pool the person who suggests a purchase and the dwarf who receives it are unrelated.
+func _buy_shop(target: int, i: int) -> void:
+	if i < 0 or i >= shop_stock.size() or target < 0 or target >= roster.size():
 		return
 	var s: Dictionary = shop_stock[i]
 	if bool(s.get("sold", false)) or treasury < int(s["cost"]):
 		return
-	var d: Dictionary = roster[seat]
+	var d: Dictionary = roster[target]
 	match str(s["kind"]):
 		"card":
 			(d["deck"] as Array).append(s["cid"])
 			_msg("%s bought %s." % [d["name"], str(Db.CARDS[s["cid"]]["name"])])
 		"heal":
+			# Clearing the WOUND is the point — every shelf tag for this good says so ("mend one
+			# wound"), and the older list path always did it. Topping HP alone made the room's
+			# apothecary quietly weaker than the same purchase off a menu.
+			if str(d["status"]) == "wounded":
+				d["status"] = "ready"
+				d["recover"] = 0
 			d["hp"] = int(d["max_hp"])
 			_msg("%s is patched up to full." % d["name"])
 		_:
@@ -3089,7 +4578,5 @@ func _buy_shop(seat: int, i: int) -> void:
 	treasury -= int(s["cost"])
 	_tween_treasury_to(treasury)
 	s["sold"] = true
-	if state == "CONTRACTS":
-		_clear_screen()
-		_build_contracts()
+	_rebuild_current()
 	_refresh_hud()
