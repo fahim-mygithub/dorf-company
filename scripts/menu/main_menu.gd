@@ -1,9 +1,15 @@
 extends Control
-## Main menu: Solo / Host / Join. Host+Join dial Net (Supabase) and enter the lobby;
-## Solo drops straight into today's single-player combat with Net untouched.
+## Main menu: Campaign / Host / Join (+ Quick Fight). Host+Join dial Net (Supabase) and enter
+## the lobby; both solo paths leave Net untouched.
+##
+## Solo Play used to mean COMBAT, from when a skirmish was the whole game. The campaign is the
+## game now, so the primary solo button opens it and the bare skirmish is demoted to a secondary
+## "Quick Fight" (still worth keeping — it is the fastest way to look at a card or an enemy move
+## without playing a month first).
 
 const LOBBY := "res://scenes/menu/lobby.tscn"
 const COMBAT := "res://scenes/combat/combat.tscn"
+const OVERWORLD := "res://scenes/overworld/overworld.tscn"
 const BuildInfo := preload("res://scripts/menu/build_info.gd")
 const CODE_CHARS := "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no ambiguous 0/O/1/I/L
 
@@ -23,9 +29,10 @@ func _build() -> void:
 	_lbl("DORF COMPANY", Vector2(0, 210), Vector2(720, 64), 46)
 	_lbl("- a quarterly raid -", Vector2(0, 286), Vector2(720, 30), 20, Color(0.7, 0.7, 0.78))
 	_lbl("🛡️   ⛑️   🧙", Vector2(0, 344), Vector2(720, 64), 44)
-	_btn("Solo Play", 560, _on_solo)
+	_btn("🏰  Campaign", 560, _on_campaign)
 	_btn("Host Room", 650, _on_host)
 	_btn("Join Room", 740, _on_join)
+	_btn("Quick Fight", 1130, _on_quick_fight, 18, Vector2(200, 46))
 	code_input = LineEdit.new()
 	code_input.placeholder_text = "ROOM CODE"
 	code_input.max_length = 4
@@ -53,12 +60,12 @@ func _lbl(text: String, pos: Vector2, sz: Vector2, font: int, col := Color.WHITE
 	add_child(l)
 	return l
 
-func _btn(text: String, y: float, cb: Callable) -> void:
+func _btn(text: String, y: float, cb: Callable, font: int = 24, sz := Vector2(300, 64)) -> void:
 	var b := Button.new()
 	b.text = text
-	b.add_theme_font_size_override("font_size", 24)
-	b.position = Vector2(210, y)
-	b.size = Vector2(300, 64)
+	b.add_theme_font_size_override("font_size", font)
+	b.position = Vector2(360.0 - sz.x * 0.5, y)
+	b.size = sz
 	b.pressed.connect(cb)
 	add_child(b)
 
@@ -68,13 +75,23 @@ func _rand_code() -> String:
 		s += CODE_CHARS[randi() % CODE_CHARS.length()]
 	return s
 
-func _on_solo() -> void:
+## Both solo entries hang up first. Clearing BOTH request dicts is the load-bearing part: each
+## scene's _ready CONSUMES the matching one, and a leftover from an abandoned co-op lobby would
+## boot the solo run as a CLIENT waiting on a host that is not coming.
+func _go_solo(scene: String) -> void:
 	Net.disconnect_realtime()
 	Net.room_code = ""
 	Net.is_authority = false
 	Net.my_seat = -1
 	Net.combat_request = {}
-	get_tree().change_scene_to_file(COMBAT)
+	Net.campaign_request = {}
+	get_tree().change_scene_to_file(scene)
+
+func _on_campaign() -> void:
+	_go_solo(OVERWORLD)
+
+func _on_quick_fight() -> void:
+	_go_solo(COMBAT)
 
 func _on_host() -> void:
 	Net.ensure_peer_id()
