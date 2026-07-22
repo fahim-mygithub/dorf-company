@@ -212,7 +212,10 @@ const STABLE_HP_FRAC := 0.25  # a dwarf who survives their death saves comes hom
 const HELLO_SEC := 3.0        # client heartbeat
 const ABSENT_SEC := 12.0      # silent this long and the seat stops blocking the ring (AFK escape hatch)
 const INTENT_RETRY_SEC := 1.2 # broadcast is fire-and-forget: keep knocking until the host acks
-const RING_KINDS := ["embark", "hex", "extract", "event", "endmonth"]
+## Every shared consequence is the table's. `loot` joined because a card leaving the tile is company
+## property being assigned, and `restart` because one seat wiping the company for everyone was the
+## single most destructive un-voted action on the board.
+const RING_KINDS := ["embark", "hex", "extract", "event", "endmonth", "loot", "loot_skip", "restart", "hire"]
 
 var mode: int = Mode.SOLO
 var request: Dictionary = {}     # lobby/harness handoff; set BEFORE add_child (parsed in _ready)
@@ -221,6 +224,7 @@ var seat_count := 1
 var seats: Array = []            # [{name, cls, present}] — seat i pilots roster[i], for the whole campaign
 var ring: Dictionary = {}        # the open proposal: {pid, kind, arg, by, required:[seat], ayes:[seat]}
 var carried: Array = []          # co-op: the fallen, riding the wagon, still rolling death saves
+var crew_claim: Array = []       # co-op: seat i -> roster index it has claimed for the next job (-1 = none)
 var fight_req: Dictionary = {}   # non-empty = a fight is live; the host-rolled request EVERY peer runs
 var outcome: Dictionary = {}     # view-model for the OUTCOME screen (clients can't replay the beats)
 var over_kind := ""              # GAMEOVER reason, replicated
@@ -498,6 +502,8 @@ func _new_run() -> void:
 	selected_contract = -1
 	ring = {}
 	carried = []
+	crew_claim = []
+	_ensure_claims()
 	fight_req = {}
 	outcome = {}
 	over_kind = ""
@@ -609,7 +615,9 @@ func _make_contract(tier: String, zone: int) -> Dictionary:
 	# that it is a real map.
 	var cs: int = int(CREW_SIZE[tier])
 	if mode != Mode.SOLO:
-		cs = roster.size()
+		# One body per player. It used to be the whole roster, which is only the same number while
+		# the pool cannot grow — and the pool grows now.
+		cs = maxi(1, seat_count)
 	return {
 		"tier": tier,
 		"zone": zone,
@@ -942,7 +950,7 @@ func _embark() -> void:
 	current = c
 	if USE_REAL_COMBAT and c.get("fight", false):
 		if mode != Mode.SOLO:
-			current["crew"] = roster.duplicate()   # co-op: the crew IS the table — no crew-select screen
+			current["crew"] = _crew_for_expedition()   # each seat's claim, auto-filled where unclaimed
 			_open_expedition(c)
 			return
 		if CREW_SELECT:
@@ -2258,21 +2266,12 @@ func _roll_hex_loot() -> Array:
 func _build_hex_reward() -> void:
 	_mklabel("— SPOILS —", Vector2(0, 200), Vector2(720, 28), 22, screen_root)
 	var xs := [40, 268, 496]
-	if mode != Mode.SOLO:
-		# Co-op: one card leaves this tile. Tap it and it is YOURS — first claim wins, so talk fast.
-		_mklabel("One card leaves this room. Claim it and it joins YOUR deck — first tap wins.",
-			Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
-		for i in range(hex_loot.size()):
-			_build_hex_loot_card(i, xs[i])
-		var skip2 := Button.new()
-		skip2.text = "Leave it"
-		skip2.add_theme_font_size_override("font_size", 18)
-		skip2.position = Vector2(285, 1150)
-		skip2.size = Vector2(150, 62)
-		skip2.pressed.connect(_on_hexloot_skip)
-		screen_root.add_child(skip2)
-		return
-	_mklabel("Take a card for the company — then the dwarf who learns it.", Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
+	# Co-op used to be "first tap wins, for YOUR deck". Spoils are company property, so both modes now
+	# take the same two-step — pick the card, then the dwarf — and in co-op that pair is what the
+	# table votes on.
+	_mklabel("Take a card for the company — then the dwarf who learns it." if mode == Mode.SOLO
+		else "Pick a card, then who learns it — the table votes on the pair.",
+		Vector2(0, 238), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
 	for i in range(hex_loot.size()):
 		_build_hex_loot_card(i, xs[i])
 	_mklabel("give to:", Vector2(0, 720), Vector2(720, 20), 14, screen_root, true, Color(0.8, 0.8, 0.85))
@@ -2331,9 +2330,8 @@ func _on_hexloot_card_input(event: InputEvent, i: int) -> void:
 	if state != "HEXREWARD":
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if mode != Mode.SOLO:
-			_intent("loot", str(i))   # claims it for MY dwarf
-			return
+		# Picking the card is LOCAL in both modes — it is half a proposal, not a decision. The intent
+		# only goes out once a recipient names the other half.
 		hex_loot_pick = i
 		_msg("%s — now tap the dwarf who learns it." % Db.CARDS[hex_loot[i]]["name"])
 		_clear_screen()
@@ -2346,12 +2344,19 @@ func _on_hexloot_target_input(event: InputEvent, d: Dictionary) -> void:
 		if hex_loot_pick < 0:
 			_msg("Pick a card first.")
 			return
-		var cid: String = hex_loot[hex_loot_pick]
-		d["deck"].append(cid)
-		_msg("%s learned %s." % [d["name"], Db.CARDS[cid]["name"]])
-		hex_loot = []
-		hex_loot_pick = -1
-		await _resume_hex(run_epoch)
+		# Resolve the tapped dwarf to a ROSTER index — the strip is built from exp_crew, which is a
+		# subset of the pool, so its position is not the roster position.
+		var ri := -1
+		for k in range(roster.size()):
+			if is_same(roster[k], d):
+				ri = k
+				break
+		if ri < 0:
+			return
+		if mode != Mode.SOLO:
+			_intent("loot", "%d:%d" % [hex_loot_pick, ri])
+			return
+		await _claim_loot(ri, hex_loot_pick)
 
 func _on_hexloot_skip() -> void:
 	if state != "HEXREWARD":   # guard parity with the other loot handlers (no double-fire after rebuild)
@@ -2539,13 +2544,12 @@ func _reroll_shop() -> void:
 	pool.shuffle()
 	shop_stock.append({"kind": "card", "cid": pool[0], "cost": SHOP_CARD_COST})
 	shop_stock.append({"kind": "heal", "cost": SHOP_HEAL_COST})
-	if mode == Mode.SOLO:
-		var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
-		var rc: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]   # recruits draw from the full roster
-		shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
-	else:
-		# Co-op has no Recruit: seats are fixed and the wagon rule already refills a dead dwarf.
-		shop_stock.append({"kind": "card", "cid": pool[1], "cost": SHOP_CARD_COST})
+	# Co-op stocks a recruit too now. It used to be pointless — seats were fixed, so a hire would have
+	# benched a PLAYER — but the crew is drawn from a shared pool, so a new hand is a real body anyone
+	# can take onto the next job.
+	var rn: String = RECRUIT_NAMES[randi() % RECRUIT_NAMES.size()]
+	var rc: String = Db.ROLL_POOL[randi() % Db.ROLL_POOL.size()]   # recruits draw from the full roster
+	shop_stock.append({"kind": "recruit", "name": rn, "cls": rc, "cost": SHOP_RECRUIT_COST})
 
 func _build_shop_panel() -> void:
 	# Recruit has its own venue, so the shelf carries goods only — one door per purchase. Co-op never
@@ -2769,7 +2773,8 @@ func _build_snap() -> Dictionary:
 		"shop_stock": shop_stock,
 		"hexes": hexes, "hex_cur": hex_cur, "exp_contract": _strip_crew(exp_contract),
 		"exp_loot_gold": exp_loot_gold, "hex_loot": hex_loot,
-		"ring": ring, "seats": seats, "seat_iseq": _seat_iseq,
+		"ring": ring, "seats": seats, "seat_iseq": _seat_iseq, "crew_claim": crew_claim,
+		"crew_idx": _crew_idx(),
 		"fight": fight_req, "outcome": outcome, "msg": msg_text,
 	}
 
@@ -2835,6 +2840,7 @@ func _apply_snap(s: Dictionary) -> void:
 	carried = _norm(s.get("carried", []))
 	contracts = _norm(s.get("contracts", []))
 	selected_contract = int(s.get("selected_contract", -1))
+	crew_claim = _norm(s.get("crew_claim", []))
 	shop_stock = _norm(s.get("shop_stock", []))
 	hexes = _norm(s.get("hexes", {}))
 	var prev_cur := hex_cur
@@ -2850,7 +2856,14 @@ func _apply_snap(s: Dictionary) -> void:
 	outcome = _norm(s.get("outcome", {}))
 	fight_req = _norm(s.get("fight", {}))
 	current = exp_contract
-	exp_crew = roster          # co-op: the crew IS the table, in seat order
+	# The crew is a SUBSET of the pool now, so it cannot be derived — it rides as roster indices, and
+	# is rebuilt here into references so a client's exp_crew aliases its own roster exactly as the
+	# host's does (HP written through one shows through the other).
+	exp_crew = []
+	for k in _norm(s.get("crew_idx", [])):
+		var ki: int = int(k)
+		if ki >= 0 and ki < roster.size():
+			exp_crew.append(roster[ki])
 	_msg(str(s.get("msg", "")))
 	# The host echoes each seat's applied iseq: that IS the ack, and it is in every snapshot — so a
 	# client can see it even if the one snapshot that first carried it was the one that dropped.
@@ -2972,14 +2985,14 @@ func _authority_intent(p: Dictionary) -> void:
 
 ## Is this decision the whole table's to make? Consequence decides, not the name: a shop buy is
 ## yours alone until it eats the rent money, and then it is everybody's problem.
-## A voted purchase has to name BOTH the good and who gets it: with one shared pool of dwarves the
+## A voted spend has to name BOTH the thing and who gets it: with one shared pool of dwarves the
 ## proposer is not automatically the owner, so the table is agreeing to "this, for them".
 ## ⚠ MEASURED, not assumed: `int("2:1")` is **21** in GDScript — it discards the separator and
 ## CONCATENATES the digit runs, and it does not error. A reader that forgot to split therefore gets a
 ## plausible-looking index rather than a crash: usually out of range and so dropped, but on a longer
 ## stock `int("1:2") == 12` is a real slot and the wrong good is bought silently. Every reader of a
 ## buy arg goes through here, so there is exactly one place to forget.
-func _parse_buy(arg: String) -> Vector2i:
+func _parse_pair(arg: String) -> Vector2i:
 	var parts := arg.split(":")
 	if parts.size() != 2:
 		return Vector2i(-1, -1)
@@ -2993,13 +3006,24 @@ func _is_ring(kind: String, arg: String) -> bool:
 		return false
 	if kind == "hex" and (state != "HEX" or not _hex_step_allowed(arg)):
 		return false
+	if kind == "loot":
+		# Same validation the shop gets: a proposal the table cannot actually execute must never
+		# reach the table. A bad arg opens no ring rather than burning a unanimous vote on nothing.
+		var l := _parse_pair(arg)
+		return state == "HEXREWARD" and l.x >= 0 and l.x < hex_loot.size() \
+			and l.y >= 0 and l.y < roster.size()
+	if kind == "restart":
+		return state == "GAMEOVER"
+	if kind == "hire":
+		var hi: int = int(arg)
+		return hi >= 0 and hi < shop_stock.size() 			and str(shop_stock[hi].get("kind", "")) == "recruit" 			and not bool(shop_stock[hi].get("sold", false)) and treasury >= int(shop_stock[hi]["cost"])
 	if RING_KINDS.has(kind):
 		return true
 	if kind == "shop":
 		# EVERY spend out of the shared purse is the table's call — not only the ones that dip under
 		# the rent line. One company, one purse, one vote. A malformed arg opens no ring at all
 		# rather than a ring that resolves to nothing and wastes everyone's aye.
-		var b := _parse_buy(arg)
+		var b := _parse_pair(arg)
 		return b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size()
 	return false
 
@@ -3025,14 +3049,13 @@ func _apply_free(seat: int, kind: String, arg: String) -> void:
 			if busy:
 				return
 			_do_continue()
-		"loot":
-			_claim_loot(seat, int(arg))
-		"loot_skip":
-			if state == "HEXREWARD":
-				_do_hexloot_skip()
-		"restart":
-			if state == "GAMEOVER":
-				_new_run()
+		"crew":
+			# Claiming who YOU will pilot is a personal pick, not a shared consequence — the shared
+			# decision is the embark vote that follows. Any pool dwarf can fill any seat; taking one
+			# another seat already holds is refused rather than stealing it.
+			_claim_crew(seat, int(arg))
+		_:
+			pass   # loot / loot_skip / restart are RINGS now — see _resolve_ring
 
 # ---------------------------------------------------------------- The ring
 ## A proposal lights a pip beside every seat and fires only when they are all lit. Proposing IS your
@@ -3106,9 +3129,21 @@ func _resolve_ring(kind: String, arg: String, by: int) -> void:
 		"shop":
 			# `by` is who PROPOSED it; the recipient rides the arg, because the table just agreed to
 			# a specific dwarf getting it and that need not be the proposer's own.
-			var b := _parse_buy(arg)
+			var b := _parse_pair(arg)
 			_buy_shop(b.y, b.x)
 			_push()
+		"loot":
+			# Same shape as a buy: the table agreed to a specific card going to a specific dwarf.
+			var l := _parse_pair(arg)
+			await _claim_loot(l.y, l.x)
+		"loot_skip":
+			if state == "HEXREWARD":
+				await _do_hexloot_skip()
+		"restart":
+			if state == "GAMEOVER":
+				_new_run()
+		"hire":
+			_buy_recruit(int(arg))
 
 func _ring_label(kind: String, arg: String) -> String:
 	match kind:
@@ -3127,12 +3162,27 @@ func _ring_label(kind: String, arg: String) -> String:
 		"endmonth":
 			return "end the month (rent %dg)" % fee
 		"shop":
-			var b := _parse_buy(arg)
+			var b := _parse_pair(arg)
 			if b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size():
 				var under := "" if treasury - int(shop_stock[b.x]["cost"]) >= fee else "  ⚠ under the rent"
 				return "spend %dg on %s for %s%s" % [int(shop_stock[b.x]["cost"]),
 					_good_name(b.x), str(roster[b.y]["name"]), under]
 			return "spend from the purse"
+		"loot":
+			var l := _parse_pair(arg)
+			if l.x >= 0 and l.x < hex_loot.size() and l.y >= 0 and l.y < roster.size():
+				return "give %s to %s" % [str(Db.CARDS[hex_loot[l.x]]["name"]), str(roster[l.y]["name"])]
+			return "claim the spoils"
+		"loot_skip":
+			return "leave the spoils and move on"
+		"restart":
+			return "disband and start a NEW company"
+		"hire":
+			var hi: int = int(arg)
+			if hi >= 0 and hi < shop_stock.size():
+				return "sign %s for %dg" % [str(shop_stock[hi].get("name", "a new hand")),
+					int(shop_stock[hi]["cost"])]
+			return "take on a new hand"
 	return kind
 
 func _good_name(i: int) -> String:
@@ -3651,16 +3701,45 @@ func _sheet_dwarf() -> void:
 			order.append(k)
 		count[k] = int(count[k]) + 1
 	var rows: int = int(ceil(float(order.size()) * 0.5))
-	var h: float = 100.0 + 96.0 + float(rows) * 56.0 + 14.0
+	var coop: bool = mode != Mode.SOLO
+	var h: float = 100.0 + 96.0 + float(rows) * 56.0 + 14.0 + (64.0 if coop else 0.0)
 	var panel := _sheet_frame(str(d["name"]), "%s · %s · %d cards in the deck"
 		% [str(Db.CLASSES[d["cls"]]["name"]), str(Db.CLASSES[d["cls"]]["role"]).to_upper(),
 		(d["deck"] as Array).size()], h)
 	_crew_row(d, panel, 12.0, 92.0, SHEET_W - 24.0, 86.0)
+	var top := 194.0
+	if coop:
+		# ANY pool dwarf can fill ANY seat, so this is where you take one. It is a personal pick and
+		# stays a free intent — the shared decision is the embark vote that follows.
+		_ensure_claims()
+		var holder := _claimed_by(sheet_arg)
+		var take := Button.new()
+		if holder == my_seat:
+			take.text = "◀ Stand down"
+		elif holder >= 0:
+			take.text = "%s is taking them" % _seat_name(holder)
+			take.disabled = true
+		elif not _crewable(d):
+			take.text = "Not fit to march"
+			take.disabled = true
+		else:
+			take.text = "⚔️ I'll take %s" % str(d["name"]).split(" ")[0]
+		take.add_theme_font_size_override("font_size", 17)
+		take.position = Vector2(SHEET_W * 0.5 - 150.0, 190)
+		take.size = Vector2(300, 48)
+		take.pressed.connect(_on_take_crew.bind(sheet_arg))
+		panel.add_child(take)
+		top = 254.0
 	var cw: float = (SHEET_W - 30.0) * 0.5
 	for i in range(order.size()):
-		var cy: float = 194.0 + floorf(float(i) * 0.5) * 56.0
+		var cy: float = top + floorf(float(i) * 0.5) * 56.0
 		_sheet_card_chip(str(order[i]), int(count[order[i]]), panel,
 			12.0 + float(i % 2) * (cw + 6.0), cy, cw)
+
+func _on_take_crew(ri: int) -> void:
+	if busy or mode == Mode.SOLO:
+		return
+	_intent("crew", str(ri))
 
 func _sheet_card_chip(cid: String, n: int, panel: Control, x: float, y: float, w: float) -> void:
 	var def: Dictionary = Db.CARDS.get(cid, {})
@@ -3741,6 +3820,14 @@ func _sheet_contract_row(i: int, panel: Control, y: float) -> void:
 		_mklabel("need %d ready — you have %d" % [cs, ready], Vector2(112, y + 92), Vector2(w - 292, 20),
 			13, panel, false, C_RED)
 		return
+	if mode != Mode.SOLO:
+		# Say it BEFORE the vote: an unclaimed seat is auto-filled, and the table should know that is
+		# what it is agreeing to rather than discover it on the first tile.
+		var un := _seats_unclaimed()
+		_mklabel("every seat has picked their dwarf" if un == 0
+			else "%d seat%s not picked — they get whoever is spare" % [un, "" if un == 1 else "s"],
+			Vector2(112, y + 92), Vector2(w - 292, 20), 13, panel, false,
+			C_GREEN if un == 0 else C_AMBER)
 	var go := Button.new()
 	if mode == Mode.SOLO:
 		go.text = "Embark"
@@ -3832,11 +3919,6 @@ func _sheet_buy(i: int) -> void:
 	_rebuild_current()
 
 func _sheet_hire() -> void:
-	if mode != Mode.SOLO:
-		var pc := _sheet_frame("— THE RECRUITMENT HALL —", "Seats are fixed for the whole campaign.", 260.0)
-		_mklabel("Every seat is a player, so nobody is hired over one. A dwarf who goes down\nrides the wagon, and an heir takes the seat on the next tile.",
-			Vector2(20, 110), Vector2(SHEET_W - 40, 80), 15, pc, true, Color(0.72, 0.68, 0.58))
-		return
 	var ri := _shop_slot_of("recruit")
 	if ri < 0 or bool(shop_stock[ri].get("sold", false)):
 		var pe := _sheet_frame("— THE RECRUITMENT HALL —", "The bench is empty.", 220.0)
@@ -3859,7 +3941,8 @@ func _sheet_hire() -> void:
 		C_COIN if afford else C_RED)
 	if afford:
 		var hire := Button.new()
-		hire.text = "Sign %s — %dg" % [str(s["name"]), cost]
+		hire.text = "Sign %s — %dg" % [str(s["name"]), cost] if mode == Mode.SOLO \
+			else "Put %s to the crew — %dg" % [str(s["name"]), cost]
 		hire.add_theme_font_size_override("font_size", 18)
 		hire.position = Vector2(SHEET_W * 0.5 - 150.0, 344)
 		hire.size = Vector2(300, 56)
@@ -3910,9 +3993,6 @@ func _venue_status(key: String) -> Array:
 			return ["%d ON THE SHELF" % left, C_COIN if left > 0 else Color(0.6, 0.6, 0.64),
 				"brass_lo" if left > 0 else "dim"]
 		"recruit":
-			if mode != Mode.SOLO:
-				# Co-op seats are fixed — a benched dwarf would be a benched PLAYER.
-				return ["SEATS ARE FIXED", Color(0.6, 0.6, 0.64), "dim"]
 			for s in shop_stock:
 				if str(s.get("kind", "")) == "recruit" and not bool(s.get("sold", false)):
 					return ["1 WAITING", C_COIN, "brass_lo"]
@@ -4139,13 +4219,6 @@ func _build_recruit() -> void:
 		_build_back_to_town()
 		return
 	_build_venue_header("— THE RECRUITMENT HALL —", "A roster you cannot field is the real loss.")
-	if mode != Mode.SOLO:
-		_mklabel("Seats are fixed for the whole campaign.", Vector2(0, 470), Vector2(720, 26), 19,
-			screen_root, true, Color(0.86, 0.84, 0.78))
-		_mklabel("Every seat is a player. Nobody gets hired over one — a dwarf who goes down\nrides the wagon and an heir takes the seat on the next tile.",
-			Vector2(0, 508), Vector2(720, 60), 15, screen_root, true, Color(0.68, 0.65, 0.58))
-		_build_back_to_town()
-		return
 	var ri := -1
 	for i in range(shop_stock.size()):
 		if str(shop_stock[i].get("kind", "")) == "recruit":
@@ -4185,9 +4258,12 @@ func _build_recruit() -> void:
 	_build_back_to_town()
 
 func _on_hire(i: int) -> void:
-	if busy or mode != Mode.SOLO:
+	if busy:
 		return
 	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
+	if mode != Mode.SOLO:
+		_intent("hire", str(i))   # a new hand is a spend out of the shared purse, so the table decides
+		return
 	_buy_recruit(i)
 
 # ---------------------------------------------------------------- The nested fight
@@ -4250,28 +4326,144 @@ func _client_join_fight() -> void:
 func _party_scale() -> float:
 	if mode == Mode.SOLO:
 		return 0.0
-	return float(roster.size() - 3) * PARTY_STEP
+	# The term means "how many dwarves are actually FIGHTING". It read roster.size() while the crew
+	# WAS the roster; the pool can outgrow the table now, and a dwarf sitting in the tavern must not
+	# make the enemies on the board harder.
+	var n: int = exp_crew.size() if not exp_crew.is_empty() else maxi(1, seat_count)
+	return float(n - 3) * PARTY_STEP
 
 # ---------------------------------------------------------------- Death without lockout
 ## A dwarf that goes down is hauled onto the WAGON — it keeps rolling its death saves there — and the
-## player takes an HEIR at the same seat on the very next tile. Nobody watches the rest of an
-## expedition. If the original stabilises it takes its seat back at the end, deck and all; the heir
-## was only ever a stand-in. If it bleeds out, the heir keeps the seat and the DECK is what you lost.
+## player picks up a REPLACEMENT at the same seat on the very next tile. Nobody watches the rest of
+## an expedition. The replacement is a spare from the POOL where the company has one, and only a
+## freshly minted heir when it does not. A carried dwarf never leaves the pool, so surviving its
+## saves simply puts it back on its feet, deck and all; bleeding out is what costs you the deck.
+## Identity, not equality: these arrays hold REFERENCES to the same roster dicts, and Dictionary `==`
+## in Godot 4 compares contents — two dwarves rolled with the same name and class would collide.
+## The crew, as positions in the pool. Identity-matched because these ARE roster dicts.
+func _crew_idx() -> Array:
+	var out: Array = []
+	for d in exp_crew:
+		var k := -1
+		for i in range(roster.size()):
+			if is_same(roster[i], d):
+				k = i
+				break
+		out.append(k)
+	return out
+
+func _has_ref(arr: Array, d: Dictionary) -> bool:
+	for x in arr:
+		if is_same(x, d):
+			return true
+	return false
+
+func _crewable(d: Dictionary) -> bool:
+	return str(d.get("status", "")) == "ready" and int(d.get("hp", 0)) > 0
+
+## crew_claim is sized to the table, never to the roster: it is "who each SEAT is taking", so it
+## survives the pool growing and shrinking underneath it.
+func _ensure_claims() -> void:
+	var n: int = maxi(1, seat_count)
+	while crew_claim.size() < n:
+		crew_claim.append(-1)
+	while crew_claim.size() > n:
+		crew_claim.pop_back()
+
+## Which seat, if any, has this roster index. -1 for nobody.
+func _claimed_by(ri: int) -> int:
+	for i in range(crew_claim.size()):
+		if int(crew_claim[i]) == ri:
+			return i
+	return -1
+
+func _claim_crew(seat: int, ri: int) -> void:
+	if mode == Mode.SOLO or busy:
+		return
+	_ensure_claims()
+	if seat < 0 or seat >= crew_claim.size():
+		return
+	if ri < 0 or ri >= roster.size() or not _crewable(roster[ri]):
+		return
+	var holder := _claimed_by(ri)
+	if holder == seat:
+		crew_claim[seat] = -1                       # tapping your own claim releases it
+		_msg("%s stands down." % str(roster[ri]["name"]))
+	elif holder >= 0:
+		_msg("%s is already spoken for by %s." % [str(roster[ri]["name"]), _seat_name(holder)])
+		return
+	else:
+		crew_claim[seat] = ri
+		_msg("%s takes %s." % [_seat_name(seat), str(roster[ri]["name"])])
+	_rebuild_current()
+
+## How many seats still have nobody. The zone ledger reads this so the table can see, before it
+## votes, that somebody has not picked yet.
+func _seats_unclaimed() -> int:
+	_ensure_claims()
+	var n := 0
+	for i in range(crew_claim.size()):
+		var ri: int = int(crew_claim[i])
+		if ri < 0 or ri >= roster.size() or not _crewable(roster[ri]):
+			n += 1
+	return n
+
+## THE CREW IS DRAWN FROM THE POOL, and seat i pilots exp_crew[i]. Combat already indexes its party
+## by seat (`active_idx = my_seat` against `request.crew`), so this array IS the seat binding and
+## there is nowhere else to change. Any pool dwarf can fill any seat.
+##
+## A seat that has claimed nobody is auto-filled, and if the pool cannot fill every seat we MINT an
+## heir rather than leave a player with nothing to pilot — that is the anti-lockout rule the wagon
+## was built for, and it has to survive the pool running dry.
+func _crew_for_expedition() -> Array:
+	var n: int = maxi(1, seat_count)
+	var out: Array = []
+	var taken: Dictionary = {}
+	for i in range(n):
+		var ri: int = int(crew_claim[i]) if i < crew_claim.size() else -1
+		if ri >= 0 and ri < roster.size() and not taken.has(ri) and _crewable(roster[ri]):
+			taken[ri] = true
+			out.append(roster[ri])
+		else:
+			out.append({})
+	for i in range(n):
+		if not (out[i] as Dictionary).is_empty():
+			continue
+		var pick := -1
+		for k in range(roster.size()):
+			if not taken.has(k) and _crewable(roster[k]):
+				pick = k
+				break
+		if pick < 0:
+			roster.append(_make_heir(i))
+			pick = roster.size() - 1
+		taken[pick] = true
+		out[i] = roster[pick]
+	return out
+
+## A downed dwarf leaves the CREW but stays in the POOL — it is riding the wagon, not deleted. Its
+## seat is refilled from the pool if the company has anyone spare, and only otherwise with an heir.
 func _reseat_fallen() -> void:
 	if mode == Mode.SOLO:
 		return
-	var reseated := false
-	for i in range(roster.size()):
-		var d: Dictionary = roster[i]
+	for i in range(exp_crew.size()):
+		var d: Dictionary = exp_crew[i]
 		if not bool(d.get("downed", false)) and str(d["status"]) != "lost":
 			continue
 		d["seat"] = i
-		carried.append(d)
-		roster[i] = _make_heir(i)
-		reseated = true
-		_msg("%s is dragged onto the wagon — %s takes up their axe." % [d["name"], roster[i]["name"]])
-	if reseated:
-		exp_crew = roster
+		if not _has_ref(carried, d):
+			carried.append(d)
+		var rep: Dictionary = {}
+		for k in range(roster.size()):
+			var cand: Dictionary = roster[k]
+			if _crewable(cand) and not _has_ref(exp_crew, cand) and not _has_ref(carried, cand):
+				rep = cand
+				break
+		if rep.is_empty():
+			rep = _make_heir(i)
+			roster.append(rep)
+		exp_crew[i] = rep
+		_msg("%s is dragged onto the wagon — %s takes up their axe." % [d["name"], rep["name"]])
 
 func _make_heir(i: int) -> Dictionary:
 	var cls: String = str(seats[i].get("cls", "warrior")) if i < seats.size() else "warrior"
@@ -4299,71 +4491,75 @@ func _clear_ds(d: Dictionary) -> void:
 	d["ds_success"] = 0
 	d["ds_fail"] = 0
 
-## The expedition is over: the wagon comes home. Whoever survived their saves takes their seat back
-## from the stand-in. Whoever did not is gone — but their SEAT is never left with a corpse in it,
-## because a player staring at a corpse for the rest of the campaign is not playing the game.
+## The expedition is over: the wagon comes home. Whoever survived their saves is patched up and stays
+## on the company's books. Whoever did not is gone, and their deck with them. No seat is ever left
+## holding a corpse — a player staring at one for the rest of the campaign is not playing the game.
 func _wagon_home(kind: String) -> void:
-	# ⚠ One seat can put MORE THAN ONE dwarf on the wagon in a single expedition: the original goes
-	# down on tile 2, its heir goes down on tile 4, and both ride home. This loop used to write
-	# `roster[si] = d` unconditionally, so the second survivor SILENTLY DELETED the first — a living
-	# dwarf and every card ever bought into its deck, while the log cheerfully announced it was back
-	# in the line. The pool is shared, so a second survivor from one seat simply JOINS it.
-	var reclaimed: Dictionary = {}
 	for d: Dictionary in carried:
 		if kind == "wipe":
 			_finish_saves(d)   # a wipe gives the dying no more time
-		var si: int = int(d.get("seat", -1))
 		if str(d["status"]) == "lost":
 			_msg("%s never came home. Their deck dies with them." % d["name"])
 			continue
-		if si < 0 or si >= roster.size():
-			continue
 		_clear_ds(d)
 		d["hp"] = maxi(1, int(round(float(d["max_hp"]) * STABLE_HP_FRAC)))
-		if reclaimed.has(si):
-			roster.append(d)
-			_msg("%s walked home too — back on the company's books." % d["name"])
-			continue
-		reclaimed[si] = true
-		roster[si] = d   # back on their feet, deck intact — the heir steps aside
-		_msg("%s is patched up and back in the line." % d["name"])
+		# No roster write at all any more: a carried dwarf never LEFT the pool, it only left the
+		# crew. That is what makes the old double-overwrite (two survivors from one seat, the second
+		# deleting the first) structurally impossible rather than merely guarded against.
+		_msg("%s is patched up and back on the company's books." % d["name"])
 	carried = []
-	# A wipe never reseats (there was nobody left standing to do the dragging), so settle those seats
-	# here too: dead seats get an heir, downed-but-alive seats get up.
-	for i in range(roster.size()):
-		var d2: Dictionary = roster[i]
+	# A wipe never reseats (nobody was left standing to do the dragging), so settle the crew here.
+	for d2: Dictionary in exp_crew:
 		if str(d2["status"]) == "lost":
-			roster[i] = _make_heir(i)
-		elif bool(d2["downed"]) or bool(d2["stable"]):
+			continue
+		if bool(d2["downed"]) or bool(d2["stable"]):
 			_clear_ds(d2)
 			d2["hp"] = maxi(1, int(round(float(d2["max_hp"]) * STABLE_HP_FRAC)))
-	exp_crew = roster
+	# THE DEAD LEAVE THE COMPANY. Under the old seat model a corpse was replaced in place by an heir,
+	# so none ever accumulated; a pool would just collect them — unfieldable entries cluttering every
+	# roster list, for a loss the outcome screen has already reported.
+	var live: Array = []
+	for d3: Dictionary in roster:
+		if str(d3["status"]) != "lost":
+			live.append(d3)
+	roster = live
+	var crew: Array = []
+	for d4: Dictionary in exp_crew:
+		if str(d4["status"]) != "lost":
+			crew.append(d4)
+	exp_crew = crew
+	# ⚠ Claims are ROSTER INDICES, and the purge above just shifted them. A stale claim would not
+	# error — it would silently crew a different dwarf than the one that seat picked.
+	crew_claim = []
+	_ensure_claims()
 
 # ---------------------------------------------------------------- Personal claims (host-side)
-## Loot is PERSONAL: one card leaves the tile and it joins the claimer's own deck. First tap wins —
-## which is a conversation, not a mechanic, and that is the point.
-func _claim_loot(seat: int, i: int) -> void:
+## Spoils are COMPANY property: one card leaves the tile and the table votes on which dwarf learns
+## it. `target` is a ROSTER index, not a seat — with a shared pool the claimer and the recipient are
+## no longer the same person by construction.
+func _claim_loot(target: int, i: int) -> void:
 	if state != "HEXREWARD" or i < 0 or i >= hex_loot.size():
 		return
-	if seat < 0 or seat >= roster.size():
+	if target < 0 or target >= roster.size():
 		return
 	var cid: String = hex_loot[i]
-	var d: Dictionary = roster[seat]
+	var d: Dictionary = roster[target]
 	(d["deck"] as Array).append(cid)
 	_msg("%s claimed %s." % [d["name"], str(Db.CARDS[cid]["name"])])
 	hex_loot = []
 	hex_loot_pick = -1
 	await _resume_hex(run_epoch)
 
-## You buy for your OWN dwarf, out of the SHARED purse. Above the rent line that is nobody's business
-## but yours; below it, _is_ring() has already made the table agree before we ever get here.
-func _buy_shop(seat: int, i: int) -> void:
-	if i < 0 or i >= shop_stock.size() or seat < 0 or seat >= roster.size():
+## The table has ALREADY agreed, in _is_ring/_resolve_ring, to this good going to this dwarf.
+## `target` is a ROSTER index carried in the proposal — never the proposer's seat, because with one
+## shared pool the person who suggests a purchase and the dwarf who receives it are unrelated.
+func _buy_shop(target: int, i: int) -> void:
+	if i < 0 or i >= shop_stock.size() or target < 0 or target >= roster.size():
 		return
 	var s: Dictionary = shop_stock[i]
 	if bool(s.get("sold", false)) or treasury < int(s["cost"]):
 		return
-	var d: Dictionary = roster[seat]
+	var d: Dictionary = roster[target]
 	match str(s["kind"]):
 		"card":
 			(d["deck"] as Array).append(s["cid"])

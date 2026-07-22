@@ -70,7 +70,11 @@ func _run() -> void:
 		and str(client.contracts[2]["title"]) == str(host.contracts[2]["title"]))
 	_ck("fight contract crew_size == seat count", int(host.contracts[2]["crew_size"]) == 2,
 		str(host.contracts[2]["crew_size"]))
-	_ck("no Recruit in the co-op shop", not _has_kind(host.shop_stock, "recruit"))
+	# Co-op stocks a Recruit now: the crew is drawn from a SHARED POOL rather than welded one dwarf
+	# per seat, so a new hand is a real body anyone can take onto the next job.
+	_ck("co-op stocks a Recruit", _has_kind(host.shop_stock, "recruit"))
+	_ck("crew_claim is sized to the TABLE, not the pool", host.crew_claim.size() == 2,
+		str(host.crew_claim))
 
 	print("\n--- 2. FREE intent: a client navigates ---------------------------")
 	client._intent("nav", "contracts")
@@ -126,6 +130,43 @@ func _run() -> void:
 	_ck("a malformed buy arg opens no ring", not host._is_ring("shop", str(card_i)))
 	_ck("an out-of-range recipient opens no ring", not host._is_ring("shop", "%d:99" % card_i))
 
+	print("\n--- 2c. ANYONE can be crewed, and a new hand is a voted spend -----")
+	# Hiring: spending, so it votes -- and it grows the POOL past the seat count, which is the whole
+	# point of the pool. (Top the purse up first; the two buys above ate into it.)
+	host.treasury = 300
+	host._push()
+	await _wait(0.5)
+	var hire_i := _slot_of(host.shop_stock, "recruit")
+	var pool0: int = host.roster.size()
+	client._intent("hire", str(hire_i))
+	await _wait(1.0)
+	_ck("a hire opens a ring", not host.ring.is_empty()
+		and str(host.ring.get("kind", "")) == "hire", str(host.ring))
+	_ck("nobody joined on one vote", host.roster.size() == pool0, str(host.roster.size()))
+	host._intent("hire", str(hire_i))
+	await _wait(1.2)
+	_ck("the table signed them on", host.roster.size() == pool0 + 1,
+		"%d -> %d" % [pool0, host.roster.size()])
+	_ck("the POOL is now bigger than the table", host.roster.size() > host.seat_count,
+		"%d dwarves / %d seats" % [host.roster.size(), host.seat_count])
+	_ck("the client sees the bigger pool", client.roster.size() == host.roster.size(),
+		"%d / %d" % [client.roster.size(), host.roster.size()])
+
+	# ANY pool dwarf can fill ANY seat: seat 1 claims the dwarf that seat 0 started with.
+	client._intent("crew", "0")
+	await _wait(1.0)
+	_ck("claiming is free (no ring)", host.ring.is_empty(), str(host.ring))
+	_ck("seat 1 claimed roster 0", int(host.crew_claim[1]) == 0, str(host.crew_claim))
+	_ck("the claim replicated", int(client.crew_claim[1]) == 0, str(client.crew_claim))
+	# ...and two seats cannot hold the same body.
+	host._intent("crew", "0")
+	await _wait(1.0)
+	_ck("a claimed dwarf cannot be taken twice", int(host.crew_claim[0]) != 0, str(host.crew_claim))
+	# releasing is the same tap again
+	client._intent("crew", "0")
+	await _wait(1.0)
+	_ck("tapping your own claim releases it", int(host.crew_claim[1]) == -1, str(host.crew_claim))
+
 	print("\n--- 3. RING: embark needs BOTH players ---------------------------")
 	client._intent("select", "2")
 	await _wait(0.8)
@@ -178,15 +219,27 @@ func _run() -> void:
 	await _wait(0.4)
 	host._intent("hex", step)
 	await _wait(2.0)
-	_ck("the fallen dwarf left the seat", str(host.roster[1]["name"]) != fallen_name,
-		"%s -> %s" % [fallen_name, str(host.roster[1]["name"])])
-	_ck("an HEIR is piloting seat 1", int(host.roster[1]["hp"]) > 0, str(host.roster[1]["hp"]))
-	_ck("the heir kept the player's CLASS", str(host.roster[1]["cls"]) == "sorcerer")
+	# THE MODEL CHANGED: a downed dwarf leaves the CREW but never leaves the POOL. So the assertion
+	# is no longer "roster[seat] was replaced" -- it is the invariant that actually matters, which is
+	# that seat 1 still has a living body to pilot.
+	_ck("the fallen left the crew", str(host.exp_crew[1]["name"]) != fallen_name,
+		"%s -> %s" % [fallen_name, str(host.exp_crew[1]["name"])])
+	_ck("seat 1 has a living dwarf to pilot", int(host.exp_crew[1]["hp"]) > 0,
+		str(host.exp_crew[1]["hp"]))
+	_ck("nobody spectates: the crew is still one body per seat", host.exp_crew.size() == 2,
+		str(host.exp_crew.size()))
+	_ck("the fallen is STILL in the pool, not deleted",
+		host.roster.any(func(d): return str(d["name"]) == fallen_name),
+		str(host.roster.map(func(d): return str(d["name"]))))
 	_ck("the fallen is on the wagon", host.carried.size() == 1 and str(host.carried[0]["name"]) == fallen_name)
 	_ck("the wagon kept their deck", (host.carried[0]["deck"] as Array).size() == fallen_deck)
-	_ck("the client sees the heir too", client.roster.size() == 2
-		and str(client.roster[1]["name"]) == str(host.roster[1]["name"]),
-		"%s / %s" % [str(client.roster[1]["name"]), str(host.roster[1]["name"])])
+	_ck("the client rebuilt the same crew from the wire",
+		client.exp_crew.size() == host.exp_crew.size()
+		and str(client.exp_crew[1]["name"]) == str(host.exp_crew[1]["name"]),
+		"%s / %s" % [str(client.exp_crew.map(func(d): return str(d["name"]))),
+			str(host.exp_crew.map(func(d): return str(d["name"])))])
+	_ck("the client's crew ALIASES its own roster (not a copy)",
+		client.exp_crew.any(func(d): return client.roster.any(func(r): return is_same(r, d))))
 	_ck("the client sees the wagon", client.carried.size() == 1)
 
 	print("\n--- 5b3. EXTRACTION IS A PLACE, and the host is what enforces it --")
@@ -268,32 +321,42 @@ func _run() -> void:
 	_ck("the safe choice paid out", int(host.exp_loot_gold) > gold0,
 		"%d -> %d" % [gold0, int(host.exp_loot_gold)])
 
-	print("\n--- 5b5. the wagon: two survivors from ONE seat, nobody deleted --")
-	# The original goes down on one tile and its heir on another, so seat 1 has TWO dwarves on the
-	# wagon. _wagon_home used to write roster[seat] for each, so the second silently deleted the
-	# first -- a living dwarf and every card ever bought into its deck.
-	var keep_a := {"name": "Wagon A", "cls": "warrior", "status": "ready", "recover": 0,
-		"hp": 0, "max_hp": 30, "deck": ["strike", "strike"], "downed": true, "stable": true,
-		"ds_success": 3, "ds_fail": 0, "seat": 1}
-	var keep_b := {"name": "Wagon B", "cls": "warrior", "status": "ready", "recover": 0,
-		"hp": 0, "max_hp": 30, "deck": ["guard"], "downed": true, "stable": true,
-		"ds_success": 3, "ds_fail": 0, "seat": 1}
+	print("\n--- 5b5. two survivors from ONE seat: neither is deleted ----------")
+	# One seat can put two dwarves on the wagon in one expedition (the original goes down, then its
+	# replacement). _wagon_home used to write roster[seat] for each, so the second silently deleted
+	# the first. Under the pool model a carried dwarf never LEAVES the roster, which makes the
+	# overwrite structurally impossible rather than merely guarded -- so the test is that both are
+	# still on the books afterwards, with their decks.
 	var roster_n0: int = host.roster.size()
-	host.carried = [keep_a, keep_b]
+	# ⚠ SAVE the real wagon. This section replaces `carried` wholesale, and clobbering it would
+	# ORPHAN the dwarf section 5b put on it -- it would never roll another death save and never come
+	# home, which then fails section 8 for a reason that has nothing to do with section 8.
+	var carried_real: Array = host.carried.duplicate()
+	var wa: Dictionary = host._make_dwarf("Wagon A", "warrior")
+	var wb: Dictionary = host._make_dwarf("Wagon B", "warrior")
+	wa["deck"] = ["strike", "strike"]
+	wb["deck"] = ["guard"]
+	for w in [wa, wb]:
+		w["hp"] = 0
+		w["downed"] = true
+		w["stable"] = true
+		w["ds_success"] = 3
+		w["seat"] = 1
+		host.roster.append(w)      # they are POOL members riding the wagon
+	host.carried = [wa, wb]
 	host._wagon_home("extract")
-	var names: Array = []
-	for d2: Dictionary in host.roster:
-		names.append(str(d2["name"]))
-	_ck("both survivors are on the books", names.has("Wagon A") and names.has("Wagon B"), str(names))
-	_ck("the pool grew rather than overwrote", host.roster.size() == roster_n0 + 1,
+	var names: Array = host.roster.map(func(d): return str(d["name"]))
+	_ck("both survivors are still on the books", names.has("Wagon A") and names.has("Wagon B"), str(names))
+	_ck("neither overwrote the other", host.roster.size() == roster_n0 + 2,
 		"%d -> %d" % [roster_n0, host.roster.size()])
-	_ck("the reclaimed dwarf kept its deck",
-		names.has("Wagon A") and (host.roster[1]["deck"] as Array).size() == 2,
-		str(host.roster[1].get("deck", [])))
-	# put the board back for the sections that follow
+	_ck("both kept their decks", (wa["deck"] as Array).size() == 2 and (wb["deck"] as Array).size() == 1,
+		"%d / %d" % [(wa["deck"] as Array).size(), (wb["deck"] as Array).size()])
+	_ck("both were patched up off the wagon", int(wa["hp"]) > 0 and int(wb["hp"]) > 0,
+		"%d / %d" % [int(wa["hp"]), int(wb["hp"])])
+	# put the board back for the sections that follow, wagon included
 	while host.roster.size() > roster_n0:
 		host.roster.pop_back()
-	host.carried = []
+	host.carried = carried_real
 	host._push()
 	await _wait(0.6)
 
@@ -324,7 +387,10 @@ func _run() -> void:
 	client._replay_fx("not even a dictionary")
 	_ck("unknown + malformed fx are dropped, never fatal", true)
 
-	print("\n--- 5c. loot is PERSONAL: first tap wins, for your own deck -------")
+	print("\n--- 5c. spoils are COMPANY property: the table votes who learns it -")
+	# Was "first tap wins, for YOUR deck". Loot is a ring now, and like a purchase the arg names both
+	# halves -- which card, and which dwarf -- because the claimer and the recipient are no longer
+	# the same person by construction.
 	host.hex_loot = ["strike", "guard", "cleave"]
 	host.hex_loot_pick = -1
 	host.state = "HEXREWARD"
@@ -334,11 +400,25 @@ func _run() -> void:
 		"%s %d" % [client.state, client.hex_loot.size()])
 	var cdeck0: int = (host.roster[1]["deck"] as Array).size()
 	var hdeck0: int = (host.roster[0]["deck"] as Array).size()
-	client._intent("loot", "0")
-	await _wait(1.5)
-	_ck("the claimer's own deck grew", (host.roster[1]["deck"] as Array).size() == cdeck0 + 1,
-		"%d -> %d" % [cdeck0, (host.roster[1]["deck"] as Array).size()])
-	_ck("nobody else got a card", (host.roster[0]["deck"] as Array).size() == hdeck0)
+	# The CLIENT proposes card 0 for the HOST's dwarf.
+	client._intent("loot", "0:0")
+	await _wait(1.2)
+	_ck("a lone claim no longer takes the card", not host.ring.is_empty()
+		and str(host.ring.get("kind", "")) == "loot", str(host.ring))
+	_ck("nothing moved on one vote", (host.roster[0]["deck"] as Array).size() == hdeck0
+		and (host.roster[1]["deck"] as Array).size() == cdeck0)
+	_ck("the ring names the card and the dwarf",
+		host._ring_label("loot", "0:0").contains(str(host.roster[0]["name"])),
+		host._ring_label("loot", "0:0"))
+	_ck("a malformed loot arg opens no ring", not host._is_ring("loot", "0"))
+	_ck("an out-of-range recipient opens no ring", not host._is_ring("loot", "0:99"))
+	host._intent("loot", "0:0")
+	await _wait(1.6)
+	_ck("the NAMED dwarf learned it, not the proposer",
+		(host.roster[0]["deck"] as Array).size() == hdeck0 + 1
+		and (host.roster[1]["deck"] as Array).size() == cdeck0,
+		"h %d->%d  c %d->%d" % [hdeck0, (host.roster[0]["deck"] as Array).size(),
+			cdeck0, (host.roster[1]["deck"] as Array).size()])
 	_ck("the tile resolved back to the map", host.state == "HEX", host.state)
 	_ck("client followed back to the map", client.state == "HEX", client.state)
 
@@ -411,8 +491,25 @@ func _run() -> void:
 	_ck("treasury agrees", host.treasury == client.treasury, "%d / %d" % [host.treasury, client.treasury])
 	_ck("roster HP agrees", _hps(host.roster) == _hps(client.roster),
 		"%s / %s" % [_hps(host.roster), _hps(client.roster)])
-	_ck("nobody is stuck dead in a seat", _no_corpses(host.roster), str(_statuses(host.roster)))
-	_ck("every seat still has a living dwarf to pilot", _all_alive(host.roster), str(_hps(host.roster)))
+	_ck("no corpses left in the pool", _no_corpses(host.roster), str(_statuses(host.roster)))
+	# The anti-lockout invariant moved from the pool to the CREW: the pool may legitimately hold a
+	# dwarf at 0 HP riding the wagon, but every SEAT must have a living body to pilot. It is a
+	# MID-EXPEDITION invariant, so which form applies depends on whether we are still out there --
+	# asserting the crew form unconditionally passes vacuously on an empty array, which is how this
+	# check quietly stopped meaning anything the first time the expedition ended early.
+	if host.state == "HEX":
+		_ck("every seat still has a living dwarf to pilot", _all_alive(host.exp_crew),
+			str(_hps(host.exp_crew)))
+		_ck("the crew is exactly one body per seat", host.exp_crew.size() == 2,
+			str(host.exp_crew.size()))
+	else:
+		_ck("the expedition ended and released the crew", host.exp_crew.is_empty()
+			or _all_alive(host.exp_crew), "%s %s" % [host.state, str(_hps(host.exp_crew))])
+		# Whatever it cost, the company must still be able to field a full table next time -- the
+		# pool tops itself up with heirs rather than locking a player out.
+		var next_crew: Array = host._crew_for_expedition()
+		_ck("a full crew can still be fielded", next_crew.size() == 2 and _all_alive(next_crew),
+			"%s %s" % [str(next_crew.size()), str(_hps(next_crew))])
 
 	print("\n--- 9. the AFK escape hatch ---------------------------------------")
 	# Freeze the client: stop its hellos and let the host's sweep notice.
