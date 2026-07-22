@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/test/layout_preview.gd" id="1_layoutpreview"]
+
+[node name="LayoutPreview" type="Node"]
+script = ExtResource("1_layoutpreview")

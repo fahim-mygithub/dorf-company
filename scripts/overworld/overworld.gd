@@ -10,6 +10,9 @@ extends Control
 ## Step-2 seams: CREW_SELECT (crew picking) + LOSS_ENABLED (permanent loss) are gated off.
 
 const Db := preload("res://scripts/combat/card_db.gd")
+# The CURATED encounter table (2026-07-21). It is authoring data + pure lookup funcs, no state and no
+# scene, so preloading it here costs nothing and keeps _roll_encounter total.
+const Enc := preload("res://scripts/combat/encounter_db.gd")
 const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
 const HexTile := preload("res://scripts/ui/hex_tile.gd")
 const WritScene := preload("res://scripts/ui/writ_scene.gd")
@@ -1235,11 +1238,16 @@ func _embark_fight(c: Dictionary) -> void:
 	selected_contract = -1
 	_msg("%s — into the fight!" % c["title"])
 	var req: Dictionary = {"crew": _build_crew_specs(current["crew"])}
-	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition
+	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(c["tier"], {})   # Phase 2: danger tier -> enemy composition (fallback only)
 	var mscale: float = float(c["mod"]["scale"]) if c.has("mod") else 1.0   # Phase 5: modifier scales the fight
-	if not comp.is_empty():
-		req["enemies"] = _roll_encounter(c["tier"], comp)
-		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + _party_scale()   # additive (see _hex_combat)
+	var board: Dictionary = _roll_encounter(String(c["tier"]), comp, EMBARK_DANGER)
+	# The old guard was `if not comp.is_empty()`; the empty ENEMIES array is now the same signal, and it
+	# covers one more case — tier "low" has no ENCOUNTERS_BY_TIER entry, so before the curated table it
+	# fell through to combat's built-in default board. It now gets a real easy-band encounter.
+	if not (board["enemies"] as Array).is_empty():
+		req["enemies"] = board["enemies"]
+		req["encounter"] = board["id"]   # "" for a pool roll; combat's popup handles that itself
+		req["enemy_scale"] = _encounter_scale(float(board["scale"]), mscale, EMBARK_DANGER)
 	var result: Dictionary = await _run_fight(req, e)
 	if result.is_empty():
 		return
@@ -1685,13 +1693,60 @@ func _content_bag(n: int) -> Array:
 func _danger_scale(danger: int) -> float:
 	return 1.0 + float(maxi(0, danger - 1)) * DANGER_STEP
 
-## Encounter variety (2026-07-01): roll a comp from the tier's pool; scale still comes from
-## ENCOUNTERS_BY_TIER. Missing/empty pool falls back to the fixed comp (old behavior).
-func _roll_encounter(tier: String, comp: Dictionary) -> Array:
+## A direct contract fight (_embark_fight) has no hex tile, so it has no danger int — but band_for()
+## needs one. DANGER 1 is deliberate and is the conservative choice: _danger_scale(1) == 1.0, so the
+## danger term contributes exactly ZERO and an embark fight's threat composite stays byte-identical to
+## the shipped one. It also lands each tier on a sane band (low/med -> easy, high -> med), which brackets
+## the old fixed comp scales (med 1.0, high 1.2) almost exactly. Raise it only with a sim run in hand.
+const EMBARK_DANGER := 1
+
+## Encounter selection. Consults the CURATED table (encounter_db.gd) FIRST — tier + tile danger pick a
+## band, the band rolls one of its named boards — and falls back to the shipped flat comp pools when
+## the band is empty or unknown. That fallback is load-bearing: it is what keeps every existing save,
+## every harness and every hand-built request working if the curated table is ever pruned.
+##
+## WHY THIS RETURNS A DICTIONARY NOW. The old bare Array was enough when scale lived in a separate
+## table; a curated board carries its OWN scale and its own id, and the id has to reach combat as
+## request["encounter"] or the design-notes popup can never find the board it is describing. Widening
+## the return costs nothing elsewhere — the only two callers are the two fight seams below.
+##   "enemies"  the body list in slot order (boss first, via Enc.bodies()). Empty = "caller, do not
+##              set request["enemies"] at all", which is the old comp.is_empty() branch.
+##   "scale"    the board's own scale, to be folded ADDITIVELY by _encounter_scale().
+##   "id"       curated id, or "" for a pool roll. combat.gd's _encounter() answers {} for "", and its
+##              popup has a written fallback for that, so "" is a supported value and not an error.
+func _roll_encounter(tier: String, comp: Dictionary, danger: int) -> Dictionary:
+	var enc: Dictionary = Enc.roll(Enc.band_for(tier, danger))
+	if not enc.is_empty():
+		return {"enemies": Enc.bodies(enc), "scale": float(enc["scale"]), "id": String(enc["id"])}
+	# Fallback = the 2026-07-01 behaviour, unchanged: roll a comp from the tier's pool, take the scale
+	# from ENCOUNTERS_BY_TIER, and report no id. `comp` may legitimately be {} (tier "low" has no entry),
+	# in which case an empty enemies array tells the caller to leave the request alone.
+	var cscale: float = float(comp.get("scale", 1.0))
 	var pool: Array = Db.ENCOUNTER_POOLS.get(tier, [])
 	if pool.is_empty():
-		return comp["enemies"]
-	return pool[randi() % pool.size()]
+		return {"enemies": (comp.get("enemies", []) as Array), "scale": cscale, "id": ""}
+	return {"enemies": (pool[randi() % pool.size()] as Array), "scale": cscale, "id": ""}
+
+## Fold a rolled board's own `scale` into the hexcrawl's threat composite.
+##
+## ADDITIVE, and that is the whole point. The 2026-07-01 audit tore out a MULTIPLIED tier x mod x
+## danger composite because it grew roughly quadratically; its worst cell (2.688) measured 0% winnable
+## across a 96-cell Monte Carlo. So the board's scale is just another term here, REPLACING the old
+## comp-scale term — never a multiplier on the rest. _party_scale() stays in: a curated board is tuned
+## for a crew of 3 exactly like the comps were.
+##
+## ⚠ WE DELIBERATELY DO NOT CALL Enc.composite_scale(). That helper MULTIPLIES the band scale onto the
+## additive threat, which is precisely the growth curve the audit undid. We do reuse its SCALE_CEILING,
+## because the ceiling belongs in one place and it is genuinely needed here: curated scales run to 1.85
+## where the old comps topped out at 1.20, so the RAW sum at the worst reachable cell (high tier,
+## danger 3 -> elite band, Warband modifier 1.50, four players) is
+##     1.0 + 0.85 + 0.50 + 0.42 + 0.34 = 3.11
+## against the 2.12 the audit measured as the worst cell that is still winnable. The clamp holds that
+## corner at 2.20 instead. UNSIMMED — dorf_sim.py has seen none of this, and 2.20-vs-2.12 is the first
+## number to put through it, alongside PARTY_STEP.
+func _encounter_scale(escale: float, mscale: float, danger: int) -> float:
+	var composite: float = 1.0 + (escale - 1.0) + (mscale - 1.0) + (_danger_scale(danger) - 1.0) + _party_scale()
+	return minf(composite, Enc.SCALE_CEILING)
 
 func _living_up() -> Array:
 	var up: Array = []
@@ -2200,14 +2255,17 @@ func _roll_death_saves() -> void:
 ## Enemy scale = tier base x contract modifier x the tile's telegraphed DANGER (not distance).
 func _hex_combat(danger: int, e: int) -> void:
 	var req: Dictionary = {"crew": _build_crew_specs(exp_crew)}   # downed dwarves ride in at 0 HP (benched slot)
-	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})
+	var comp: Dictionary = Db.ENCOUNTERS_BY_TIER.get(exp_contract["tier"], {})   # fallback comp only
 	var mscale: float = float(exp_contract["mod"]["scale"]) if exp_contract.has("mod") else 1.0
-	if not comp.is_empty():
-		req["enemies"] = _roll_encounter(exp_contract["tier"], comp)
-		# Scaling audit (2026-07-01): threat factors compose ADDITIVELY — multiplying tier x mod x
-		# danger grew ~quadratically (worst 2.688 was 0% winnable in sim). Single-factor cells unchanged.
-		# _party_scale() is the co-op term: the encounters were tuned for a crew of 3.
-		req["enemy_scale"] = 1.0 + (float(comp["scale"]) - 1.0) + (mscale - 1.0) + (_danger_scale(danger) - 1.0) + _party_scale()
+	# The tile's telegraphed danger picks the BAND as well as feeding the scale, so a hex the player can
+	# see is ☠☠☠ on a High contract is the one cell that rolls an elite set-piece — which is exactly the
+	# "route around it or commit" decision the visible board exists to offer.
+	var board: Dictionary = _roll_encounter(String(exp_contract["tier"]), comp, danger)
+	if not (board["enemies"] as Array).is_empty():
+		req["enemies"] = board["enemies"]
+		req["encounter"] = board["id"]
+		# Additive composition + the SCALE_CEILING clamp; the reasoning lives on _encounter_scale().
+		req["enemy_scale"] = _encounter_scale(float(board["scale"]), mscale, danger)
 	var result: Dictionary = await _run_fight(req, e)
 	if result.is_empty():
 		return

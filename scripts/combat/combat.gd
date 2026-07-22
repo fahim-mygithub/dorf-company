@@ -9,6 +9,19 @@ extends Control
 
 const Db := preload("res://scripts/combat/card_db.gd")
 const Powers := preload("res://scripts/combat/class_powers.gd")
+## The synergy engine — every device that makes one body worth more than its own health bar (aegis,
+## chorus, gorge, regalia, molt, twin bond, alone gate, swarm). Same pattern as Powers: a pure rules
+## module that owns the numbers, and combat.gd only ROUTES to it. Every device is DERIVED from board
+## state that already crosses the wire, so wiring it added nothing to the snapshot and nothing to
+## _INT_KEYS.
+const Syn := preload("res://scripts/combat/synergies.gd")
+## The twelve authored boards. Combat reads exactly ONE thing out of this file — the `design` block
+## behind the Feedback popup — and it reads it through get_enc(), which answers {} for an unknown or
+## absent id. That is the whole integration: no board is rolled here (overworld.gd owns that), so a
+## fight whose encounter is unknown loses a page of designer's notes and nothing else.
+const Enc := preload("res://scripts/combat/encounter_db.gd")
+## The designer's-notes popup. Purely local, purely cosmetic, never on the wire — see _on_feedback.
+const Feedback := preload("res://scripts/ui/feedback_panel.gd")
 const PowerOrb := preload("res://scripts/ui/power_orb.gd")
 const Card := preload("res://scripts/ui/card.gd")
 const Threat := preload("res://scripts/ui/threat_arrows.gd")
@@ -65,11 +78,28 @@ var _cursor_on := false
 
 # ---------------------------------------------------------------- UI refs
 # enemies (parallel to enemies[])
+var enemy_n := 3               # bodies on the board (1-ENEMY_MAX); en_pos is sized to it
+var en_pos: Array = []         # runtime enemy portrait centers (set in _build_ui)
 var en_emoji: Array = []
 var en_name: Array = []
 var en_intent: Array = []
 var en_hp: Array = []
 var en_block: Array = []
+# --- the synergy readout (2026-07-22), parallel to enemies[] as well ---
+var en_aura: Array = []       # slab BEHIND the portrait, in the aura source's colour
+var en_device: Array = []     # one short line: the devices touching THIS body right now
+var en_meter_bg: Array = []   # the crack meter's track (Molt-King)
+var en_meter_fg: Array = []   # ...and its fill
+## The OVERRIDDEN-RULE badge (2026-07-22). Its own label, at half the nameplate's font, because a
+## Taunt that took has to show BOTH facts at once: 😡 (the rule was overridden) sits in the nameplate
+## where the pref badge normally lives, and the body's own pref badge is demoted here rather than
+## deleted. Deleting it would make a taunted Brute and a taunted Caster look identical, which is the
+## one comparison a player needs the turn the Taunt wears off.
+var en_rule: Array = []
+## ONE collapsed line per contiguous swarm run (Syn.swarm_groups). Not parallel to enemies[] — a run
+## can be any length, so these are a small pool sized to the most runs a board can hold, positioned
+## over the run they describe at refresh time.
+var sw_line: Array = []
 # party (parallel to party[])
 var pc_emoji: Array = []
 var pc_name: Array = []
@@ -80,6 +110,9 @@ var pc_outline: Array = []
 var pc_minis: Array = []   # per-slot container for the tiny hand row (non-active dwarves)
 var pc_power: Array = []       # the Class Power orb on each portrait
 var pc_power_lbl: Array = []   # its gate readout (cooldown / 📿 / 🧿 charge)
+## THE INCOMING FORECAST — one chip per dwarf, mirroring the Class Power coin across the portrait.
+## See _incoming_forecast for what the number means and why it is the number it is.
+var pc_forecast: Array = []
 ## A targeted power (Smite / Assassin's Mark / Flurry) is ARMED by tapping the orb, then aimed by
 ## tapping an enemy — the same two-tap grammar as a target card, so there is nothing new to learn.
 var power_armed := false
@@ -92,6 +125,7 @@ var ip_title: Label
 var ip_body: Label
 var ip_next: Label
 var ip_pref: Label
+var ip_dev: Label               # the synergy line: what the REST of the board does to this body
 var intent_open := -1           # enemy index the intent panel is showing, -1 = hidden
 var power_tip: Control          # hover explainer for a Class Power coin
 var pt_title: Label
@@ -106,13 +140,84 @@ var log_label: Label
 var overlay: ColorRect
 var overlay_label: Label
 var overlay_btn: Button
+## THE DESIGNER'S NOTES (2026-07-22) — a playtest instrument, not a hint system. `feedback` is the
+## full-screen popup (scripts/ui/feedback_panel.gd, which owns everything inside it); `feedback_btn`
+## is the only thing combat.gd puts on screen for it, and it says nothing except that notes exist.
+## Spoiler discipline is the entire design constraint here: no badge, no subtitle, no count, no
+## preview. Anything that leaked the encounter's intent before the press would turn the fight into a
+## tutorial and destroy the measurement the popup exists to take.
+var feedback: Control
+var feedback_btn: Button
 
 # enemy slot screen positions / party slot screen positions
 const EN_POS := [Vector2(170, 200), Vector2(360, 200), Vector2(550, 200)]
 const PC_POS := [Vector2(170, 700), Vector2(360, 700), Vector2(550, 700)]
 const PARTY_MAX := 4
+## 3 stays the normal board. 6 is the ceiling, and it is a readability number, not a taste one: it is
+## where "🗡️9>War" still fits at a 120px pitch and a portrait tap target stays around 60dp. A 10-body
+## board was built and screenshotted before this cap was set — it renders, but three separate things
+## break at once: the intent labels crowd, nothing distinguishes a body worth killing from a body
+## worth ignoring, and ten standard statlines put ~34 damage into a 22-HP Sorcerer on turn one.
+## Going past 6 needs the elevated BOSS slot (which is exempt, because size separates it
+## pre-attentively) — not a second rank of equals.
+const ENEMY_MAX := 6
 # Debug hotseat: force a party size (2/4) when no request.crew is supplied. 0 = off (SOLO 3).
 const DEBUG_PARTY_N := 0
+
+## ---------------------------------------------------------------- the synergy readout
+## An aura is caused by ONE body and felt by the others, so the readout has to answer "which body"
+## before it answers "how much" — a generic "aegis grey" fails on exactly the boards that matter (a
+## Shellback line and a Rune Crystal lattice look identical in grey). So a protected body wears a dim
+## wash of ITS SOURCE'S colour and the source wears the same colour solid: one glance links them.
+## Keyed by archetype rather than by aura kind for the same reason. Anything unlisted falls back to
+## the kind's colour, so a new aura body renders sensibly the day it lands and only looks generic.
+const SOURCE_TINT := {
+	"warden":       Color(0.72, 0.74, 0.80),   # 🗿 stone
+	"shellback":    Color(0.52, 0.82, 0.62),   # 🐢 shell green
+	"rune_crystal": Color(0.55, 0.82, 1.00),   # 💎 cold blue
+	"caster":       Color(0.80, 0.60, 1.00),   # 🔮 arcane violet
+	"sporeling":    Color(0.68, 0.92, 0.48),   # 🍄 spore green
+}
+const AURA_FALLBACK_TINT := Color(0.85, 0.80, 0.60)
+const METER_W := 96.0     # the crack meter's full width; the RIGHT EDGE is the threshold
+const METER_H := 6.0
+
+## ---------------------------------------------------------------- the six-body squeeze
+## Every enemy label used to be a fixed 160px box centred on the slot. At three bodies the pitch is
+## 190px and that is fine; at the ENEMY_MAX six it is 120px, so a 160px box overlaps BOTH neighbours
+## by 20px and two adjacent labels render into each other. That is not a nitpick — the entire reason
+## the board caps at 6 is that labels stop fitting, so a cap enforced by a number in a const and
+## nowhere in the layout is a cap that does not exist.
+##
+## The fix is one scale factor derived from the pitch, applied to every box width and every font on
+## the enemy row. It is CLAMPED at both ends on purpose: 1.0 keeps the three-body board byte-identical
+## to the shipped one (no silent restyle of the fight everyone actually plays), and 0.75 is the floor
+## because below ~10px the digits in an intent label stop being readable at arm's length on a phone,
+## and an unreadable telegraph is worth less than a clipped one.
+const SLOT_LABEL_W := 160.0
+const SLOT_FONT_FLOOR := 0.75
+
+## Horizontal pitch between enemy slots — the width one body actually owns.
+## Read off en_pos rather than recomputed from 720/n so it cannot drift from _enemy_layout.
+func _slot_pitch() -> float:
+	# A lone body owns the whole width — NOT SLOT_LABEL_W. Returning the label width here would make a
+	# one-enemy board (a solo boss, and several test fixtures) squeeze by ~4% for no reason, which is
+	# exactly the kind of silent restyle the 1.0 clamp above exists to prevent.
+	if en_pos.size() < 2:
+		return 720.0
+	return absf(float(en_pos[1].x) - float(en_pos[0].x))
+
+## Width of one enemy label box, and the font scale that goes with it. See the block above.
+func _slot_label_w() -> float:
+	return minf(SLOT_LABEL_W, _slot_pitch() - 6.0)
+
+func _slot_font_scale() -> float:
+	return clampf(_slot_label_w() / SLOT_LABEL_W, SLOT_FONT_FLOOR, 1.0)
+
+## A base font size, squeezed for the current board. Rounded, never floored: at the 0.75 floor a
+## floor() would cost a whole point on every odd size at once.
+func _sf(base: int) -> int:
+	return roundi(float(base) * _slot_font_scale())
 
 # ================================================================ Lifecycle
 func _ready() -> void:
@@ -180,8 +285,25 @@ func _build_ui() -> void:
 
 	_label("— THE QUARTERLY RAID —", Vector2(60, 24), Vector2(600, 26), 18)
 
-	for i: int in range(3):
+	# The board is sized from the REQUEST, exactly like the party is — and every peer builds it from
+	# the same request, so a client lays out the same board the host resolves. (Adding bodies later is
+	# a different problem: `slot` is the wire address and _apply_snapshot drops out-of-range slots.)
+	enemy_n = clampi((request.get("enemies", Db.ENCOUNTER) as Array).size(), 1, ENEMY_MAX)
+	en_pos = _enemy_layout(enemy_n)
+	for i: int in range(enemy_n):
 		_build_enemy_slot(i)
+	# THE SWARM LINE. Four bats telegraphing "🗡️4>Sor" four times is four labels saying one thing, and
+	# the cost is not clutter — it is that the player's eye has to VISIT four labels to learn there is
+	# nothing to compare. So a contiguous run of identical minions collapses to one line spanning the
+	# run, with the summed total in parentheses: one object, one number, one decision.
+	# Built as a small POOL rather than per-slot because a run has no fixed home: the pool is sized to
+	# the most runs a board can hold (a run is at least Syn.SWARM_MIN bodies, and a board is at most
+	# ENEMY_MAX), and each line is positioned over its run at refresh time.
+	var max_runs: int = maxi(1, int(ENEMY_MAX / Syn.SWARM_MIN))
+	for i: int in range(max_runs):
+		var l := _label("", Vector2.ZERO, Vector2(0, 22), _sf(18))
+		l.visible = false
+		sw_line.append(l)
 
 	# threat arrows drawn above the board, below cards
 	threat = Threat.new()
@@ -196,26 +318,45 @@ func _build_ui() -> void:
 	add_child(intent_panel)
 	var ipbg := ColorRect.new()
 	ipbg.color = Color(0.07, 0.07, 0.10, 0.97)
-	ipbg.size = Vector2(480, 92)
+	ipbg.size = Vector2(480, 98)
 	ipbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	intent_panel.add_child(ipbg)
 	var ipedge := ColorRect.new()
 	ipedge.color = Color(1, 1, 1, 0.14)
 	ipedge.size = Vector2(480, 1)
-	ipedge.position = Vector2(0, 91)
+	ipedge.position = Vector2(0, 97)
 	ipedge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	intent_panel.add_child(ipedge)
-	ip_title = _label("", Vector2(10, 4), Vector2(460, 20), 15, false)
+	# The five rows are TIGHTENED rather than the panel grown by a full line: the panel sits at y=40
+	# and the enemy name row starts at y=126, so every pixel it gains covers the very labels the
+	# player opened it to compare against. Labels do not clip to their rect (single line, top-aligned,
+	# no autowrap), so a 16px box on a 12px font is safe.
+	ip_title = _label("", Vector2(10, 3), Vector2(460, 20), 15, false)
 	ip_title.reparent(intent_panel, false)
-	ip_body = _label("", Vector2(10, 27), Vector2(460, 18), 12, false)
+	ip_body = _label("", Vector2(10, 25), Vector2(460, 17), 12, false)
 	ip_body.add_theme_color_override("font_color", Color(0.78, 0.78, 0.82))
 	ip_body.reparent(intent_panel, false)
-	ip_next = _label("", Vector2(10, 47), Vector2(460, 18), 12, false)
+	ip_next = _label("", Vector2(10, 43), Vector2(460, 17), 12, false)
 	ip_next.add_theme_color_override("font_color", Color(0.95, 0.80, 0.45))
 	ip_next.reparent(intent_panel, false)
-	ip_pref = _label("", Vector2(10, 68), Vector2(460, 18), 11, false)
+	ip_pref = _label("", Vector2(10, 61), Vector2(460, 16), 11, false)
 	ip_pref.add_theme_color_override("font_color", Color(0.62, 0.70, 0.80))
+	# This row is ordered by decision-relevance (reach, then the badge sentence, then the archetype's
+	# prose) precisely because it is the row that overflows: several archetype tips are longer than
+	# 460px on their own, and adding the badge sentence in front of them guarantees it. A Label does
+	# not clip by default, so the tail used to paint straight over the panel's right edge and onto the
+	# board. TRIM_ELLIPSIS makes the truncation deliberate and, more importantly, VISIBLE — a sentence
+	# that just stops reads as a bug, and a player cannot tell it from a tip that was written that way.
+	ip_pref.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	ip_pref.clip_text = true
 	ip_pref.reparent(intent_panel, false)
+	# The DEVICE line — what the rest of the board is doing to this one, INCLUDING what it would do
+	# under a condition that is not true yet (the cornered Caster). It is greyed because most of what
+	# it prints is conditional: a conditional the player cannot see is an unfair number, but a
+	# conditional dressed up as a fact is just a different lie.
+	ip_dev = _label("", Vector2(10, 78), Vector2(460, 16), 11, false)
+	ip_dev.add_theme_color_override("font_color", Color(0.70, 0.66, 0.60))
+	ip_dev.reparent(intent_panel, false)
 
 	# Class Power explainer (hover a coin) — lives in the open band between the enemies and the crew.
 	power_tip = Control.new()
@@ -313,19 +454,120 @@ func _build_ui() -> void:
 	ch_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	choice_box.add_child(ch_lbl)
 
+	_build_feedback()
+
+## THE FEEDBACK AFFORDANCE — the button lives here, the popup lives in feedback_panel.gd.
+##
+## WHERE IT SITS, AND WHY. The 720x1280 board has exactly one empty region left, and it is the
+## bottom-LEFT corner. Everything else is spoken for: the header band y 24-50 (the raid title), the
+## intent panel y 40-138 (x-clamped to as far left as x=8, so the "obvious" top-left slot collides
+## with it the moment you hover the leftmost enemy), the enemy row centred on y=200, the crew row on
+## y=700, the mini-hand band y 798-846, the active/hint lines y 852-902, the card fan y 905-1120
+## (a fan card's bottom edge is 905+196+18), the log line at y=1244, and End Turn at (540,1184).
+## That leaves x 0-540 by y 1125-1240. The button takes the far left of it, which also puts it at the
+## opposite end of the bottom row from End Turn — the one button on this screen you must never make
+## easier to hit by accident. It is deliberately NOT vertically centred on End Turn's 52px band: it
+## is 40px tall and sits inside that band, so it reads as subordinate furniture rather than a peer
+## of the button that ends your turn.
+##
+## WHY IT IS ALWAYS THERE. The user's request was "when the combat scene starts", and the reason is a
+## measurement one: a playtester forms the judgement DURING the fight ("I never noticed the aura",
+## "turn 3 played itself"), so a notes button that only appears on the win screen samples the wrong
+## moment. It is therefore live in every phase, including the enemy phase — the only thing that hides
+## it is the win/lose overlay, exactly like intent_panel, power_tip and end_turn_btn.
+##
+## WHAT THE LABEL SAYS. Flat capitals, no glyph, no encounter name, no "3 notes" count: "DEV NOTES"
+## states that a developer wrote something and nothing whatsoever about what. It matches the popup's
+## own out-of-fiction eyebrow so the two read as one register, and it cannot be mistaken for an
+## in-world affordance the way "Notes" or a scroll emoji could.
+func _build_feedback() -> void:
+	feedback_btn = Button.new()
+	feedback_btn.text = "DEV NOTES"
+	feedback_btn.add_theme_font_size_override("font_size", 14)
+	feedback_btn.position = Vector2(16, 1190)
+	feedback_btn.size = Vector2(118, 40)
+	# Quiet on purpose. It is a dev affordance sharing a row with End Turn; at full opacity it competes
+	# for the eye with the single most important control on the screen.
+	feedback_btn.modulate = Color(1, 1, 1, 0.62)
+	feedback_btn.pressed.connect(_on_feedback)
+	add_child(feedback_btn)
+
+	# Added LAST so it is the final sibling: the panel is full-screen and z_index 70, but sibling order
+	# is this scene's paint order for everything that shares a z, and being last costs nothing.
+	# setup() builds the whole widget and leaves it hidden; it is idempotent, so a future UI rebuild
+	# cannot double-build it.
+	feedback = Feedback.new()
+	add_child(feedback)
+	feedback.setup()
+
 func _build_enemy_slot(i: int) -> void:
-	var pos: Vector2 = EN_POS[i]
-	var e := _emoji(pos, Vector2(96, 76), 50)
+	var pos: Vector2 = en_pos[i]
+	# The AURA SLAB, added FIRST so it draws BEHIND the portrait (this scene has no z_index on the
+	# board — sibling order is the paint order). It is the at-a-glance half of the aegis readout: the
+	# source is washed solid in its own colour, everything it shields wears the same colour faint.
+	# MOUSE_FILTER_IGNORE matters — the portrait underneath it owns the tap and the hover that opens
+	# the intent panel, and a slab that ate either would break inspection on precisely the boards
+	# where inspection is the lesson.
+	# Sized to the PORTRAIT and not to the whole slot (it stops just above the HP row): screenshotted at
+	# slot height it read as a selection box, and the board already uses a filled highlight to mean
+	# "armed, tap me". A plaque behind the body reads as a property OF the body.
+	# Everything on this row is sized off the slot PITCH, not off a constant — see the six-body
+	# squeeze block near ENEMY_MAX. `lw`/`lx` are the label box; `sc` scales the glyph furniture
+	# (slab, meter) that would otherwise reach into the neighbouring body at six.
+	var lw: float = _slot_label_w()
+	var lx: float = pos.x - lw * 0.5
+	var sc: float = _slot_font_scale()
+	var slab := ColorRect.new()
+	slab.size = Vector2(104.0 * sc, 88)
+	slab.position = pos - Vector2(slab.size.x * 0.5, 46)
+	slab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	slab.visible = false
+	add_child(slab)
+	en_aura.append(slab)
+	var e := _emoji(pos, Vector2(96, 76), _sf(50))
 	e.gui_input.connect(_on_enemy_input.bind(i))
 	# Intent explainer: hover on desktop; on touch the emulated cursor "enters" on tap and
 	# "exits" on the next tap elsewhere, so the same signals give tap-to-inspect for free.
 	e.mouse_entered.connect(_open_intent.bind(i))
 	e.mouse_exited.connect(_close_intent.bind(i))
 	en_emoji.append(e)
-	en_name.append(_label("", Vector2(pos.x - 80, pos.y - 74), Vector2(160, 20), 14))
-	en_intent.append(_label("", Vector2(pos.x - 80, pos.y - 52), Vector2(160, 22), 18))
-	en_hp.append(_label("", Vector2(pos.x - 80, pos.y + 40), Vector2(160, 20), 16))
-	en_block.append(_label("", Vector2(pos.x - 80, pos.y + 60), Vector2(160, 18), 14))
+	en_name.append(_label("", Vector2(lx, pos.y - 74), Vector2(lw, 20), _sf(14)))
+	en_intent.append(_label("", Vector2(lx, pos.y - 52), Vector2(lw, 22), _sf(18)))
+	en_hp.append(_label("", Vector2(lx, pos.y + 40), Vector2(lw, 20), _sf(16)))
+	en_block.append(_label("", Vector2(lx, pos.y + 60), Vector2(lw, 18), _sf(14)))
+	# The DEVICE ROW — its own line under the status row, not more chips inside it. A status is
+	# something done TO this body and it wears off; a device is caused by ANOTHER body and vanishes
+	# the instant that body dies. Mixing them would teach the player to read a soak as a debuff.
+	en_device.append(_label("", Vector2(lx, pos.y + 78), Vector2(lw, 16), _sf(12)))
+	# The DEMOTED PREF BADGE — see en_rule. Half the nameplate's font (the contract's word), on its own
+	# row directly under it, so 😡 and the rule it overrode read as one two-line statement without
+	# needing rich text in a Label the whole board indexes by type.
+	var rl := _label("", Vector2(lx, pos.y - 60), Vector2(lw, 12), maxi(7, _sf(7)))
+	rl.add_theme_color_override("font_color", Color(0.75, 0.72, 0.70))
+	rl.visible = false
+	en_rule.append(rl)
+	# The CRACK METER — a real bar, because what it shows is a fraction with a THRESHOLD, and the
+	# whole promise of the Molt-King is that the threshold is visible instead of a hidden counter.
+	# The bar's RIGHT EDGE *is* the half-HP crack: full bar = the shell comes off on the next hit.
+	# (A text gauge was the alternative and the web font ships no box-drawing glyphs — see the U+2192
+	# tofu that started the glyph gate.)
+	var mw: float = METER_W * sc
+	var mbg := ColorRect.new()
+	mbg.color = Color(1, 1, 1, 0.10)
+	mbg.position = Vector2(pos.x - mw * 0.5, pos.y + 96)
+	mbg.size = Vector2(mw, METER_H)
+	mbg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mbg.visible = false
+	add_child(mbg)
+	en_meter_bg.append(mbg)
+	var mfg := ColorRect.new()
+	mfg.color = Color(0.95, 0.45, 0.35, 0.90)
+	mfg.position = mbg.position
+	mfg.size = Vector2(0, METER_H)
+	mfg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mfg.visible = false
+	add_child(mfg)
+	en_meter_fg.append(mfg)
 
 func _build_party_slot(i: int) -> void:
 	var pos: Vector2 = pc_pos[i]
@@ -355,6 +597,14 @@ func _build_party_slot(i: int) -> void:
 	pc_power.append(orb)
 	# The gate readout under the coin — the cooldown, the 📿 it needs, the 🧿 casts it is waiting on.
 	pc_power_lbl.append(_label("", Vector2(pos.x + 32, pos.y + 28), Vector2(56, 16), 11, true))
+	# THE INCOMING FORECAST — mirrored across the portrait from the Class Power coin, on purpose. The
+	# two chips are the dwarf's two halves of one question: the coin is what you can DO, the forecast
+	# is what is about to be done TO you. Putting them at the same height on opposite sides makes the
+	# pair scannable as a row across the whole crew, which is how the decision is actually made
+	# ("who is about to die" is a comparison between dwarves, never a fact about one).
+	# The gutter is free: the emoji spans pos.x±55 and every stat label is centred on the slot.
+	var fc := _label("", pos + Vector2(-88, -30), Vector2(56, 26), 17, true)
+	pc_forecast.append(fc)
 	pc_name.append(_label("", Vector2(pos.x - 80, pos.y - 58), Vector2(160, 20), 14))
 	pc_hp.append(_label("", Vector2(pos.x - 80, pos.y + 38), Vector2(160, 20), 16))
 	pc_block.append(_label("", Vector2(pos.x - 80, pos.y + 58), Vector2(160, 18), 14))
@@ -382,6 +632,25 @@ func _effective_crew() -> Array:
 
 ## Party portrait centers, sized to N. N == 3 keeps the exact original layout (SOLO
 ## behavior-equivalent); N == 2/4 spread evenly across the 720 width.
+## Enemy portrait centers for a board of n bodies. The sibling of _party_layout, and deliberately the
+## same shape: 3 returns EN_POS byte-identical, so the normal fight is visually untouched.
+##
+## ⚠ ONE ROW, on purpose — and specifically NOT a zigzag. A staggered second rank was the first thing
+## built here, and the readability research refuted it: a cosmetic offset costs positional constancy
+## ("the ogre is slot 3") and unambiguous scan order while carrying no meaning of its own. Every
+## shipped two-row battler — Wildfrost's lanes, Banners of Ruin's rows, Darkest Dungeon's ranks —
+## makes the row SEMANTIC (it gates who can reach whom). We have no such rule, so we get no second
+## row: a rank that means nothing is worse than no rank at all. The way past 6 is the elevated boss
+## slot, not more equals.
+func _enemy_layout(n: int) -> Array:
+	if n == 3:
+		return EN_POS.duplicate()   # the shipped board, byte-identical
+	var out: Array = []
+	var w: float = 720.0 / float(n)
+	for i: int in range(n):
+		out.append(Vector2(w * (float(i) + 0.5), EN_POS[0].y))
+	return out
+
 func _party_layout(n: int) -> Array:
 	if n == 3:
 		return PC_POS.duplicate()
@@ -445,24 +714,17 @@ func _start_combat() -> void:
 	enemies = []
 	var enc: Array = request.get("enemies", Db.ENCOUNTER)
 	var escale: float = float(request.get("enemy_scale", 1.0))
-	for i: int in range(enc.size()):
+	# Bounded by the slots _build_ui actually made, so an oversized comp truncates instead of
+	# indexing past en_emoji. enemy_n is itself clamped to ENEMY_MAX from the same request.
+	for i: int in range(mini(enc.size(), enemy_n)):
 		var eid: String = enc[i]
 		var ed: Dictionary = Db.ENEMIES[eid]
 		# HP scales at full escale; damage/block at the damped dscale (hard, not impossible).
-		var dscale: float = 1.0 + (escale - 1.0) * ATK_SCALE_K
+		var dscale: float = _dscale()
 		var ehp: int = int(round(float(ed["max_hp"]) * escale))
 		var eatk: int = int(round(float(ed["atk"]) * dscale))
 		# Move rotation: damage/block amounts pre-scaled by dscale; rage stays flat (small permanent +).
-		var mvs: Array = []
-		for m: Dictionary in ed.get("moves", []):
-			var mv: Dictionary = m.duplicate()
-			if mv.has("dmg"):
-				mv["dmg"] = int(round(float(mv["dmg"]) * dscale))
-			if mv.has("amt") and mv["kind"] in ["block", "guard_all"]:
-				mv["amt"] = int(round(float(mv["amt"]) * dscale))
-			if mv.has("ally_amt"):
-				mv["ally_amt"] = int(round(float(mv["ally_amt"]) * dscale))
-			mvs.append(mv)
+		var mvs: Array = _scale_moves(ed.get("moves", []), dscale)
 		enemies.append({
 			"archetype": eid, "name": ed["name"], "emoji": ed["emoji"],
 			"hp": ehp, "max_hp": ehp, "block": 0, "atk": eatk,
@@ -470,7 +732,24 @@ func _start_combat() -> void:
 			"burn": 0, "vulnerable": 0,   # status debuffs (Kindle / Guard Break)
 			"stun": 0,                    # Stunning Strike: loses its next action
 			"am_owner": -1, "am_tick": 0, "am_turns": 0,   # the Rogue's Assassin's Mark (owner seat)
-			"moves": mvs, "move_i": (randi() % mvs.size()) if not mvs.is_empty() else 0,   # random offset desyncs duplicates
+			# ROTATION OFFSET — randomised ONLY for a body that appears more than once on this board.
+			# The offset exists for exactly one reason: three Cave Bats or two Wolves marching in
+			# lockstep read as one metronome instead of three threats. A body that appears ONCE gets no
+			# benefit from it and pays a real cost — encounter_db authors a `rhythm` list per board
+			# ("turn 1: Vorn coils behind block. Free turn.") and feedback_panel prints those lines to
+			# the playtester VERBATIM, so a randomised beat 1 made the feedback instrument lie about the
+			# fight the tester just played. Vorn opened on AVALANCHE 25% of the time; the Ogre on
+			# stonefists skipped its authored free turn half the time. Wire-safe: move_i is in
+			# _INT_KEYS, so the host's roll is the one every peer renders either way.
+			# Deliberately gated on DUPLICATE-NESS rather than on tier != "boss": stonefists and gorge
+			# are not boss boards and their rhythms were lying too.
+			# ⚠ UNSIMMED — singleton bodies now always open on beat 0, which dorf_sim.py has not seen.
+			"moves": mvs, "move_i": (randi() % mvs.size()) if (not mvs.is_empty() and enc.count(eid) > 1) else 0,
+			# THE SECOND ROTATION (Molt-King). Built here, from the same dscale, for the same reason
+			# `moves` is: it must be pre-scaled identically, and both halves of a two-phase boss have
+			# to be scaled by ONE piece of code or the cracked half quietly ships at base numbers in
+			# every elite fight. Empty for every other body, which is also the swap's gate.
+			"moves_molt": _scale_moves(ed.get("moves_molt", []), dscale),
 			"rage": 0,                    # permanent +atk from Howl (rage_all)
 			"intent_target": -1, "node": en_emoji[i], "slot": i, "side": "enemy",
 		})
@@ -483,6 +762,11 @@ func _start_combat() -> void:
 	overlay.visible = false
 	intent_open = -1
 	intent_panel.visible = false
+	# Play Again re-enters here without rebuilding the UI, so anything left open from the last fight
+	# survives into the new one. The notes in particular would then be describing the fight you just
+	# finished while a fresh board sits underneath them.
+	if feedback != null:
+		feedback.close()
 	for i: int in range(enemies.size()):
 		en_emoji[i].text = enemies[i]["emoji"]
 		en_emoji[i].modulate = Color.WHITE
@@ -719,17 +1003,108 @@ func _enemy_phase() -> void:
 	_start_player_phase()
 	_net_board()   # fresh hands were just dealt off the authority's RNG
 
+## The damping factor every enemy DAMAGE/BLOCK number is pre-scaled by (HP takes the full escale).
+## Derived from `request` rather than stored on an enemy: every peer builds its board from the same
+## request, so this is identical everywhere without a byte on the wire. Anything that has to invent a
+## move number at RUNTIME (the Overseer's regalia Gaze) has to come through here, or it would be the
+## one beat in the game that ignores the encounter's scale.
+func _dscale() -> float:
+	return 1.0 + (float(request.get("enemy_scale", 1.0)) - 1.0) * ATK_SCALE_K
+
+## Pre-scale one authored rotation. Pulled out of _start_combat the moment a second rotation existed:
+## two copies of these four lines is exactly how a two-phase boss ends up with one scaled half.
+func _scale_moves(src: Array, dscale: float) -> Array:
+	var out: Array = []
+	for m: Dictionary in src:
+		var mv: Dictionary = m.duplicate()
+		if mv.has("dmg"):
+			mv["dmg"] = int(round(float(mv["dmg"]) * dscale))
+		if mv.has("amt") and mv["kind"] in ["block", "guard_all"]:
+			mv["amt"] = int(round(float(mv["amt"]) * dscale))
+		if mv.has("ally_amt"):
+			mv["ally_amt"] = int(round(float(mv["ally_amt"]) * dscale))
+		out.append(mv)
+	return out
+
+## THE MOLT — a second rotation, swapped in at half HP and never swapped back. It is its own function
+## because the intent panel's "Next:" line reads the rotation directly, and a panel still reading the
+## armoured beats after the shell came off would be the exact lie this whole section exists to prevent.
+## Gated on the DATA (an authored `moves_molt`) and not on an archetype id, so the next body that
+## sheds a shell gets this for free. move_i is deliberately NOT reset: the two arrays are the same
+## length by authoring rule, so beat 0 stays beat 0 — the telegraph the player already read still
+## resolves, it just resolves as the molted version. Swapping a ROTATION is wire-safe (both halves are
+## rebuilt locally on every peer from the same request); adding or removing BODIES would not be.
+func _rotation(e: Dictionary) -> Array:
+	var molt: Array = e.get("moves_molt", [])
+	if not molt.is_empty() and Syn.molted(e):
+		return molt
+	return e.get("moves", [])
+
 ## The move this enemy is committed to (latched by construction: move_i only advances after acting).
 ## An entry without a rotation falls back to the classic flat attack.
+##
+## THIS IS THE ONLY PLACE THAT ANSWERS "what is it about to do", and the resolver AND all three
+## telegraphs (the latched label, the panel headline, the Next line) read it. That is why every
+## SUBSTITUTION lives here rather than in _do_enemy_move: a substitution the resolver made privately
+## would be a number the player could not have seen coming.
 func _enemy_move(e: Dictionary) -> Dictionary:
-	var mvs: Array = e.get("moves", [])
+	var mvs: Array = _rotation(e)
 	if mvs.is_empty():
-		return {"name": "Attack", "emoji": "🗡️", "kind": "attack", "dmg": int(e["atk"]), "tip": "A plain attack."}
+		return {"name": "Attack", "kind": "attack", "dmg": int(e["atk"]), "tip": "A plain attack."}
+	# THE ALONE GATE — the cornered Caster stops warding and only casts its heaviest beat. Substituted
+	# here so it is visible in the telegraph the turn it becomes true, and previewed greyed in the
+	# intent panel BEFORE it is true (see _device_line).
+	var sub: Dictionary = Syn.alone_gate(enemies, e)
+	if not sub.is_empty():
+		return sub
+	# TWIN BOND — the Wolf that lost its Witch howls on every beat. Syn owns the flag but deliberately
+	# not the choice of beat: which move is "the howl" is rotation data, so it is matched on KIND here.
+	# The rage cap (RAGE_CAP) still applies, so this plateaus instead of diverging, and _rage_gain
+	# keeps the label honest ("max") once it does.
+	if bool(Syn.twin_bond(enemies, e).get("howl_every_beat", false)):
+		for m: Dictionary in mvs:
+			if str(m.get("kind", "")) == "rage_all":
+				return m
 	return mvs[int(e["move_i"]) % mvs.size()]
 
-## Per-hit damage of an attack-kind move: move damage + accumulated rage (Howl).
+## The beat AFTER the current one, run through the SAME substitution chain the live beat is.
+##
+## The intent panel's "Next:" line used to index _rotation() raw, which made it the one telegraph that
+## could disagree with the resolver — and it disagreed PERMANENTLY, not for a turn. Both substitutions
+## above are one-way: nothing revives, so a Caster that is alone stays alone and a Wolf that lost its
+## Witch stays widowed. With move_i % 3 == 0 the panel promised "Next: Ward — block 6" while every
+## remaining beat was a 15-damage Bolt, so the player blocked for a ward and ate the bolt. Neither
+## backstop covered it: _device_line's alone-gate preview is explicitly gated on the gate NOT yet
+## being live (it goes silent exactly when the Next line starts lying), and Syn.active_devices' gate
+## sentence only reaches the feedback popup, which _refresh_intent_panel refuses to draw under.
+##
+## Probing a shallow copy with move_i+1 keeps _enemy_move the only place that answers "what is it
+## about to do". Shallow is safe and deliberate: the only key written is move_i (an int), and
+## archetype / slot / hp / max_hp / moves_molt — everything Syn matches a body, an aura or a molt on —
+## survive duplicate() by value or by shared reference, either of which reads the same.
+func _next_move(e: Dictionary) -> Dictionary:
+	var probe: Dictionary = e.duplicate()
+	probe["move_i"] = int(e["move_i"]) + 1
+	return _enemy_move(probe)
+
+## The move's OWN printed damage, before the board's contribution — i.e. what _move_dmg used to read
+## straight off the dict. Only the regalia beats differ: a `gaze` move's damage is not authored on the
+## move at all, it is 3 + 2 per living Rune Crystal (Syn.regalia), so the Overseer's output falls as
+## its lattice does and killing rocks that never attack is visibly the correct play. Scaled by the
+## same dscale the builder applied to every other move, or the one runtime-computed number in the game
+## would be the one that ignores the encounter scale.
+func _move_base(e: Dictionary, mv: Dictionary) -> int:
+	if bool(mv.get("gaze", false)):
+		return int(round(float(Syn.regalia(enemies)["gaze"]) * _dscale()))
+	return int(mv.get("dmg", e["atk"]))
+
+## THE ONE NUMBER. Per-hit damage of an attack-kind move, with every outgoing modifier folded in by
+## Syn.effective_dmg — Howl rage, chorus, the Maw's gorge, the molt's fury, the doubled Shriek.
+## The resolver and all three telegraphs come through here and nothing else, which is what makes the
+## intent label structurally incapable of lying. NEVER add a modifier at a call site: a second path
+## is a telegraph that disagrees with the hit, and the whole grammar dies with it.
 func _move_dmg(e: Dictionary, mv: Dictionary) -> int:
-	return int(mv.get("dmg", e["atk"])) + int(e.get("rage", 0))
+	return Syn.effective_dmg(enemies, e, mv, _move_base(e, mv))
 
 ## What a Howl would actually add (telegraphs stay truthful once rage hits the cap).
 func _rage_gain(e: Dictionary, mv: Dictionary) -> int:
@@ -785,8 +1160,23 @@ func _do_enemy_move(e: Dictionary, mv: Dictionary) -> void:
 # ================================================================ Targeting (enemy preference)
 ## Role-based (NOT slot-indexed) so a non-canonical crew (e.g. {W,W,S} with no Cleric) targets
 ## correctly. Byte-identical to the old party[0/1/2] logic for the canonical W/C/S trio.
+##
+## TAUNT IS A BODY BLOCK, AND A BODY CANNOT BLOCK A SPELL (2026-07-21). `forced` used to return the
+## tank the instant it was set, BEFORE the pref match ever ran — one energy deleted every targeting
+## rule in the game at once. The measured consequence: target selection was worth 0% of a planner
+## bot's advantage, and four of the twelve new encounters were unshippable because their whole named
+## lesson is "you cannot solve this by taunting". So the redirect now COMPETES with pref instead of
+## overriding it: it catches MELEE bodies only. A ranged enemy shoots past the Warrior and keeps its
+## own preference.
+##
+## WHY REACH AND NOT A NUMERIC THREAT SCORE. A score-based pull fails exactly where the player needs
+## it: it would refuse to drag a Caster off a dying Sorcerer, which is the one case anybody reaches
+## for Taunt. It is also invisible — nothing on screen tells you what your score is, so the rule
+## could never be predicted, only discovered after the damage landed. Reach is one sentence, it is
+## already in the data, and it hands the ranged roster a permanent identity worth building
+## encounters around.
 func _enemy_target(e: Dictionary) -> Dictionary:
-	if e["forced"]:
+	if _taunt_catches(e):
 		var w: Dictionary = _first_living_role("tank")   # Taunt -> a tank
 		if not w.is_empty():
 			return w
@@ -805,6 +1195,25 @@ func _enemy_target(e: Dictionary) -> Dictionary:
 			return _pick_lowest_hp()
 		_:
 			return _pick_lowest_hp()
+
+## Does the standing Taunt actually redirect THIS body? Melee only — see _enemy_target.
+## Every consumer of the redirect goes through here (the resolver, the threat arrows, the latched
+## intent label, the intent panel and the portrait badge), so there is exactly one place that can
+## answer "did the taunt take" and they cannot disagree. An arrow that shows a pull the resolver
+## then ignores is worse than never having changed the rule.
+func _taunt_catches(e: Dictionary) -> bool:
+	return bool(e.get("forced", false)) and _enemy_range(e) < 2
+
+## Reach of an enemy archetype: 1 = melee, 2 = ranged. The field has been in Db.ENEMIES since the
+## removed grid fork and sat inert until Taunt was made to compete; anything missing it is melee,
+## which is the safe default (a new enemy is taunt-able until someone says otherwise).
+## Read off Db by `archetype` rather than stored on the enemy dict ON PURPOSE: the whole enemy dict
+## crosses the wire, so a stored copy would be a second source of truth that also has to be
+## int-coerced in _INT_KEYS (JSON hands ints back as floats). `archetype` already crosses, and it is
+## static, so every peer derives the same answer with nothing added to the snapshot.
+func _enemy_range(e: Dictionary) -> int:
+	var ed: Dictionary = Db.ENEMIES.get(str(e.get("archetype", "")), {})
+	return int(ed.get("range", 1))
 
 func _first_living_role(role: String) -> Dictionary:
 	for a: Dictionary in party:
@@ -944,6 +1353,11 @@ func _build_snapshot() -> Dictionary:
 		var d: Dictionary = e.duplicate()
 		d.erase("node")
 		d.erase("moves")   # every peer rebuilds identical pre-scaled moves from request.enemy_scale
+		# ...and the same goes for the Molt-King's second rotation. It MUST be erased with its sibling:
+		# an array of dicts crossing the wire would come back with float leaves that _INT_KEYS cannot
+		# reach (it only coerces top-level keys), so every cracked-half number would arrive as 14.0 and
+		# print as "14.0" the first time a "%d" met it.
+		d.erase("moves_molt")
 		es.append(d)
 	# DRAIN, not read: fx are events, so they ship exactly once. Reassigning (rather than clearing)
 	# means the dict we hand back can never alias the live buffer.
@@ -1067,7 +1481,7 @@ func _apply_play(a: Dictionary, idx: int, cid: String, def: Dictionary, target_k
 			_resolve(def, a, party[target_idx])
 		_:
 			_resolve(def, a, {})   # self / party: the ops loop over the party internally
-	# 🌀 Twinned: re-run against a SECOND enemy. Gated hard to a single-target enemy spell whose
+	# 🧿 Twinned: re-run against a SECOND enemy. Gated hard to a single-target enemy spell whose
 	# effect fans out nowhere — arc_lightning carries a dmg_all INSIDE its effect, and re-running that
 	# would hit the whole board twice off one Twin.
 	if str(a.get("meta_pick", "")) == "twin" and str(def.get("school", "")) == "spell":
@@ -1075,7 +1489,7 @@ func _apply_play(a: Dictionary, idx: int, cid: String, def: Dictionary, target_k
 		if target_kind == "enemy" and _twinnable(def):
 			var second: int = _second_enemy(target_idx)
 			if second >= 0:
-				_log("🌀 %s twins %s onto %s." % [a["name"], def["name"], enemies[second]["name"]])
+				_log("🧿 %s twins %s onto %s." % [a["name"], def["name"], enemies[second]["name"]])
 				_resolve(def, a, enemies[second])
 	_finish_play(a, def, cid)
 
@@ -1677,6 +2091,10 @@ func _run_ops(ops: Array, a: Dictionary, target: Dictionary, mult: int, is_atk: 
 			"apply":
 				_apply_enemy_status(target, str(op[1]), int(op[2]) if op.size() > 2 else 1)
 			"force_target_all":
+				# The flag goes on EVERY body, including the ranged ones it will not move. Whether a
+				# taunt takes is decided once, at read time, in _taunt_catches — so the ranged bodies
+				# can still wear the 🏹 "it slid off me" badge. Filtering here instead would make a
+				# ranged enemy indistinguishable from a board with no Taunt on it at all.
 				for e: Dictionary in enemies:
 					e["forced"] = true
 				taunt_last_turn = turn
@@ -1763,6 +2181,19 @@ func _attack(a: Dictionary, enemy: Dictionary, base: int, is_attack: bool) -> vo
 		amt = int(round(amt * Db.MARK_MULT))
 	if int(enemy.get("vulnerable", 0)) > 0:
 		amt = int(round(amt * VULN_MULT))
+	# AEGIS (and the two boss-shaped soaks: the Overseer's regalia, the Molt-King's carapace).
+	# It goes LAST, after xMark and xVulnerable, because it is a flat shell and a multiplier must
+	# never be allowed to amplify a flat soak — 6 soak on a x1.5 hit is 6, not 9.
+	#
+	# ⚠ IT LIVES IN _attack AND DELIBERATELY NOT IN _deal_enemy. Burn ticks, the Assassin's Mark bleed
+	# and Retaliate's reflect all write through _deal_enemy precisely BECAUSE they route around the
+	# armour rules (see _enemy_phase's comment on status damage ignoring block) — and aegis IS armour.
+	# So a shell soaks swings and does nothing to a fire you already lit, which makes burn the designed
+	# way through an aegis line rather than a loophole in it. Nothing on screen contradicts that: every
+	# tip and every readout says "less per hit", and a burn tick is not a hit.
+	var soak: int = Syn.incoming_reduction(enemies, enemy)
+	if soak > 0:
+		amt = maxi(0, amt - soak)
 	_deal_enemy(enemy, amt)
 	# The Assassin's Mark is fed from both ends here: an ally's hit buys it a turn, the owner's hit
 	# buys it a tick. May run on an enemy this hit just killed — harmless only because every reader
@@ -1847,6 +2278,10 @@ func _end(won: bool) -> void:
 	power_armed = false
 	if choice_box != null:
 		choice_box.visible = false   # z_index 50 would paint a stale pick over the win screen
+	# ...and the notes are z_index 70, i.e. ABOVE the win overlay. Left open they would bury the
+	# result and the Play Again button under a full-screen dim with no way back to them.
+	if feedback != null:
+		feedback.close()
 	if not request.is_empty():
 		var crew_results: Array = []
 		for a: Dictionary in party:
@@ -1859,6 +2294,81 @@ func _end(won: bool) -> void:
 
 func _on_overlay_btn() -> void:
 	_start_combat()
+
+# ================================================================ The designer's notes
+## Open the popup. This is the ONLY thing that ever reveals an encounter's intent, by design.
+##
+## CO-OP: purely local and purely read-only. It sends nothing (no new wire event, and nothing here
+## touches Net), it mutates nothing (both dicts are built fresh and handed over by value), and it
+## does not gate the simultaneous-play flow — your seat's End Turn is not blocked for anyone else
+## while you read, and the other seats never learn that you opened it. What it DOES do is swallow
+## every tap on the board underneath, because the panel's root is a full-screen MOUSE_FILTER_STOP
+## Control: this repo's most expensive modal bug was a floating panel that left the card fan live
+## beneath it, so you could read a popup and play a card with the same tap.
+func _on_feedback() -> void:
+	if feedback == null:
+		return
+	# Close the two hover explainers first. Both are z_index 60/61, i.e. UNDER the popup's 70, so they
+	# would sit invisible behind the dim and then reappear on dismiss pointing at a body the player has
+	# long since stopped looking at. The panel also blocks the mouse_exited that would normally close
+	# them, so nothing else will.
+	_close_intent(intent_open)
+	_close_power_tip(power_tip_open)
+	feedback.show_notes(_encounter(), _live_board())
+
+## Is the popup up? One null-safe predicate rather than `feedback != null and feedback.visible`
+## repeated at every guard — _build_ui creates it before _start_combat so it is never actually null
+## in play, but combat.gd already guards choice_box the same way and a modal check that can itself
+## crash is worse than no modal check.
+func _feedback_up() -> bool:
+	return feedback != null and feedback.visible
+
+## The authored encounter behind THIS fight, or {} when there is not one.
+##
+## request["encounter"] is the id the campaign will stamp on a rolled board. It is absent today, it is
+## absent forever in a freeform skirmish rolled from Db.ENCOUNTER_POOLS, and it is absent in every
+## test harness (powers_verify / combat_verify / the coop harnesses all build request by hand) — so
+## the missing case is the COMMON case, not the edge case, and it must be silent. get_enc() answers
+## {} for both "" and an unknown id, and the panel has a written fallback for {}: it says outright
+## that nobody designed this fight, which is itself a finding worth showing a playtester.
+func _encounter() -> Dictionary:
+	return Enc.get_enc(str(request.get("encounter", "")))
+
+## The board as it actually is, right now. Intent is only useful next to reality — "the rhythm says
+## turn 2 is the squeeze" means nothing until you can see you are ON turn 2 with two bodies up.
+func _live_board() -> Dictionary:
+	var bodies := 0
+	for e: Dictionary in enemies:
+		if e.get("alive", false):
+			bodies += 1
+	return {
+		"turn": turn,
+		"bodies": bodies,
+		"devices": _live_devices(),
+		# The scale the fight was BUILT at, read back off the request rather than off _dscale(): the
+		# encounter's design block quotes bestiary-contract numbers against escale, so the popup has to
+		# print the same axis or the two cannot be compared.
+		"scale": float(request.get("enemy_scale", 1.0)),
+	}
+
+## The device keys switched on right now, deduped, in board order.
+##
+## Syn.active_devices returns {"key", "text"} rows — one per device INSTANCE, so a board with two
+## molted bodies yields two "molt" rows carrying two different sentences. The panel joins its
+## `devices` list with ", " and str()s each entry, so handing it those dicts verbatim would print a
+## wall of `{ "key": "molt", "text": "..." }` across the one line whose whole job is to be glanceable.
+## The sentences are not lost: every one of them is already ON the board (the per-body device line
+## under each portrait, and the intent panel's synergy row). What the popup needs here is "what is
+## switched on", not "what does it do" — so this collapses each row to its key.
+func _live_devices() -> Array:
+	var out: Array = []
+	for d: Variant in Syn.active_devices(enemies):
+		if not (d is Dictionary):
+			continue
+		var k: String = str((d as Dictionary).get("key", ""))
+		if k != "" and not out.has(k):
+			out.append(k)
+	return out
 
 func _first_living_party() -> int:
 	for i: int in range(party.size()):
@@ -1885,6 +2395,12 @@ func _refresh() -> void:
 	end_turn_btn.text = "Waiting…" if ended else "End Turn"
 	end_turn_btn.disabled = phase != "playerTurn" or not _barrier_open or ended or benched
 	end_turn_btn.visible = not overlay.visible
+	# The notes button follows End Turn exactly: it is a live affordance for the WHOLE fight (a
+	# playtester forms the judgement mid-fight, not on the win screen) and disappears only under the
+	# win/lose overlay, where it would paint over the result. It is never disabled by phase — reading
+	# the design during the enemy phase is a legitimate and common thing to want to do.
+	if feedback_btn != null:
+		feedback_btn.visible = not overlay.visible
 	_update_cursor()
 	_refresh_intent_panel()
 	_refresh_power_tip()
@@ -1892,18 +2408,37 @@ func _refresh() -> void:
 	_switch_from = -1
 
 func _refresh_enemies() -> void:
-	for i: int in range(3):
+	# The collapsed swarm lines are resolved FIRST: they decide which bodies must NOT draw their own
+	# intent label, and a per-body loop that had already drawn one would leave both on screen.
+	var collapsed: Dictionary = _refresh_swarm_lines()
+	for i: int in range(enemies.size()):
 		var e: Dictionary = enemies[i]
 		var alive: bool = e["alive"]
 		en_emoji[i].visible = alive
 		en_name[i].visible = alive
-		en_intent[i].visible = alive
+		en_intent[i].visible = alive and not collapsed.has(i)
 		en_hp[i].visible = alive
-		var has_stat: bool = e["block"] > 0 or int(e.get("burn", 0)) > 0 or int(e.get("vulnerable", 0)) > 0
+		# `forced` joins the status row because a Taunt that did NOT take has to be visible: the badge
+		# is the only thing on screen that distinguishes "this body ignored your Taunt" from "you
+		# never played one". Without it the player just sees an arrow that failed to move.
+		var has_stat: bool = e["block"] > 0 or int(e.get("burn", 0)) > 0 or int(e.get("vulnerable", 0)) > 0 \
+			or int(e.get("stun", 0)) > 0 or bool(e.get("forced", false))
 		en_block[i].visible = alive and has_stat
+		# BEFORE the corpse early-out: a dead body must drop its slab, its device row and its meter, or
+		# a killed Shellback would leave its aegis wash on the board it no longer protects — a synergy
+		# that is visibly still running after you solved it is worse than one you never saw.
+		_refresh_devices(i, e)
+		# The demoted pref badge is only ever on screen while a Taunt is actually redirecting this body.
+		var taunted: bool = _taunt_catches(e)
+		en_rule[i].visible = alive and taunted
+		if taunted:
+			en_rule[i].text = str(Db.PREF_BADGES.get(str(e.get("pref", "")), {}).get("badge", ""))
 		if not alive:
 			continue
-		en_name[i].text = ("🎯 " if e["marked"] else "") + e["name"]
+		# NAMEPLATE = [pref badge][mark][name]. The badge is IDENTITY (what this body always does) and
+		# lives here rather than in the intent line, which is TRUTH (what it is about to do). Keeping
+		# them apart is what lets a player learn a rule instead of re-reading this turn's target.
+		en_name[i].text = "%s %s%s" % [_pref_badge(e), ("🎯 " if e["marked"] else ""), e["name"]]
 		en_hp[i].text = "%d/%d" % [e["hp"], e["max_hp"]]
 		var estat := ""
 		if e["block"] > 0:
@@ -1912,17 +2447,249 @@ func _refresh_enemies() -> void:
 			estat += "🔥%d " % int(e["burn"])
 		if int(e.get("vulnerable", 0)) > 0:
 			estat += "💥 "
+		# 💫 Stun was LOG-ONLY until 2026-07-22: the enemy skipped its turn and the only trace was a
+		# line in the log, so the player could not tell "I stunned it" from "the telegraph was wrong".
+		# It is a status, so it wears a status badge like every other one, and the telegraph says so
+		# too (see _intent_text) — a skipped beat has to be visible in the slot the beat lives in.
+		if int(e.get("stun", 0)) > 0:
+			estat += "💫%d " % int(e["stun"])
+		# 🏹 = a standing Taunt slid off this body because it is ranged, so its own preference stands.
+		# The 😡 case is NOT here any more: an overridden rule belongs on the nameplate beside the rule
+		# it overrode (see _pref_badge), not in the status row, where it read as one more wearing-off
+		# debuff. What is left here is the NEGATIVE case, which has no home on the nameplate because
+		# nothing about the body's rule changed — and it is the case the player most needs told.
+		if bool(e.get("forced", false)) and not taunted:
+			estat += "🏹 "
 		en_block[i].text = estat
+		var mv: Dictionary = _enemy_move(e)
 		en_intent[i].text = _intent_text(e)
-		en_intent[i].add_theme_color_override("font_color", _intent_color(_enemy_move(e)["kind"]))
+		# CHORUS PRINTS THE TOTAL, NEVER THE ARITHMETIC. The number in the label is ALREADY the buffed
+		# one (it comes through _move_dmg -> Syn.effective_dmg), so the only thing left to say is WHO is
+		# doing it — and a colour says that without asking the player to do sums mid-fight. Tinted in
+		# the SOURCE's colour rather than a generic "buffed" colour, because with two possible singers
+		# on the board (🔮 and 🍄) the useful half of the information is which one to kill.
+		# Gated on the move KIND, not on the damage: a Ward's base falls back to `atk`, so a
+		# damage>0 test would tint a block beat that chorus does not touch.
+		en_intent[i].add_theme_color_override("font_color", _intent_tint(e, mv))
 		# Highlight valid enemy targets while an enemy-target card is armed.
 		var arm: Dictionary = _armed_def()
 		var can: bool = arm.get("target", "") in ["enemy", "ally_or_enemy"]
 		en_emoji[i].modulate = Color(1.3, 1.05, 0.6) if (can and selected_uid != "") else Color.WHITE
 
+## The intent label's colour: its kind's, unless a chorus is inflating the number — then the SOURCE's,
+## so the tint answers "which body do I kill to make this number smaller". Pulled out of the per-body
+## loop the moment the collapsed swarm line needed the identical answer for a whole run.
+func _intent_tint(e: Dictionary, mv: Dictionary) -> Color:
+	if Syn.chorus_bonus(enemies, e) > 0 and str(mv.get("kind", "")) in Syn.DMG_KINDS:
+		return _source_tint(Syn.aura_source(enemies, Syn.CHORUS))
+	return _intent_color(str(mv.get("kind", "")))
+
+## The nameplate badge — one of the three shipped prefs, or 😡 when a standing Taunt ACTUALLY takes.
+## See Db.PREF_BADGES for why the set is closed at three and why 😡 REPLACES rather than hides.
+## Everything about "did the redirect take" goes through _taunt_catches, the single answer the
+## resolver, the arrows, the label and this badge all read — a badge that promised a pull the
+## resolver ignores would be worse than no badge at all, and Taunt is melee-only since 2026-07-21.
+func _pref_badge(e: Dictionary) -> String:
+	var key: String = "forced" if _taunt_catches(e) else str(e.get("pref", ""))
+	return str((Db.PREF_BADGES.get(key, {}) as Dictionary).get("badge", ""))
+
+## The badge's sentence, for the intent panel. Same lookup, same closed set — one table, so the glyph
+## on the board and the words in the panel cannot drift.
+func _pref_tip(e: Dictionary) -> String:
+	var key: String = "forced" if _taunt_catches(e) else str(e.get("pref", ""))
+	return str((Db.PREF_BADGES.get(key, {}) as Dictionary).get("tip", ""))
+
+## THE SWARM LINE — one label for a contiguous run of 3+ identical living minions, drawn across the
+## run in place of their individual intent labels. Returns the set of slot indices whose own label
+## must therefore stay hidden, so the caller cannot forget to hide them.
+##
+## WHY IT IS WORTH A WHOLE FUNCTION: four Cave Bats telegraphing "🗡️4>Sor" four times is four labels
+## that say one thing. The cost is not clutter, it is that the player's eye has to VISIT all four to
+## discover there was nothing to compare — on the exact boards (5-6 bodies) where attention is already
+## the scarce resource. One line, one number, one decision.
+##
+## WHY A CONTIGUOUS RUN AND NOT "ALL THE BATS": contiguity is what makes duplicates read as one
+## object. Two bats with a Warden standing between them are genuinely two problems (the Warden's aegis
+## sits between them), and a bracket drawn over the Warden would claim otherwise. Syn.swarm_groups
+## already enforces contiguity; this only draws what it found.
+##
+## THE COLLAPSE IS GATED ON THE BEATS ACTUALLY MATCHING, and bails to individual labels if they do
+## not. Rotations start at a random offset per instance, so two of the same archetype CAN be
+## telegraphing different beats. Swarm chaff is authored with a single beat precisely so a swarm stays
+## summarisable, which means this gate is nearly always satisfied — it exists for the day someone
+## gives a minion a second beat, which is exactly the day a silent collapse would start lying. A
+## STUNNED member bails for the same reason: it is not doing what the line says, and one line claiming
+## four swings when three are coming is the one failure mode that would make the number untrustworthy.
+##
+## THE SUMMED TOTAL IN PARENTHESES IS THE POINT. "🗡️3>Sor" four times is a multiplication the player
+## has to do; "(12)" against a 22-HP Sorcerer is a decision they can make.
+func _refresh_swarm_lines() -> Dictionary:
+	var collapsed: Dictionary = {}
+	for l: Label in sw_line:
+		l.visible = false
+	# Only while the intents are LATCHED. Mid enemy-phase the beats resolve one at a time and a
+	# summed line would keep claiming swings that have already landed.
+	if phase != "playerTurn" or enemies.is_empty():
+		return collapsed
+	var li: int = 0
+	for g: Dictionary in Syn.swarm_groups(enemies):
+		if li >= sw_line.size():
+			break
+		var slots: Array = g.get("slots", [])
+		if slots.size() < Syn.SWARM_MIN or int(slots[0]) >= enemies.size():
+			continue
+		var head: Dictionary = enemies[int(slots[0])]
+		var hm: Dictionary = _enemy_move(head)
+		var same: bool = true
+		var total: int = 0
+		for s: int in slots:
+			if s >= enemies.size():
+				same = false
+				break
+			var e: Dictionary = enemies[s]
+			var mv: Dictionary = _enemy_move(e)
+			if int(e.get("stun", 0)) > 0 or str(mv.get("name", "")) != str(hm.get("name", "")) \
+				or str(mv.get("kind", "")) != str(hm.get("kind", "")):
+				same = false
+				break
+			total += _body_total(e, mv)
+		if not same:
+			continue
+		# Span the run: from the first body's label box to the last one's, so the bracket visibly
+		# BELONGS to those bodies and stops at the edge of the group.
+		var lw: float = _slot_label_w()
+		var x0: float = float(en_pos[int(slots[0])].x)
+		var x1: float = float(en_pos[int(slots[slots.size() - 1])].x)
+		var l2: Label = sw_line[li]
+		l2.position = Vector2(x0 - lw * 0.5, float(en_pos[int(slots[0])].y) - 52.0)
+		l2.size = Vector2((x1 - x0) + lw, 22)
+		# The FULL font, never the squeezed one: this line owns the whole run's width, so it is the one
+		# label on a six-body board that has room. Collapsing and then shrinking would spend the space
+		# the collapse just bought.
+		l2.add_theme_font_size_override("font_size", 18)
+		l2.add_theme_color_override("font_color", _intent_tint(head, hm))
+		l2.text = "%s×%d %s (%d)" % [str(head.get("emoji", "")), slots.size(), _intent_text(head), total]
+		l2.visible = true
+		for s2: int in slots:
+			collapsed[s2] = true
+		li += 1
+	return collapsed
+
+## Everything ONE body's current move will put into the party this phase, per-hit numbers summed.
+## Shared by the swarm line's total and by the forecast's sanity, so the two can never disagree about
+## what "a body's output" means. Non-damage beats are 0 by construction (they are not in DMG_KINDS).
+func _body_total(e: Dictionary, mv: Dictionary) -> int:
+	var kind: String = str(mv.get("kind", ""))
+	if not kind in Syn.DMG_KINDS:
+		return 0
+	if kind == "attack_all":
+		var living: int = 0
+		for a: Dictionary in party:
+			if a.get("alive", false):
+				living += 1
+		return _move_dmg(e, mv) * living
+	var hits: int = int(mv.get("hits", 1)) if kind == "multi" else 1
+	return _intent_hit(e, mv) * hits
+
+## The colour that IDENTIFIES an aura source. See SOURCE_TINT — the point is which body, not which
+## aura, so an unlisted source falls back to a neutral gold rather than to a per-kind colour that
+## would make two different sources look like the same one.
+func _source_tint(src: Dictionary) -> Color:
+	var c: Variant = SOURCE_TINT.get(str(src.get("archetype", "")), AURA_FALLBACK_TINT)
+	return c if c is Color else AURA_FALLBACK_TINT
+
+## THE DEVICE READOUT for one body — the half of this task that is not arithmetic. Every device in
+## synergies.gd is worthless if the player cannot see it BEFORE committing a card, so each one gets a
+## mark on the board itself and not only a line in a tooltip:
+##   aegis  -> a slab behind the portrait in the SOURCE's colour (solid on the source, faint on
+##             everything it shields) + a "🪨-N" chip. Colour is the link between them.
+##   chorus -> the source is slabbed in its own colour too, and every recipient's intent label is
+##             TINTED that colour (see _refresh_enemies). The label already prints the buffed total.
+##   gorge  -> 🩸 pips, one per corpse, capped at the 4 that reach Syn.GORGE_CAP.
+##   molt   -> a crack meter whose RIGHT EDGE is the half-HP threshold.
+## Everything here is derived from the live board every frame; nothing is stored and nothing is
+## latched, so a client rebuilding its screen from an absolute snapshot draws exactly what the host
+## drew, with no fx event and no wire field.
+func _refresh_devices(i: int, e: Dictionary) -> void:
+	var slab: ColorRect = en_aura[i]
+	var dev: Label = en_device[i]
+	var mbg: ColorRect = en_meter_bg[i]
+	var mfg: ColorRect = en_meter_fg[i]
+	slab.visible = false
+	dev.visible = false
+	mbg.visible = false
+	mfg.visible = false
+	if not e.get("alive", false):
+		return
+
+	var bits: Array = []
+	# --- aegis: the slab, and the chip that says what it is worth ---------------------------------
+	# The chip prints incoming_reduction, i.e. what this body ACTUALLY soaks — aegis, the Overseer's
+	# regalia and the Molt-King's carapace MAXed into one number. Printing the aura amount instead
+	# would tell a shelled Molt-King under a Shellback that it soaks 6, and it soaks 3.
+	var soak: int = Syn.incoming_reduction(enemies, e)
+	var aegis_src: Dictionary = Syn.aura_source(enemies, Syn.AEGIS)
+	var chorus_src: Dictionary = Syn.aura_source(enemies, Syn.CHORUS)
+	var is_aegis_src: bool = _is_body(aegis_src, e)
+	var is_chorus_src: bool = _is_body(chorus_src, e)
+	if is_aegis_src or is_chorus_src:
+		# A SOURCE wears its own colour solid — this is the body to kill, and it should read as the
+		# thing causing the wash on its neighbours rather than as one more body wearing it.
+		slab.color = _source_tint(e)
+		slab.color.a = 0.22
+		slab.visible = true
+		if is_aegis_src:
+			bits.append("🪨 aegis -%d" % Syn.aura_amount(enemies, Syn.AEGIS, {}))
+		if is_chorus_src:
+			bits.append("🎶 +%d all" % Syn.aura_amount(enemies, Syn.CHORUS, {}))
+	elif soak > 0:
+		# A PROTECTED body wears its protector's colour faintly. If the soak is its own (a carapace),
+		# there is no source to point at, so it falls back to the neutral tint.
+		slab.color = _source_tint(aegis_src) if not aegis_src.is_empty() else AURA_FALLBACK_TINT
+		slab.color.a = 0.11
+		slab.visible = true
+	if soak > 0 and not is_aegis_src:
+		bits.append("🪨-%d" % soak)
+
+	# --- gorge: one pip per corpse, capped where the bonus caps -----------------------------------
+	# Pips rather than a bar because what it counts is DISCRETE and small (each pip is a body you
+	# killed), and because the cap has to be legible: four pips full = the +12 ceiling, and the fifth
+	# corpse changing nothing is then something the player can see rather than discover.
+	# The pip count is DERIVED from the bonus rather than counted off the corpses, so a change to
+	# GORGE_PER_CORPSE or GORGE_CAP moves the pips with it — a readout that has to be kept in step by
+	# hand is a readout that will eventually lie. floori() over `/` because integer division is a
+	# warning here and the intent is explicitly "how many whole pips does this bonus buy".
+	if str(e.get("archetype", "")) == Syn.ID_MAW:
+		var per: float = float(Syn.GORGE_PER_CORPSE)
+		var pips: int = mini(floori(float(Syn.GORGE_CAP) / per), floori(float(Syn.gorge_bonus(enemies, e)) / per))
+		bits.append("🩸".repeat(pips) if pips > 0 else "🩸x0")
+
+	# --- molt: the crack meter --------------------------------------------------------------------
+	if not (e.get("moves_molt", []) as Array).is_empty():
+		var cracked: bool = Syn.molted(e)
+		# Fills with damage TAKEN and reaches the right edge exactly at half HP, which is the crack.
+		# maxf(1.0, ...) keeps a 1-HP body from dividing by zero.
+		var half: float = maxf(1.0, float(int(e.get("max_hp", 0))) * 0.5)
+		var frac: float = clampf(float(int(e.get("max_hp", 0)) - int(e.get("hp", 0))) / half, 0.0, 1.0)
+		mbg.visible = true
+		mfg.visible = true
+		# The track's OWN width, not METER_W: the meter is squeezed with everything else on a six-body
+		# board (see _slot_font_scale), and a fill computed off the unsqueezed constant would overrun
+		# its track — the one place on this widget where "full" has to mean exactly the right edge.
+		mfg.size = Vector2(round(mbg.size.x * frac), METER_H)
+		mfg.color = Color(1.0, 0.72, 0.25, 0.95) if cracked else Color(0.95, 0.45, 0.35, 0.90)
+		bits.append("🦂 CRACKED" if cracked else "🦂 shell")
+
+	dev.text = " ".join(bits)
+	dev.visible = dev.text != ""
+
 func _refresh_party() -> void:
 	var arm: Dictionary = _armed_def()
 	var ally_arm: bool = selected_uid != "" and arm.get("target", "") in ["ally", "ally_or_enemy"]
+	# ONE pass over the enemy board for the whole crew, not one per dwarf: the forecast is inherently
+	# a fold across every enemy's intent, and computing it per-portrait would run _enemy_move and
+	# Syn.effective_dmg N x M times on the render path.
+	var fc: Array = _incoming_forecast()
 	for i: int in range(party.size()):
 		var a: Dictionary = party[i]
 		var alive: bool = a["alive"]
@@ -1940,6 +2707,12 @@ func _refresh_party() -> void:
 				st += "🔰%d " % a["shield"]
 			if int(a.get("vulnerable", 0)) > 0:
 				st += "💥%d " % a["vulnerable"]
+			# 💫 Stun, PARTY SIDE. Nothing in the shipped content stuns a dwarf — this is the badge for
+			# the day something does, written now because the enemy side got one in the same pass and a
+			# status whose glyph exists on only one side of the board is exactly how a second, different
+			# glyph gets invented for the other side. Costs one guarded line and closes that door.
+			if int(a.get("stun", 0)) > 0:
+				st += "💫%d " % int(a["stun"])
 			if int(a["temp"]["channel_charges"]) > 0:
 				st += "🌀%d " % a["temp"]["channel_charges"]
 			if a["temp"]["fortify_guard"] or a["temp"]["fortify"]:
@@ -1958,8 +2731,11 @@ func _refresh_party() -> void:
 				st += "🎶%d/%d " % [(a.get("targets_turn", []) as Array).size(), Powers.PERFORM_TARGETS]
 			if str(a.get("form", "")) != "":
 				st += "%s%d " % [Db._form_emoji(str(a["form"])).left(2).strip_edges(), int(a.get("shift_turns", 0))]
+			# 🧿 (was 🌀): Metamagic's glyph moved in the 2026-07-22 collision pass so 🌀 means Channel
+			# and only Channel — both badges can be lit on the same Sorcerer at the same time, which is
+			# what made this the collision worth paying for.
 			if str(a.get("meta_pick", "")) != "":
-				st += "🌀%s " % str(a["meta_pick"]).left(1).to_upper()
+				st += "🧿%s " % str(a["meta_pick"]).left(1).to_upper()
 			if str(a.get("held_cid", "")) != "":
 				st += "⏳ "
 			if int(a["temp"].get("next_attack_bonus", 0)) > 0:
@@ -1974,6 +2750,157 @@ func _refresh_party() -> void:
 			pc_block[i].text = ""
 			pc_energy[i].text = ""
 		_refresh_orb(i, a, alive)
+		_refresh_forecast(i, a, alive, fc[i] if i < fc.size() else {})
+
+## Paint one dwarf's incoming chip. Player phase only, and only when something is actually coming:
+## a chip reading "🗡️0" every quiet turn is a chip the eye learns to skip, and it would then be
+## skipped on the turn it says 💀. Mid enemy-phase it is hidden outright — the beats resolve one at a
+## time there, so a summed total would keep counting swings that have already landed.
+func _refresh_forecast(i: int, a: Dictionary, alive: bool, f: Dictionary) -> void:
+	var lbl: Label = pc_forecast[i]
+	var gross: int = int(f.get("gross", 0))
+	if not alive or phase != "playerTurn" or gross <= 0:
+		lbl.visible = false
+		return
+	var net: int = int(f.get("net", 0))
+	if net <= 0:
+		# Covered. The number stays the GROSS swing, so "how much Guard is this costing me" is
+		# readable — a chip that printed 0 would make a 30-damage turn look like a quiet one.
+		lbl.text = "🛡️%d" % gross
+		lbl.add_theme_color_override("font_color", Color(0.62, 0.85, 1.0))
+	elif net >= int(a.get("hp", 0)):
+		# The only state that drops the number: at this point the magnitude is irrelevant and the
+		# glyph is the whole message. This is the readout the 95%-of-a-planner's-edge heal is aimed by.
+		lbl.text = "💀"
+		lbl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.35))
+	else:
+		lbl.text = "🗡️%d" % gross
+		lbl.add_theme_color_override("font_color", Color(1.0, 0.72, 0.45))
+	lbl.visible = true
+
+## THE INCOMING FORECAST — per dwarf, for the enemy phase that is currently telegraphed. Returns an
+## array parallel to party[] of {"gross": int, "net": int}.
+##
+## WHY THIS IS THE HIGHEST-VALUE READOUT ON THE SCREEN, and it is measured rather than felt:
+## scripts/test/skill_gap.gd decomposed a planner bot's advantage over a greedy one and found BLOCKING
+## TO THE TELEGRAPH worth 33% and AIMING HEALS worth 95%. Both of those decisions ARE this number.
+## Until now the player had to fold it by hand off up to six separate intent labels every single turn
+## — and the labels cannot even carry it, because the multipliers that matter live on the VICTIM
+## (Vulnerable is on the dwarf, not on the swing) and Guard drains across the whole phase.
+##
+## WHAT THE TWO NUMBERS MEAN:
+##   gross — everything that will SWING at this dwarf, after every modifier that scales the swing
+##           (Syn's chorus / rage / gorge / molt-fury / doubled Shriek through _move_dmg, this dwarf's
+##           own Vulnerable x1.5, the Barbarian's resistance) and BEFORE anything that absorbs it.
+##   net   — what actually reaches HP, i.e. gross put through wards and Guard exactly the way
+##           _enemy_attack puts it: xVuln -> resistance -> ward -> Guard -> hp.
+## The chip prints gross and lets net choose the glyph, so the NUMBER never changes meaning between
+## states — the same one-slot-one-meaning discipline the intent grammar is built on. A chip that
+## printed gross when covered and net when not would be the × overload again, on the most important
+## label on the board.
+##
+## IT MUST AGREE WITH WHAT LANDS, so every number here comes from the resolver's own functions:
+## _enemy_move (the latched beat, substitutions included), _move_dmg (Syn.effective_dmg — THE one
+## number), _enemy_target (the same targeting the arrows draw) and Powers.incoming_scale. There is no
+## parallel arithmetic anywhere in this function, on purpose: a forecast with its own copy of the
+## damage rules is a forecast that will eventually disagree with the hit, and then it is worse than
+## nothing because the player has stopped checking.
+##
+## WHAT IT DELIBERATELY DOES NOT MODEL, each because modelling it would cost more truth than it buys:
+##  * RETARGETING MID-PHASE. Targets are read once off the CURRENT board. If a Cave Bat kills the
+##    Sorcerer, the next bat reroutes and this was high. Simulating that would make the chip disagree
+##    with the threat arrows drawn directly above it — and a forecast that contradicts the arrows
+##    teaches the player to trust neither. The arrows already have this property; the chip inherits it.
+##  * RETALIATE killing an attacker mid-flurry. Always in the player's favour, and not knowable
+##    without resolving the phase.
+##  * A STUNNED body is excluded outright. It loses its action (see _enemy_phase), so counting its
+##    telegraph would be the one case where the chip promises damage that cannot land.
+##
+## WHAT IT DOES MODEL, and why the line is drawn here: the two INTRA-PHASE DEBUFFS, Expose and Howl.
+## Unlike retargeting, they cost nothing in truth — every beat in the phase is already latched, the
+## enemies resolve in slot order, so an Expose or a Howl landing at slot 0 is fully knowable from the
+## telegraphs the player is looking at. And unlike everything in the list above, omitting them made
+## the chip UNDERSTATE a lethal turn (Expose then two hits at x1.5 killed a Cleric the chip said would
+## end at 6 HP), which is the exact opposite of what this readout exists for. Note the per-BODY intent
+## labels are still pre-phase — they describe one body in isolation and have no phase order to walk —
+## so a chip that reads higher than the sum of the labels above it is correct, not a bug.
+func _incoming_forecast() -> Array:
+	var out: Array = []
+	for _a: Dictionary in party:
+		out.append({"gross": 0, "net": 0})
+	if party.is_empty() or enemies.is_empty():
+		return out
+	# Guard is a POOL that drains across the whole phase, so it is simulated per dwarf in the order
+	# the enemies act (slot order — the same order _enemy_phase loops). Wards (`shield`) are NOT
+	# drained: they soak every hit, forever, which is exactly what makes a ward worth more than Guard.
+	var pool: Array = []
+	for a: Dictionary in party:
+		pool.append(int(a.get("block", 0)))
+	# The two simulation carriers. `vuln` starts from the board (Vulnerable only decays at PLAYER-phase
+	# start, so whatever is on a dwarf now is live for this whole enemy phase); `rage_add` is empty
+	# because nothing has howled yet this phase.
+	var vuln: Array = []
+	for a: Dictionary in party:
+		vuln.append(int(a.get("vulnerable", 0)) > 0)
+	var rage_add: Dictionary = {}   # enemy slot -> rage a Howl banks EARLIER in this same phase
+	for e: Dictionary in enemies:
+		if not e.get("alive", false) or int(e.get("stun", 0)) > 0:
+			continue
+		var mv: Dictionary = _enemy_move(e)
+		var kind: String = str(mv.get("kind", ""))
+		# Expose lands before every body after it in slot order, and _enemy_attack reads
+		# t["vulnerable"] live, so from here on that dwarf takes x1.5 for the rest of the phase.
+		if kind == "expose":
+			var xt: Dictionary = _enemy_target(e)
+			var xi: int = int(xt.get("slot", -1)) if not xt.is_empty() else -1
+			if xi >= 0 and xi < vuln.size():
+				vuln[xi] = true
+			continue
+		# Howl is permanent +atk on EVERY living body, so a Howl at slot 1 is already in the numbers
+		# slots 2+ swing for. Clamped exactly the way _do_enemy_move clamps it — rage plateaus at
+		# RAGE_CAP, so two Howls in one phase must plateau here too or the chip over-promises.
+		if kind == "rage_all":
+			for o: Dictionary in enemies:
+				if not o.get("alive", false):
+					continue
+				var oi: int = int(o.get("slot", -1))
+				var headroom: int = maxi(0, RAGE_CAP - int(o.get("rage", 0)))
+				rage_add[oi] = mini(int(rage_add.get(oi, 0)) + int(mv.get("amt", 0)), headroom)
+			continue
+		if not kind in Syn.DMG_KINDS:
+			continue
+		# Syn.effective_dmg adds e["rage"] as a flat term AFTER the Shriek doubling, so banked rage is
+		# a flat adder on top of the resolved per-hit number — the same order the resolver produces it.
+		var per: int = _move_dmg(e, mv) + int(rage_add.get(int(e.get("slot", -1)), 0))
+		var hits: int = int(mv.get("hits", 1)) if kind == "multi" else 1
+		var victims: Array = []
+		if kind == "attack_all":
+			for a2: Dictionary in party:
+				if a2.get("alive", false):
+					victims.append(a2)
+		else:
+			var t: Dictionary = _enemy_target(e)
+			if not t.is_empty():
+				victims.append(t)
+		for v: Dictionary in victims:
+			var idx: int = int(v.get("slot", -1))
+			if idx < 0 or idx >= out.size():
+				continue
+			for _h: int in range(hits):
+				# This chain is _enemy_attack's, step for step. If that function ever changes, this
+				# one has to change with it — which is why they are this close together in shape.
+				var raw: int = per
+				# The SIMULATED flag, not v["vulnerable"] — an Expose earlier in this phase is already
+				# folded into it, and the board's copy will not carry it until the phase resolves.
+				if bool(vuln[idx]):
+					raw = int(round(raw * VULN_MULT))
+				raw = Powers.incoming_scale(v, raw)
+				var after_ward: int = maxi(0, raw - int(v.get("shield", 0)))
+				var blocked: int = mini(int(pool[idx]), after_ward)
+				pool[idx] = int(pool[idx]) - blocked
+				out[idx]["gross"] = int(out[idx]["gross"]) + raw
+				out[idx]["net"] = int(out[idx]["net"]) + (after_ward - blocked)
+	return out
 
 ## The Class Power coin. combat derives one plain state dict from the SAME predicate the host
 ## re-validates the tap with (Powers.can_fire) and hands it to the widget, which owns every visual —
@@ -2067,7 +2994,9 @@ func _refresh_power_tip() -> void:
 		return
 	var a: Dictionary = party[power_tip_open]
 	var p: Dictionary = Powers.power_def(a)
-	if p.is_empty() or not a.get("alive", false) or overlay.visible or choice_box.visible:
+	# The notes join the overlay and the pick as things that force this closed: all three are modals
+	# above the tip's z_index, so a tip left open under one is a tip nobody can see or dismiss.
+	if p.is_empty() or not a.get("alive", false) or overlay.visible or choice_box.visible or _feedback_up():
 		power_tip_open = -1
 		power_tip.visible = false
 		return
@@ -2099,23 +3028,55 @@ func _tip_status(a: Dictionary, p: Dictionary) -> String:
 
 # ---------------------------------------------------------------- Intent telegraph
 ## Compact always-on readout of the latched move, with LIVE numbers (rage + target Vulnerable).
+##
+## ALL THREE TELEGRAPHS ARE NOW RENDERED FROM Db.MOVE_KINDS — one row per kind carrying the verb
+## glyph, the colour and the three format strings. The per-move "emoji" key it replaced was authored
+## on every single move, which meant a new kind was a glyph copied 30 times and a wording change was
+## 30 edits; worse, the label/headline/brief were three separate `match` ladders that could (and did)
+## drift apart. One substitution dict now feeds all three, so a number cannot differ between them.
 func _intent_text(e: Dictionary) -> String:
-	var mv: Dictionary = _enemy_move(e)
-	match mv["kind"]:
-		"attack":
-			return "%s%d>%s" % [mv["emoji"], _intent_hit(e, mv), _intent_tname(e)]
-		"multi":
-			return "%s%d×%d>%s" % [mv["emoji"], _intent_hit(e, mv), int(mv.get("hits", 1)), _intent_tname(e)]
-		"attack_all":
-			return "%s%d×all" % [mv["emoji"], _move_dmg(e, mv)]
-		"block", "guard_all":
-			return "%s%d" % [mv["emoji"], int(mv["amt"])]
-		"rage_all":
-			var g: int = _rage_gain(e, mv)
-			return ("%s+%d" % [mv["emoji"], g]) if g > 0 else "%smax" % mv["emoji"]
-		"expose":
-			return "%s>%s" % [mv["emoji"], _intent_tname(e)]
-	return str(mv["emoji"])
+	# 💫 A stunned body has no intent — it loses this action outright (see _enemy_phase) and its
+	# rotation does NOT advance, so the beat it was telegraphing is still the beat it owes. Printing
+	# that beat anyway would be the one telegraph in the game that promises damage which cannot land,
+	# and it is the readout the player just spent a card to buy. The three-slot grammar does not apply
+	# here on purpose: this is the ABSENCE of a move, not a move with an empty target.
+	if int(e.get("stun", 0)) > 0:
+		return "💫 stunned"
+	return _fmt_move(e, _enemy_move(e), "label_fmt")
+
+## Substitutions for a move's format strings. Every key any of the three formats can name is filled,
+## every time — cheap, and it means a new format string in card_db needs no code here at all.
+##   {hit} is the number that will LAND on the named target (Vulnerable folded in);
+##   {dmg} is the per-hit number before the target's own multipliers — the AoE/brief form.
+func _move_fmt(e: Dictionary, mv: Dictionary) -> Dictionary:
+	var t: Dictionary = _enemy_target(e)
+	var kd: Dictionary = Db.MOVE_KINDS.get(str(mv.get("kind", "")), {})
+	return {
+		"verb": str(kd.get("verb", "?")),
+		"name": str(mv.get("name", "")),
+		"dmg": _move_dmg(e, mv),
+		"hit": _intent_hit(e, mv),
+		"hits": int(mv.get("hits", 1)),
+		"amt": int(mv.get("amt", 0)),
+		"ally": int(mv.get("ally_amt", 0)),
+		"gain": _rage_gain(e, mv) if str(mv.get("kind", "")) == "rage_all" else 0,
+		"tgt": str(t["name"]).substr(0, 3) if not t.is_empty() else "",
+		"target": str(t["name"]) if not t.is_empty() else "?",
+	}
+
+## Render one of a kind's three formats. The `*_fmt_zero` variants exist so a capped Howl can say
+## "max" instead of "+0" — keyed off {gain} and off the kind ACTUALLY carrying a zero variant, so no
+## other kind can accidentally fall into it. An unknown kind degrades to the move's name rather than
+## rendering an empty label: a body whose telegraph is blank is worse than one that is merely terse.
+func _fmt_move(e: Dictionary, mv: Dictionary, key: String) -> String:
+	var kd: Dictionary = Db.MOVE_KINDS.get(str(mv.get("kind", "")), {})
+	var f: Dictionary = _move_fmt(e, mv)
+	var fmt: String = str(kd.get(key, ""))
+	if kd.has(key + "_zero") and int(f["gain"]) <= 0:
+		fmt = str(kd[key + "_zero"])
+	if fmt == "":
+		return str(mv.get("name", ""))
+	return fmt.format(f)
 
 func _intent_hit(e: Dictionary, mv: Dictionary) -> int:
 	var dmg: int = _move_dmg(e, mv)
@@ -2124,24 +3085,12 @@ func _intent_hit(e: Dictionary, mv: Dictionary) -> int:
 		dmg = int(round(dmg * VULN_MULT))
 	return dmg
 
-func _intent_tname(e: Dictionary) -> String:
-	var t: Dictionary = _enemy_target(e)
-	return str(t["name"]).substr(0, 3) if not t.is_empty() else ""
-
 func _intent_color(kind: String) -> Color:
-	match kind:
-		"attack", "multi", "attack_all":
-			return Color(1.0, 0.55, 0.50)
-		"block", "guard_all":
-			return Color(0.62, 0.85, 1.0)
-		"rage_all":
-			return Color(0.98, 0.78, 0.35)
-		"expose":
-			return Color(0.85, 0.62, 1.0)
-	return Color.WHITE
+	var c: Variant = (Db.MOVE_KINDS.get(kind, {}) as Dictionary).get("color", Color.WHITE)
+	return c if c is Color else Color.WHITE
 
 func _open_intent(i: int) -> void:
-	if not enemies[i].get("alive", false) or overlay.visible:
+	if not enemies[i].get("alive", false) or overlay.visible or _feedback_up():
 		return
 	intent_open = i
 	_refresh_intent_panel()
@@ -2155,70 +3104,117 @@ func _refresh_intent_panel() -> void:
 	if intent_open < 0:
 		return
 	var e: Dictionary = enemies[intent_open]
-	if not e["alive"] or overlay.visible:
+	if not e["alive"] or overlay.visible or _feedback_up():
 		intent_open = -1
 		intent_panel.visible = false
 		return
 	var mv: Dictionary = _enemy_move(e)
-	var mvs: Array = e.get("moves", [])
+	var mvs: Array = _rotation(e)   # the CURRENT rotation — a cracked Molt-King telegraphs its new beats
 	ip_title.text = "%s %s — %s" % [e["emoji"], e["name"], _intent_headline(e, mv)]
 	ip_body.text = str(mv.get("tip", ""))
 	if mvs.size() > 1:
-		var nm: Dictionary = mvs[(int(e["move_i"]) + 1) % mvs.size()]
+		# Through _next_move, NOT `mvs[move_i + 1]` — see _next_move. The rotation is only the input to
+		# the answer; alone_gate and howl_every_beat sit above it and are permanent once true.
+		var nm: Dictionary = _next_move(e)
 		ip_next.text = "Next: %s %s" % [nm["name"], _intent_brief(e, nm)]
 	else:
 		ip_next.text = ""
-	ip_pref.text = str(Db.ENEMIES[e["archetype"]].get("tip", ""))
-	intent_panel.position = Vector2(clampf(EN_POS[intent_open].x - 240.0, 8.0, 720.0 - 8.0 - 480.0), 40.0)
+	# Reach is identity now that Taunt only catches melee, so the panel states it for EVERY enemy —
+	# a player has to be able to learn which bodies a Taunt can pull BEFORE spending the energy, not
+	# after eating the hit. It goes at the FRONT of the line on purpose: ip_pref is a single 460px
+	# row and several of the newer tips already run past it, so anything appended would be the part
+	# that clips. (Widening the panel is a layout call and another session owns the layout pass.)
+	# The BADGE SENTENCE leads, and the archetype's prose tip follows. The badge is on the nameplate
+	# every single turn, so this row is the only place it is ever spelled out — a glyph whose meaning
+	# is never stated is a glyph the player guesses at, and the three prefs are precisely the rules
+	# worth planning around. It comes from the SAME Db.PREF_BADGES row the badge does, so the glyph on
+	# the board and the sentence in the panel cannot drift; when a Taunt has actually taken, both flip
+	# to the 😡 line together and the panel says the rule was overridden rather than silently dropping
+	# it. The archetype tip is appended (not replaced) because it carries the flavour and the
+	# body-specific advice the closed badge set deliberately cannot.
+	var reach: String = "🏹 Ranged — Taunt can't pull it. " if _enemy_range(e) >= 2 else "⚔️ Melee — Taunt pulls it. "
+	ip_pref.text = "%s%s %s  %s" % [reach, _pref_badge(e), _pref_tip(e), str(Db.ENEMIES[e["archetype"]].get("tip", ""))]
+	ip_dev.text = _device_line(e)
+	intent_panel.position = Vector2(clampf(en_pos[intent_open].x - 240.0, 8.0, 720.0 - 8.0 - 480.0), 40.0)
 	intent_panel.visible = true
 
+## The synergy sentence for ONE body: what the rest of the board is doing to it, or through it — and,
+## for the alone gate, what it WILL do under a condition that has not happened yet.
+##
+## Ordered by what changes a decision soonest, and joined with " · " into a single 460px row on
+## purpose: the panel is a hover popup over the enemy row and every extra line it grows covers the
+## intent labels the player opened it to compare. Anything past the row's width is therefore the
+## LEAST decision-relevant clause, by construction rather than by luck.
+func _device_line(e: Dictionary) -> String:
+	var bits: Array = []
+	# 1. What it takes per hit — this is the number that decides whether to swing at it at all.
+	var soak: int = Syn.incoming_reduction(enemies, e)
+	if soak > 0:
+		var src: Dictionary = Syn.aura_source(enemies, Syn.AEGIS)
+		var by: String = " (%s %s)" % [str(src.get("emoji", "")), str(src.get("name", ""))] if not src.is_empty() else ""
+		bits.append("🪨 takes %d less per hit%s" % [soak, by])
+	# 2. What it GIVES the others. A source is worth killing for a reason no health bar shows.
+	var chorus: int = Syn.aura_amount(enemies, Syn.CHORUS, {})
+	var chorus_src: Dictionary = Syn.aura_source(enemies, Syn.CHORUS)
+	if _is_body(chorus_src, e) and chorus > 0:
+		bits.append("🎶 every OTHER enemy hits for +%d — kill it and that is gone" % chorus)
+	elif chorus > 0 and str(_enemy_move(e).get("kind", "")) in Syn.DMG_KINDS:
+		# Recipients get the WHY, never the arithmetic: the label already prints the buffed total.
+		bits.append("🎶 its number above already includes %s %s's chorus" % [
+			str(chorus_src.get("emoji", "")), str(chorus_src.get("name", ""))])
+	var aegis_src: Dictionary = Syn.aura_source(enemies, Syn.AEGIS)
+	if _is_body(aegis_src, e):
+		bits.append("🪨 every OTHER enemy takes %d less per hit" % Syn.aura_amount(enemies, Syn.AEGIS, {}))
+	# 3. The named devices, each phrased as the consequence rather than the mechanic.
+	var gorge: int = Syn.gorge_bonus(enemies, e)
+	if gorge > 0:
+		bits.append("🩸 +%d from the corpses on the board" % gorge)
+	if not (e.get("moves_molt", []) as Array).is_empty():
+		if Syn.molted(e):
+			bits.append("🦂 shell OFF — no soak, +%d damage, new beats" % Syn.MOLT_FURY)
+		else:
+			bits.append("🦂 the shell comes off at half HP")
+	var reg: Dictionary = Syn.regalia(enemies)
+	if str(e.get("archetype", "")) == Syn.ID_OVERSEER and int(reg["crystals"]) > 0:
+		bits.append("💎 %d standing: Gaze hits for %d" % [int(reg["crystals"]), _move_base(e, {"gaze": true})])
+	var bond: Dictionary = Syn.twin_bond(enemies, e)
+	if bool(bond.get("shriek_x2", false)):
+		bits.append("🐺 it mourns the pack — its Shriek hits TWICE as hard")
+	if bool(bond.get("howl_every_beat", false)):
+		bits.append("🧿 it lost its witch — it howls every beat")
+	# 4. THE UNFAIR-NUMBER GUARD: the cornered Caster, previewed before it is true. Computed by asking
+	# Syn the same question against a board of one — no second copy of "which beat is its heaviest".
+	var solo: Dictionary = Syn.alone_gate([e], e)
+	if not solo.is_empty() and Syn.alone_gate(enemies, e).is_empty():
+		bits.append("if it is the LAST one standing, every beat becomes %s %d" % [
+			str((Db.MOVE_KINDS.get(str(solo.get("kind", "")), {}) as Dictionary).get("verb", "?")),
+			_move_dmg(e, solo)])
+	return " · ".join(bits)
+
+## Same-body test over the WIRE ADDRESS (archetype + slot), never `==`: Dictionary equality in Godot 4
+## compares contents, so two identical Cave Bats would read as the same body and the aura source would
+## appear to shield itself.
+func _is_body(a: Dictionary, b: Dictionary) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	return str(a.get("archetype", "")) == str(b.get("archetype", "?")) and int(a.get("slot", -1)) == int(b.get("slot", -2))
+
 func _intent_headline(e: Dictionary, mv: Dictionary) -> String:
-	var t: Dictionary = _enemy_target(e)
-	var tn: String = str(t["name"]) if not t.is_empty() else "?"
-	match mv["kind"]:
-		"attack":
-			return "%s: hits %s for %d" % [mv["name"], tn, _intent_hit(e, mv)]
-		"multi":
-			return "%s: %d hits of %d on %s" % [mv["name"], int(mv.get("hits", 1)), _intent_hit(e, mv), tn]
-		"attack_all":
-			return "%s: %d to EVERY dwarf" % [mv["name"], _move_dmg(e, mv)]
-		"block":
-			return "%s: blocks %d" % [mv["name"], int(mv["amt"])]
-		"guard_all":
-			return "%s: blocks %d, allies +%d" % [mv["name"], int(mv["amt"]), int(mv.get("ally_amt", 0))]
-		"rage_all":
-			var g: int = _rage_gain(e, mv)
-			if g > 0:
-				return "%s: ALL enemies +%d attack" % [mv["name"], g]
-			return "%s: the pack's fury is at its peak" % mv["name"]
-		"expose":
-			return "%s: curses %s — x1.5 for a turn" % [mv["name"], tn]
-	return str(mv["name"])
+	return _fmt_move(e, mv, "headline_fmt")
 
 func _intent_brief(e: Dictionary, mv: Dictionary) -> String:
-	match mv["kind"]:
-		"attack":
-			return str(_move_dmg(e, mv))
-		"multi":
-			return "%d×%d" % [_move_dmg(e, mv), int(mv.get("hits", 1))]
-		"attack_all":
-			return "%d to all" % _move_dmg(e, mv)
-		"block":
-			return "block %d" % int(mv["amt"])
-		"guard_all":
-			return "block %d/+%d" % [int(mv["amt"]), int(mv.get("ally_amt", 0))]
-		"rage_all":
-			var g: int = _rage_gain(e, mv)
-			return ("+%d atk to all" % g) if g > 0 else "fury peaked"
-		"expose":
-			return "curse ×1.5"
-	return ""
+	return _fmt_move(e, mv, "brief_fmt")
 
 func _refresh_threats() -> void:
 	var pairs: Array = []
 	if phase == "playerTurn":
 		for e: Dictionary in enemies:
 			if not e["alive"]:
+				continue
+			# 💫 A stunned body threatens nobody: it loses this action, so an arrow from it would draw a
+			# swing that cannot happen. Same reason its label says "stunned" and the forecast skips it —
+			# three readouts, one fact, and they have to agree or the stun stops being worth buying.
+			if int(e.get("stun", 0)) > 0:
 				continue
 			# Only target-directed intents draw an arrow; block/buff/AoE turns threaten nobody in particular.
 			if not _enemy_move(e)["kind"] in ["attack", "multi", "expose"]:
@@ -2227,7 +3223,7 @@ func _refresh_threats() -> void:
 			if t.is_empty():
 				continue
 			pairs.append({
-				"from": EN_POS[e["slot"]] + Vector2(0, 42),
+				"from": en_pos[e["slot"]] + Vector2(0, 42),
 				"to": pc_pos[t["slot"]] + Vector2(0, -42),
 			})
 	threat.set_threats(pairs)
