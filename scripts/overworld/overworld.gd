@@ -2080,7 +2080,7 @@ func _on_hex_input(event: InputEvent, key: String) -> void:
 func _commit_hex(key: String) -> void:
 	if busy or state != "HEX":
 		return
-	if not hexes.has(key) or str(hexes[key]["kind"]) == "wall" or not _hex_neighbors(hex_cur).has(key):
+	if not _hex_step_allowed(key):
 		return
 	if mode != Mode.SOLO:
 		_intent("hex", key)   # pushing deeper risks everyone — the whole crew has to agree
@@ -2422,12 +2422,27 @@ func _do_event_choice(risky: bool) -> void:
 	await _resume_hex(e)
 
 # ---------------------------------------------------------- Extract / resolve
+## Standing on a marked way out. THE ONE PREDICATE — the button, the ring gate and the ring's own
+## resolution all ask this, because a rule enforced only where the UI hides a button is not a rule:
+## a client reaches `_intent("extract","")` directly and never runs _on_extract at all. This is the
+## same trap CLAUDE.md records for `_on_power` vs `_on_action`, and campaign_verify caught it here.
+func _extract_allowed() -> bool:
+	return bool((hexes.get(hex_cur, {}) as Dictionary).get("extract", false))
+
+## A legal step: a real tile, passable, and ADJACENT to where the crew actually stands. Same
+## reasoning as _extract_allowed — _commit_hex checks all three, but a client's intent never runs
+## _commit_hex, so without this the wire accepts a proposal to teleport anywhere on the board.
+func _hex_step_allowed(key: String) -> bool:
+	if not hexes.has(key) or not hexes.has(hex_cur):
+		return false
+	if str(hexes[key]["kind"]) == "wall":
+		return false
+	return _hex_neighbors(hex_cur).has(key)
+
 func _on_extract() -> void:
 	if busy or state != "HEX":
 		return
-	# The button is only built on an extract tile, but the intent path is reachable from a client, so
-	# the rule lives HERE where the host enforces it — not in the layout that happened to hide it.
-	if not bool((hexes.get(hex_cur, {}) as Dictionary).get("extract", false)):
+	if not _extract_allowed():
 		_msg("You cannot walk out from here — make for a 🏳️ extract point.")
 		return
 	if mode != Mode.SOLO:
@@ -2537,14 +2552,14 @@ func _build_shop_panel() -> void:
 	var startx: int = 360 - n * 100
 	for j in range(n):
 		_build_shop_slot(int(idx[j]), startx + j * 200, 300)
-	if mode != Mode.SOLO:
-		_mklabel("you buy for YOUR OWN dwarf · a buy that dips under the rent needs the whole crew",
-			Vector2(0, 436), Vector2(720, 18), 13, screen_root, true, Color(0.7, 0.7, 0.76))
-		return
 	if shop_sel >= 0 and shop_stock[shop_sel]["kind"] != "recruit":
-		_mklabel("Tap the dwarf who gets it.", Vector2(0, 436), Vector2(720, 24), 16, screen_root,
-			true, C_AMBER)
+		_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+			else "Tap who gets it — then the table votes.",
+			Vector2(0, 436), Vector2(720, 24), 16, screen_root, true, C_AMBER)
 		_build_shop_targets()
+	elif mode != Mode.SOLO:
+		_mklabel("one purse, one vote · pick a good, then say who gets it",
+			Vector2(0, 436), Vector2(720, 18), 13, screen_root, true, Color(0.7, 0.7, 0.76))
 
 func _build_shop_slot(i: int, x: int, y: int = 896) -> void:
 	var s: Dictionary = shop_stock[i]
@@ -2593,7 +2608,10 @@ func _on_shop_input(event: InputEvent, i: int) -> void:
 			_msg("Not enough gold — the rent comes first.")
 			return
 		if mode != Mode.SOLO:
-			_intent("shop", str(i))   # buys for MY dwarf; below the rent line it becomes a ring
+			# Arm only. The intent goes out once a recipient is tapped — see _on_shop_target_input.
+			shop_sel = -1 if shop_sel == i else i
+			_msg("Tap who gets it — then the table votes." if shop_sel >= 0 else "")
+			_rebuild_current()
 			return
 		if s["kind"] == "recruit":
 			_buy_recruit(i)
@@ -2643,29 +2661,15 @@ func _build_shop_target_token(d: Dictionary, cx: int, cy: int) -> void:
 func _on_shop_target_input(event: InputEvent, d: Dictionary) -> void:
 	if busy or (state != "MARKET" and state != "TAVERN") or shop_sel < 0:
 		return
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var s: Dictionary = shop_stock[shop_sel]
-		if treasury < int(s["cost"]):
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	# Route through the SAME path the room's tap-a-dwarf uses. This arm used to mutate the treasury
+	# and the roster INLINE with no mode check at all — on a client that is a write to host-owned
+	# state, and it had already drifted from _buy_shop's rules once.
+	for i in range(roster.size()):
+		if is_same(roster[i], d):
+			_on_room_dwarf_tapped(i)
 			return
-		if s["kind"] == "card":
-			d["deck"].append(s["cid"])
-			treasury -= int(s["cost"])
-			_tween_treasury_to(treasury)
-			s["sold"] = true
-			shop_sel = -1
-			_msg("%s learned %s." % [d["name"], Db.CARDS[s["cid"]]["name"]])
-		elif s["kind"] == "heal":
-			if d["status"] == "wounded":
-				d["status"] = "ready"
-				d["recover"] = 0
-			d["hp"] = int(d["max_hp"])
-			treasury -= int(s["cost"])
-			_tween_treasury_to(treasury)
-			s["sold"] = true
-			shop_sel = -1
-			_msg("%s is patched up to full." % d["name"])
-		_rebuild_current()
-		_refresh_hud()
 
 
 # ============================================================================================
@@ -2946,14 +2950,33 @@ func _authority_intent(p: Dictionary) -> void:
 
 ## Is this decision the whole table's to make? Consequence decides, not the name: a shop buy is
 ## yours alone until it eats the rent money, and then it is everybody's problem.
+## A voted purchase has to name BOTH the good and who gets it: with one shared pool of dwarves the
+## proposer is not automatically the owner, so the table is agreeing to "this, for them".
+## ⚠ `int("2:1")` is 2 in GDScript — it parses the leading digits and does not error. A reader that
+## forgot to split would therefore buy the right thing for the WRONG dwarf, silently. Every reader
+## of a buy arg goes through here so there is only one place to forget.
+func _parse_buy(arg: String) -> Vector2i:
+	var parts := arg.split(":")
+	if parts.size() != 2:
+		return Vector2i(-1, -1)
+	return Vector2i(int(parts[0]), int(parts[1]))
+
 func _is_ring(kind: String, arg: String) -> bool:
+	# Gate BEFORE the ring opens, so a bogus proposal never reaches the table at all. Returning false
+	# drops it: _apply_free has no "extract" arm, so the intent dies here rather than becoming an
+	# instant unilateral extraction.
+	if kind == "extract" and not _extract_allowed():
+		return false
+	if kind == "hex" and (state != "HEX" or not _hex_step_allowed(arg)):
+		return false
 	if RING_KINDS.has(kind):
 		return true
 	if kind == "shop":
-		var i: int = int(arg)
-		if i < 0 or i >= shop_stock.size():
-			return false
-		return treasury - int(shop_stock[i]["cost"]) < fee
+		# EVERY spend out of the shared purse is the table's call — not only the ones that dip under
+		# the rent line. One company, one purse, one vote. A malformed arg opens no ring at all
+		# rather than a ring that resolves to nothing and wastes everyone's aye.
+		var b := _parse_buy(arg)
+		return b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size()
 	return false
 
 func _apply_free(seat: int, kind: String, arg: String) -> void:
@@ -2983,8 +3006,6 @@ func _apply_free(seat: int, kind: String, arg: String) -> void:
 		"loot_skip":
 			if state == "HEXREWARD":
 				_do_hexloot_skip()
-		"shop":
-			_buy_shop(seat, int(arg))
 		"restart":
 			if state == "GAMEOVER":
 				_new_run()
@@ -3039,11 +3060,15 @@ func _resolve_ring(kind: String, arg: String, by: int) -> void:
 			selected_contract = i
 			await _embark()
 		"hex":
-			if state != "HEX" or busy or not hexes.has(arg):
+			# Adjacency re-checked at RESOLUTION, not only at proposal — the board the ring fires
+			# against is the one that counts.
+			if state != "HEX" or busy or not _hex_step_allowed(arg):
 				return
 			await _enter_hex(arg)
 		"extract":
-			if state != "HEX" or busy:
+			# Re-checked at RESOLUTION too, not just at proposal: a ring can be opened legitimately
+			# and fire later, and the board it fires against is the one that counts.
+			if state != "HEX" or busy or not _extract_allowed():
 				return
 			await _finish_expedition("extract", run_epoch)
 		"event":
@@ -3055,7 +3080,10 @@ func _resolve_ring(kind: String, arg: String, by: int) -> void:
 				return
 			await _end_month()
 		"shop":
-			_buy_shop(by, int(arg))
+			# `by` is who PROPOSED it; the recipient rides the arg, because the table just agreed to
+			# a specific dwarf getting it and that need not be the proposer's own.
+			var b := _parse_buy(arg)
+			_buy_shop(b.y, b.x)
 			_push()
 
 func _ring_label(kind: String, arg: String) -> String:
@@ -3075,11 +3103,26 @@ func _ring_label(kind: String, arg: String) -> String:
 		"endmonth":
 			return "end the month (rent %dg)" % fee
 		"shop":
-			var i2: int = int(arg)
-			if i2 >= 0 and i2 < shop_stock.size():
-				return "spend %dg under the rent line" % int(shop_stock[i2]["cost"])
-			return "spend under the rent line"
+			var b := _parse_buy(arg)
+			if b.x >= 0 and b.x < shop_stock.size() and b.y >= 0 and b.y < roster.size():
+				var under := "" if treasury - int(shop_stock[b.x]["cost"]) >= fee else "  ⚠ under the rent"
+				return "spend %dg on %s for %s%s" % [int(shop_stock[b.x]["cost"]),
+					_good_name(b.x), str(roster[b.y]["name"]), under]
+			return "spend from the purse"
 	return kind
+
+func _good_name(i: int) -> String:
+	if i < 0 or i >= shop_stock.size():
+		return "goods"
+	var s: Dictionary = shop_stock[i]
+	match str(s.get("kind", "")):
+		"card":
+			return str(Db.CARDS[s["cid"]]["name"])
+		"heal":
+			return "a Field Medic"
+		"recruit":
+			return str(s.get("name", "a new hand"))
+	return "goods"
 
 func _on_agree() -> void:
 	if ring.is_empty():
@@ -3348,8 +3391,9 @@ func _build_room(key: String) -> bool:
 	# so it has to say so — otherwise the next tap on a dwarf spends gold without warning.
 	if shop_sel >= 0 and shop_sel < shop_stock.size():
 		_rect(Vector2(120, 1036), Vector2(480, 40), Color(0, 0, 0, 0.62), screen_root)
-		_mklabel("Tap the dwarf who gets it.", Vector2(120, 1044), Vector2(480, 26), 17, screen_root,
-			true, C_AMBER)
+		_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+			else "Tap who gets it — then the table votes.",
+			Vector2(120, 1044), Vector2(480, 26), 17, screen_root, true, C_AMBER)
 	return true
 
 ## Tapping a thing in a room either MOVES you (a door) or OPENS that thing's sub-menu. Nothing here
@@ -3395,6 +3439,11 @@ func _on_room_dwarf_tapped(idx: int) -> void:
 		# to move here or the same 25g quietly buys nothing.
 		if not _eligible_target(roster[idx], shop_stock[shop_sel]):
 			_msg("%s has nothing to mend." % str(roster[idx]["name"]))
+			return
+		if mode != Mode.SOLO:
+			_intent("shop", "%d:%d" % [shop_sel, idx])
+			shop_sel = -1
+			_rebuild_current()
 			return
 		_buy_shop(idx, shop_sel)
 		shop_sel = -1
@@ -3735,12 +3784,13 @@ func _sheet_buy(i: int) -> void:
 	if treasury < int(s["cost"]):
 		_msg("%dg short — the rent comes first." % (int(s["cost"]) - treasury))
 		return
-	if mode != Mode.SOLO:
-		_intent("shop", str(i))   # buys for MY dwarf; under the rent line _is_ring makes it a vote
-		_close_sheet()
-		return
+	# Co-op takes the SAME two-tap as solo now: arm the good, then tap who gets it. The intent is not
+	# sent until a recipient is named, because the table is voting on "this, for them" — with one
+	# shared pool of dwarves there is no "my dwarf" to default to.
 	shop_sel = i
 	_close_sheet()
+	if mode != Mode.SOLO:
+		_msg("Tap who gets it — then the table votes.")
 	_rebuild_current()
 
 func _sheet_hire() -> void:
@@ -4021,9 +4071,10 @@ func _build_tavern() -> void:
 			break
 	if heal_i >= 0:
 		_build_shop_slot(heal_i, 264, ay + 32)
-		if mode == Mode.SOLO and shop_sel == heal_i:
-			_mklabel("Tap the dwarf who gets it.", Vector2(0, ay + 150), Vector2(720, 24), 16,
-				screen_root, true, C_AMBER)
+		if shop_sel == heal_i:
+			_mklabel("Tap the dwarf who gets it." if mode == Mode.SOLO
+				else "Tap who gets it — then the table votes.",
+				Vector2(0, ay + 150), Vector2(720, 24), 16, screen_root, true, C_AMBER)
 			_build_shop_targets()
 	else:
 		_mklabel("The shelf is bare until the month turns.", Vector2(0, ay + 40), Vector2(720, 22), 15,

@@ -79,34 +79,51 @@ func _run() -> void:
 	_ck("client rendered CONTRACTS", client.state == "CONTRACTS")
 	_ck("client's intent was acked", client._pending_intent.is_empty())
 
-	print("\n--- 2b. the shop: yours alone, until it eats the rent -------------")
-	# Field Medic (25g) against 80g with 55g rent: 80-25 = 55, still covers rent -> instant, no vote.
+	print("\n--- 2b. the shop: ONE PURSE, ONE VOTE, and the table names who gets it ---")
+	# The rule changed: EVERY spend out of the shared purse is the table's call, not only the ones
+	# that dip under the rent line. And because the dwarves are one shared pool, the arg carries the
+	# RECIPIENT ("slot:target") — the proposer is no longer automatically the owner.
 	var t0: int = host.treasury
 	var heal_i := _slot_of(host.shop_stock, "heal")
-	client._intent("shop", str(heal_i))
+	# 25g against 80g with 55g rent: comfortably affordable, and it STILL needs a vote.
+	client._intent("shop", "%d:0" % heal_i)
 	await _wait(1.0)
-	_ck("an affordable buy needs no vote", host.ring.is_empty(), str(host.ring))
-	_ck("the shared purse was charged", host.treasury == t0 - int(host.shop_stock[heal_i]["cost"]),
-		"%d -> %d" % [t0, host.treasury])
-	_ck("the slot sold on the client too", bool(client.shop_stock[heal_i].get("sold", false)))
-	# A card (35g) would now drop the purse UNDER the rent line -> the whole table has to agree.
-	var card_i := _slot_of(host.shop_stock, "card")
-	var deck0: int = (host.roster[1]["deck"] as Array).size()
-	var t1: int = host.treasury
-	client._intent("shop", str(card_i))
-	await _wait(1.0)
-	_ck("a buy under the rent line OPENS a ring", not host.ring.is_empty()
+	_ck("even an affordable buy opens a ring", not host.ring.is_empty()
 		and str(host.ring.get("kind", "")) == "shop", str(host.ring))
-	_ck("nothing was spent on one vote", host.treasury == t1, str(host.treasury))
-	host._intent("shop", str(card_i))
+	_ck("nothing was spent on one vote", host.treasury == t0, str(host.treasury))
+	_ck("the ring names the good AND the recipient",
+		host._ring_label("shop", "%d:0" % heal_i).contains(str(host.roster[0]["name"])),
+		host._ring_label("shop", "%d:0" % heal_i))
+	host._intent("shop", "%d:0" % heal_i)
 	await _wait(1.2)
-	_ck("the table agreed and the buy went through", host.treasury == t1 - int(host.shop_stock[card_i]["cost"]),
+	_ck("the table agreed and the purse was charged",
+		host.treasury == t0 - int(host.shop_stock[heal_i]["cost"]), "%d -> %d" % [t0, host.treasury])
+	_ck("the slot sold on the client too", bool(client.shop_stock[heal_i].get("sold", false)))
+
+	# A CLIENT proposing a card for the HOST's dwarf: a shared pool means the recipient is chosen,
+	# not inherited from whoever pressed the button.
+	var card_i := _slot_of(host.shop_stock, "card")
+	var deck_h0: int = (host.roster[0]["deck"] as Array).size()
+	var deck_c0: int = (host.roster[1]["deck"] as Array).size()
+	var t1: int = host.treasury
+	client._intent("shop", "%d:0" % card_i)
+	await _wait(1.0)
+	_ck("client's buy-for-someone-else opens a ring", not host.ring.is_empty(), str(host.ring))
+	_ck("proposer is seat 1", int(host.ring.get("by", -1)) == 1)
+	host._intent("shop", "%d:0" % card_i)
+	await _wait(1.2)
+	_ck("the card went to the NAMED dwarf (roster 0), not the proposer's",
+		(host.roster[0]["deck"] as Array).size() == deck_h0 + 1
+		and (host.roster[1]["deck"] as Array).size() == deck_c0,
+		"h %d->%d  c %d->%d" % [deck_h0, (host.roster[0]["deck"] as Array).size(),
+			deck_c0, (host.roster[1]["deck"] as Array).size()])
+	_ck("the purse was charged once", host.treasury == t1 - int(host.shop_stock[card_i]["cost"]),
 		"%d -> %d" % [t1, host.treasury])
-	_ck("the card went to the BUYER's own dwarf (seat 1)",
-		(host.roster[1]["deck"] as Array).size() == deck0 + 1,
-		"%d -> %d" % [deck0, (host.roster[1]["deck"] as Array).size()])
-	_ck("the host's dwarf got nothing", (host.roster[0]["deck"] as Array).size() != deck0 + 1
-		or str(host.roster[0]["name"]) == "Hosty")
+
+	# ⚠ int("2:1") == 2 in GDScript: a reader that forgot to split would buy the right good for the
+	# WRONG dwarf and never error. A malformed arg must open no ring at all.
+	_ck("a malformed buy arg opens no ring", not host._is_ring("shop", str(card_i)))
+	_ck("an out-of-range recipient opens no ring", not host._is_ring("shop", "%d:99" % card_i))
 
 	print("\n--- 3. RING: embark needs BOTH players ---------------------------")
 	client._intent("select", "2")
@@ -170,6 +187,54 @@ func _run() -> void:
 		and str(client.roster[1]["name"]) == str(host.roster[1]["name"]),
 		"%s / %s" % [str(client.roster[1]["name"]), str(host.roster[1]["name"])])
 	_ck("the client sees the wagon", client.carried.size() == 1)
+
+	print("\n--- 5b3. EXTRACTION IS A PLACE, and the host is what enforces it --")
+	# The Extract button is only BUILT on an extract tile, but a client reaches the intent path
+	# directly, so hiding the button is decoration and not a rule. Prove the host refuses.
+	var exits: Array = []
+	for k: String in host.hexes:
+		if bool((host.hexes[k] as Dictionary).get("extract", false)):
+			exits.append(k)
+	_ck("the map has marked extract points", exits.size() >= 1, str(exits))
+	_ck("the client received the extract flags too",
+		exits.all(func(k): return bool((client.hexes[k] as Dictionary).get("extract", false))), str(exits))
+	_ck("both peers lay the board out the same", str(host._hex_dims()) == str(client._hex_dims()),
+		"%s / %s" % [str(host._hex_dims()), str(client._hex_dims())])
+	var on_exit: bool = bool((host.hexes[host.hex_cur] as Dictionary).get("extract", false))
+	_ck("the party is NOT standing on an exit (precondition)", not on_exit, host.hex_cur)
+	var st_before: String = host.state
+	client._intent("extract", "")
+	await _wait(1.0)
+	_ck("a client cannot extract from a non-exit tile", host.ring.is_empty() and host.state == st_before,
+		"ring=%s state=%s" % [str(host.ring), host.state])
+	# Now stand them on one and confirm it becomes an ordinary ring — still a VOTE, never unilateral.
+	host.hexes[host.hex_cur]["extract"] = true
+	host._push()
+	await _wait(0.6)
+	client._intent("extract", "")
+	await _wait(1.0)
+	_ck("on an exit tile, extract opens a ring", not host.ring.is_empty()
+		and str(host.ring.get("kind", "")) == "extract", str(host.ring))
+	_ck("one player cannot walk out alone", host.state == st_before, host.state)
+	host.ring = {}
+	host.hexes[host.hex_cur]["extract"] = false
+	host._push()
+	await _wait(0.6)
+
+	# Same bug class, the other rule the UI enforces: _commit_hex checks adjacency, but a client's
+	# intent never runs _commit_hex. Without a host-side check the wire accepts a teleport.
+	var far := ""
+	for k: String in host.hexes:
+		if str(host.hexes[k]["kind"]) != "wall" and not host._hex_neighbors(host.hex_cur).has(k) \
+				and k != host.hex_cur:
+			far = k
+			break
+	_ck("found a non-adjacent tile (precondition)", far != "", far)
+	var cur_before: String = host.hex_cur
+	client._intent("hex", far)
+	await _wait(1.0)
+	_ck("a client cannot propose a teleport", host.ring.is_empty(), str(host.ring))
+	_ck("the crew did not move", host.hex_cur == cur_before, "%s -> %s" % [cur_before, host.hex_cur])
 
 	print("\n--- 5b2. M3b: the client REPLAYS the flag march + counts the purse -")
 	# A client never runs _enter_hex (it returns at _on_hex_input / _intent), so it can only have
