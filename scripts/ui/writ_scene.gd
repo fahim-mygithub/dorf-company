@@ -280,7 +280,9 @@ func _draw_writ(b: Dictionary, y: float, has_focus: bool) -> void:
 
 func _draw_continue(b: Dictionary, y: float, i: int) -> void:
 	_cont_btn = Button.new()
-	_cont_btn.text = "Continue  ▾"
+	# '»' not '▾': the web build ships two fonts with no OS fallback and U+25BE is in
+	# NEITHER cmap, so the chevron was tofu on Pages (check_web_glyphs.py catches it).
+	_cont_btn.text = "Continue  »"
 	_cont_btn.add_theme_font_size_override("font_size", F_CONT)
 	_cont_btn.position = Vector2(36, y)
 	_cont_btn.size = Vector2(648, 88)
