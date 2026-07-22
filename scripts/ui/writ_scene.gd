@@ -94,7 +94,7 @@ func _process(delta: float) -> void:
 		_auto_left -= delta
 		if _auto_left <= 0.0:
 			_auto_left = 0.0
-			_advance()
+			_advance(true)
 
 func _gui_input(ev: InputEvent) -> void:
 	if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
@@ -104,8 +104,11 @@ func _gui_input(ev: InputEvent) -> void:
 func _on_continue() -> void:
 	_advance()
 
-func _advance() -> void:
-	if not _armed:
+## `force` is what the auto-advance timer uses. An auto beat deliberately leaves _armed false so a
+## fast tap cannot skip the cut-off early — which means the timer MUST bypass that gate or the beat
+## is a dead end with no button on it.
+func _advance(force: bool = false) -> void:
+	if not _armed and not force:
 		return
 	_i += 1
 	if _i >= _beats.size():
@@ -294,6 +297,9 @@ func _draw_continue(b: Dictionary, y: float, i: int) -> void:
 	_cont_btn.disabled = not _armed
 	_cont_btn.modulate = Color(1, 1, 1, 1.0 if _armed else 0.45)
 	if auto > 0.0:
-		# An auto-advancing beat is not tappable — the cut-off has to land on time.
+		# An auto-advancing beat is not tappable — the cut-off has to land on time. Arm it at the
+		# same moment the timer fires anyway: if the advance is ever missed, a tap still gets out
+		# rather than stranding the player on a beat with no button.
 		_cont_btn.visible = false
 		_armed = false
+		_hold_left = auto
