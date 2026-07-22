@@ -1,0 +1,578 @@
+{
+  "title": "— THE TAVERN —",
+  "sub": "warm hearth, cold ale, honest bandages",
+  "wall_top": "walnut_lo",
+  "wall_bot": "walnut",
+  "floor_near": "walnut",
+  "floor_far": "walnut_lo",
+  "horizon": 520,
+  "furniture": [
+    {
+      "op": "rect",
+      "r": [
+        0,
+        236,
+        720,
+        28
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        264
+      ],
+      "b": [
+        720,
+        264
+      ],
+      "w": 3,
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        0,
+        462,
+        720,
+        58
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        462
+      ],
+      "b": [
+        720,
+        462
+      ],
+      "w": 3,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        24,
+        264,
+        232,
+        256
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        44,
+        300,
+        192,
+        220
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        72,
+        356,
+        136,
+        164
+      ],
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        18,
+        286,
+        244,
+        18
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        24,
+        520,
+        232,
+        46
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "glow",
+      "at": [
+        140,
+        486
+      ],
+      "r": 96,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "glow",
+      "at": [
+        140,
+        494
+      ],
+      "r": 54,
+      "c": "ember_hi",
+      "flicker": true
+    },
+    {
+      "op": "line",
+      "a": [
+        100,
+        514
+      ],
+      "b": [
+        180,
+        508
+      ],
+      "w": 9,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        140,
+        494
+      ],
+      "size": 46,
+      "t": "🔥"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        62,
+        274
+      ],
+      "size": 22,
+      "t": "🕯️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        212,
+        274
+      ],
+      "size": 22,
+      "t": "🍺"
+    },
+    {
+      "op": "glow",
+      "at": [
+        140,
+        572
+      ],
+      "r": 88,
+      "c": "ember",
+      "flicker": false
+    },
+    {
+      "op": "rect",
+      "r": [
+        262,
+        216,
+        136,
+        60
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        400,
+        330,
+        300,
+        14
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        432,
+        317
+      ],
+      "size": 24,
+      "t": "🍾"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        520,
+        317
+      ],
+      "size": 24,
+      "t": "🍶"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        592,
+        317
+      ],
+      "size": 24,
+      "t": "🍷"
+    },
+    {
+      "op": "text",
+      "r": [
+        420,
+        436,
+        280,
+        22
+      ],
+      "size": 16,
+      "t": "ALE  ·  STEW  ·  BEDS",
+      "c": "parch",
+      "center": true
+    },
+    {
+      "op": "line",
+      "a": [
+        470,
+        264
+      ],
+      "b": [
+        470,
+        296
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "glow",
+      "at": [
+        470,
+        314
+      ],
+      "r": 42,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "emoji",
+      "at": [
+        470,
+        314
+      ],
+      "size": 34,
+      "t": "🏮"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        802
+      ],
+      "b": [
+        720,
+        802
+      ],
+      "w": 2,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        940
+      ],
+      "b": [
+        720,
+        940
+      ],
+      "w": 2,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        360,
+        882
+      ],
+      "rx": 252,
+      "ry": 78,
+      "c": "felt_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        360,
+        882
+      ],
+      "rx": 222,
+      "ry": 62,
+      "c": "felt"
+    },
+    {
+      "op": "rect",
+      "r": [
+        368,
+        564,
+        344,
+        20
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        380,
+        584,
+        320,
+        96
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        380,
+        664,
+        320,
+        16
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        560,
+        614
+      ],
+      "b": [
+        688,
+        614
+      ],
+      "w": 5,
+      "c": "brass"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        652,
+        722
+      ],
+      "rx": 44,
+      "ry": 38,
+      "c": "walnut"
+    },
+    {
+      "op": "line",
+      "a": [
+        610,
+        706
+      ],
+      "b": [
+        694,
+        706
+      ],
+      "w": 4,
+      "c": "brass_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        610,
+        740
+      ],
+      "b": [
+        694,
+        740
+      ],
+      "w": 4,
+      "c": "brass_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        330,
+        772
+      ],
+      "rx": 72,
+      "ry": 16,
+      "c": "shadow"
+    },
+    {
+      "op": "line",
+      "a": [
+        330,
+        700
+      ],
+      "b": [
+        330,
+        764
+      ],
+      "w": 10,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        330,
+        766
+      ],
+      "rx": 40,
+      "ry": 12,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        330,
+        698
+      ],
+      "rx": 78,
+      "ry": 28,
+      "c": "walnut"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        330,
+        692
+      ],
+      "rx": 76,
+      "ry": 24,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        304,
+        674
+      ],
+      "size": 24,
+      "t": "🍺"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        242,
+        752
+      ],
+      "rx": 22,
+      "ry": 9,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "line",
+      "a": [
+        242,
+        756
+      ],
+      "b": [
+        242,
+        786
+      ],
+      "w": 7,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        420,
+        752
+      ],
+      "rx": 22,
+      "ry": 9,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "line",
+      "a": [
+        420,
+        756
+      ],
+      "b": [
+        420,
+        786
+      ],
+      "w": 7,
+      "c": "walnut_lo"
+    }
+  ],
+  "wander": [
+    64,
+    830,
+    592,
+    138
+  ],
+  "npcs": [
+    {
+      "t": "🧔",
+      "name": "Barkeep Molla",
+      "at": [
+        660,
+        556
+      ],
+      "size": 52,
+      "wander": false
+    },
+    {
+      "t": "🐈",
+      "name": "Hearth Cat",
+      "at": [
+        200,
+        600
+      ],
+      "size": 34,
+      "wander": false
+    },
+    {
+      "t": "🧝",
+      "name": "Ale-Soaked Patron",
+      "at": [
+        300,
+        880
+      ],
+      "size": 44,
+      "wander": true
+    }
+  ],
+  "props": [
+    {
+      "id": "apothecary",
+      "t": "🧪",
+      "at": [
+        430,
+        566
+      ],
+      "size": 42,
+      "label": "Apothecary",
+      "sub": "mend one wound",
+      "act": "shop:heal"
+    },
+    {
+      "id": "ledger",
+      "t": "📋",
+      "at": [
+        330,
+        268
+      ],
+      "size": 40,
+      "label": "Company Ledger",
+      "sub": "read the crew roster",
+      "act": "roster"
+    },
+    {
+      "id": "hearthside",
+      "t": "🍲",
+      "at": [
+        130,
+        648
+      ],
+      "size": 40,
+      "label": "Hearthside Bowl",
+      "sub": "free stew by the fire",
+      "act": "none"
+    }
+  ]
+}

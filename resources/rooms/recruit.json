@@ -1,0 +1,549 @@
+{
+  "title": "— THE RECRUITMENT HALL —",
+  "sub": "hopefuls, hooks, and a contract wanting a name",
+  "wall_top": "walnut_lo",
+  "wall_bot": "walnut",
+  "floor_near": "walnut_hi",
+  "floor_far": "walnut",
+  "horizon": 560,
+  "furniture": [
+    {
+      "op": "rect",
+      "r": [
+        0,
+        225,
+        720,
+        12
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        0,
+        442,
+        720,
+        118
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        0,
+        548,
+        720,
+        12
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        40,
+        265,
+        210,
+        155
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        46,
+        302
+      ],
+      "b": [
+        244,
+        302
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        82,
+        332
+      ],
+      "size": 34,
+      "t": "🪓"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        145,
+        332
+      ],
+      "size": 34,
+      "t": "🛡️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        208,
+        332
+      ],
+      "size": 34,
+      "t": "⚔️"
+    },
+    {
+      "op": "rect",
+      "r": [
+        292,
+        246,
+        176,
+        8
+      ],
+      "c": "brass_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        300,
+        254,
+        160,
+        150
+      ],
+      "c": "felt"
+    },
+    {
+      "op": "rect",
+      "r": [
+        308,
+        262,
+        144,
+        134
+      ],
+      "c": "felt_lo"
+    },
+    {
+      "op": "text",
+      "r": [
+        308,
+        296,
+        144,
+        24
+      ],
+      "size": 15,
+      "t": "TAKING ON",
+      "c": "parch",
+      "center": true
+    },
+    {
+      "op": "text",
+      "r": [
+        308,
+        322,
+        144,
+        24
+      ],
+      "size": 15,
+      "t": "HANDS",
+      "c": "parch",
+      "center": true
+    },
+    {
+      "op": "line",
+      "a": [
+        590,
+        225
+      ],
+      "b": [
+        590,
+        268
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        590,
+        290
+      ],
+      "size": 40,
+      "t": "🏮"
+    },
+    {
+      "op": "glow",
+      "at": [
+        590,
+        332
+      ],
+      "r": 100,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "rect",
+      "r": [
+        496,
+        438,
+        204,
+        100
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        502,
+        444,
+        192,
+        88
+      ],
+      "c": "parch"
+    },
+    {
+      "op": "text",
+      "r": [
+        508,
+        450,
+        180,
+        20
+      ],
+      "size": 14,
+      "t": "MUSTER ROLL",
+      "c": "ink",
+      "center": true
+    },
+    {
+      "op": "text",
+      "r": [
+        508,
+        482,
+        180,
+        18
+      ],
+      "size": 12,
+      "t": "3 SILVER A HEAD",
+      "c": "gink",
+      "center": true
+    },
+    {
+      "op": "rect",
+      "r": [
+        60,
+        462,
+        170,
+        78
+      ],
+      "c": "ink"
+    },
+    {
+      "op": "text",
+      "r": [
+        66,
+        478,
+        158,
+        24
+      ],
+      "size": 16,
+      "t": "WAIT HERE",
+      "c": "parch",
+      "center": true
+    },
+    {
+      "op": "text",
+      "r": [
+        66,
+        504,
+        158,
+        18
+      ],
+      "size": 12,
+      "t": "you will be seen",
+      "c": "parch_lo",
+      "center": true
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        198,
+        700
+      ],
+      "rx": 150,
+      "ry": 14,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        55,
+        552,
+        285,
+        16
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        50,
+        618,
+        296,
+        22
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "line",
+      "a": [
+        50,
+        620
+      ],
+      "b": [
+        346,
+        620
+      ],
+      "w": 3,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        66,
+        640,
+        16,
+        58
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        314,
+        640,
+        16,
+        58
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        630,
+        706
+      ],
+      "rx": 62,
+      "ry": 12,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        578,
+        592,
+        105,
+        110
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        578,
+        612,
+        105,
+        10
+      ],
+      "c": "brass_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        578,
+        668,
+        105,
+        10
+      ],
+      "c": "brass_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        608,
+        566
+      ],
+      "size": 32,
+      "t": "⚔️"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        188,
+        714
+      ],
+      "rx": 66,
+      "ry": 12,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        180,
+        636,
+        16,
+        72
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        150,
+        700,
+        76,
+        12
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        140,
+        618,
+        96,
+        24
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        462,
+        718
+      ],
+      "rx": 118,
+      "ry": 16,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        360,
+        655,
+        205,
+        58
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        372,
+        668,
+        181,
+        34
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        352,
+        635,
+        222,
+        22
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "glow",
+      "at": [
+        378,
+        618
+      ],
+      "r": 55,
+      "c": "ember_hi",
+      "flicker": true
+    },
+    {
+      "op": "emoji",
+      "at": [
+        378,
+        622
+      ],
+      "size": 24,
+      "t": "🕯️"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        748
+      ],
+      "b": [
+        720,
+        748
+      ],
+      "w": 2,
+      "c": "walnut_lo"
+    }
+  ],
+  "wander": [
+    56,
+    852,
+    608,
+    116
+  ],
+  "npcs": [
+    {
+      "t": "🧔",
+      "name": "Thora, Recruiter",
+      "at": [
+        520,
+        588
+      ],
+      "size": 54,
+      "wander": false
+    },
+    {
+      "t": "🧙",
+      "name": "Hopeful",
+      "at": [
+        100,
+        760
+      ],
+      "size": 44,
+      "wander": false
+    },
+    {
+      "t": "🥷",
+      "name": "Hopeful",
+      "at": [
+        280,
+        764
+      ],
+      "size": 44,
+      "wander": false
+    }
+  ],
+  "props": [
+    {
+      "id": "hire",
+      "t": "📜",
+      "at": [
+        462,
+        672
+      ],
+      "size": 42,
+      "label": "Sign the Contract",
+      "sub": "take on a new hand",
+      "act": "hire"
+    },
+    {
+      "id": "roster",
+      "t": "📖",
+      "at": [
+        188,
+        660
+      ],
+      "size": 40,
+      "label": "Company Roster",
+      "sub": "who you already keep",
+      "act": "roster"
+    }
+  ]
+}

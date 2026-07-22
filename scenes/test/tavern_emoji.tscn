@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://b588boc6g8ohe"]
+
+[ext_resource type="Script" uid="uid://dy46dlxc5bp23" path="res://scripts/test/tavern_emoji.gd" id="1_m6fyn"]
+
+[node name="TavernEmoji" type="Control" unique_id=476784337]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_m6fyn")

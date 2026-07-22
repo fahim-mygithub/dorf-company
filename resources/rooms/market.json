@@ -1,0 +1,512 @@
+{
+  "title": "— THE MARKET —",
+  "sub": "cards and kit, paid against the rent",
+  "wall_top": "walnut_lo",
+  "wall_bot": "walnut",
+  "floor_near": "walnut_hi",
+  "floor_far": "walnut",
+  "horizon": 560,
+  "furniture": [
+    {
+      "op": "rect",
+      "r": [
+        0,
+        228,
+        720,
+        56
+      ],
+      "c": "felt"
+    },
+    {
+      "op": "rect",
+      "r": [
+        40,
+        228,
+        52,
+        56
+      ],
+      "c": "parch_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        180,
+        228,
+        52,
+        56
+      ],
+      "c": "parch_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        320,
+        228,
+        52,
+        56
+      ],
+      "c": "parch_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        286
+      ],
+      "b": [
+        720,
+        286
+      ],
+      "w": 6,
+      "c": "brass_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        36,
+        286,
+        18,
+        300
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        666,
+        286,
+        18,
+        300
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        430,
+        288
+      ],
+      "b": [
+        430,
+        318
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        430,
+        336
+      ],
+      "size": 38,
+      "t": "⚖️"
+    },
+    {
+      "op": "glow",
+      "at": [
+        600,
+        342
+      ],
+      "r": 88,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "emoji",
+      "at": [
+        600,
+        346
+      ],
+      "size": 40,
+      "t": "🏮"
+    },
+    {
+      "op": "rect",
+      "r": [
+        70,
+        330,
+        180,
+        200
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        70,
+        330,
+        180,
+        10
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "line",
+      "a": [
+        78,
+        392
+      ],
+      "b": [
+        242,
+        392
+      ],
+      "w": 5,
+      "c": "brass"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        110,
+        366
+      ],
+      "size": 38,
+      "t": "⚔️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        162,
+        366
+      ],
+      "size": 38,
+      "t": "🪓"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        214,
+        366
+      ],
+      "size": 38,
+      "t": "🛡️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        130,
+        462
+      ],
+      "size": 38,
+      "t": "🏹"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        196,
+        462
+      ],
+      "size": 38,
+      "t": "🗡️"
+    },
+    {
+      "op": "rect",
+      "r": [
+        470,
+        470,
+        190,
+        76
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        480,
+        400,
+        34,
+        70
+      ],
+      "c": "felt"
+    },
+    {
+      "op": "rect",
+      "r": [
+        522,
+        392,
+        34,
+        78
+      ],
+      "c": "gink"
+    },
+    {
+      "op": "rect",
+      "r": [
+        564,
+        404,
+        34,
+        66
+      ],
+      "c": "ember"
+    },
+    {
+      "op": "line",
+      "a": [
+        466,
+        470
+      ],
+      "b": [
+        664,
+        470
+      ],
+      "w": 6,
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        280,
+        358,
+        170,
+        72
+      ],
+      "c": "parch"
+    },
+    {
+      "op": "text",
+      "r": [
+        280,
+        376,
+        170,
+        28
+      ],
+      "size": 20,
+      "t": "GOODS & KIT",
+      "c": "ink",
+      "center": true
+    },
+    {
+      "op": "rect",
+      "r": [
+        66,
+        528,
+        230,
+        56
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        110,
+        556
+      ],
+      "rx": 15,
+      "ry": 10,
+      "c": "parch"
+    },
+    {
+      "op": "rect",
+      "r": [
+        66,
+        584,
+        230,
+        16
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        335,
+        652
+      ],
+      "rx": 44,
+      "ry": 54,
+      "c": "walnut"
+    },
+    {
+      "op": "line",
+      "a": [
+        294,
+        632
+      ],
+      "b": [
+        376,
+        632
+      ],
+      "w": 5,
+      "c": "brass_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        335,
+        704
+      ],
+      "rx": 50,
+      "ry": 12,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        386,
+        606,
+        66,
+        84
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        419,
+        692
+      ],
+      "rx": 42,
+      "ry": 10,
+      "c": "shadow"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        590,
+        822
+      ],
+      "rx": 128,
+      "ry": 22,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        460,
+        704,
+        252,
+        112
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        452,
+        682,
+        264,
+        22
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "line",
+      "a": [
+        464,
+        720
+      ],
+      "b": [
+        708,
+        720
+      ],
+      "w": 4,
+      "c": "brass"
+    },
+    {
+      "op": "rect",
+      "r": [
+        500,
+        736,
+        172,
+        58
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        590,
+        952
+      ],
+      "rx": 110,
+      "ry": 20,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        500,
+        846,
+        116,
+        104
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        500,
+        880
+      ],
+      "b": [
+        616,
+        880
+      ],
+      "w": 5,
+      "c": "brass_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        630,
+        884,
+        74,
+        64
+      ],
+      "c": "walnut"
+    }
+  ],
+  "wander": [
+    58,
+    790,
+    392,
+    178
+  ],
+  "npcs": [
+    {
+      "t": "🧔",
+      "name": "Stallkeeper",
+      "at": [
+        488,
+        684
+      ],
+      "size": 48,
+      "wander": false
+    },
+    {
+      "t": "🧑‍🌾",
+      "name": "Porter",
+      "at": [
+        200,
+        880
+      ],
+      "size": 44,
+      "wander": true
+    }
+  ],
+  "props": [
+    {
+      "id": "trade_scroll",
+      "t": "📜",
+      "at": [
+        180,
+        596
+      ],
+      "size": 42,
+      "label": "Trade Scroll",
+      "sub": "add a card to a deck",
+      "act": "shop:card"
+    },
+    {
+      "id": "salve",
+      "t": "🧴",
+      "at": [
+        600,
+        782
+      ],
+      "size": 42,
+      "label": "Salve & Bandage",
+      "sub": "clears one wound",
+      "act": "shop:heal"
+    }
+  ]
+}

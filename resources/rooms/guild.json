@@ -1,0 +1,442 @@
+{
+  "title": "— THE GUILD HALL —",
+  "sub": "work is posted, sealed and paid",
+  "wall_top": "shadow",
+  "wall_bot": "walnut_lo",
+  "floor_near": "walnut",
+  "floor_far": "walnut_lo",
+  "horizon": 560,
+  "furniture": [
+    {
+      "op": "line",
+      "a": [
+        0,
+        240
+      ],
+      "b": [
+        720,
+        240
+      ],
+      "w": 2,
+      "c": "shadow"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        305
+      ],
+      "b": [
+        720,
+        305
+      ],
+      "w": 2,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        0,
+        530,
+        720,
+        30
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        0,
+        531
+      ],
+      "b": [
+        720,
+        531
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        25,
+        230,
+        70,
+        160
+      ],
+      "c": "felt"
+    },
+    {
+      "op": "line",
+      "a": [
+        18,
+        228
+      ],
+      "b": [
+        102,
+        228
+      ],
+      "w": 4,
+      "c": "brass"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        60,
+        296
+      ],
+      "size": 28,
+      "t": "⚜️"
+    },
+    {
+      "op": "rect",
+      "r": [
+        645,
+        230,
+        68,
+        160
+      ],
+      "c": "felt"
+    },
+    {
+      "op": "line",
+      "a": [
+        638,
+        228
+      ],
+      "b": [
+        718,
+        228
+      ],
+      "w": 4,
+      "c": "brass"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        679,
+        296
+      ],
+      "size": 28,
+      "t": "⚜️"
+    },
+    {
+      "op": "line",
+      "a": [
+        118,
+        340
+      ],
+      "b": [
+        190,
+        340
+      ],
+      "w": 3,
+      "c": "brass_lo"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        136,
+        358
+      ],
+      "size": 22,
+      "t": "🗝️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        172,
+        358
+      ],
+      "size": 22,
+      "t": "🗝️"
+    },
+    {
+      "op": "glow",
+      "at": [
+        128,
+        318
+      ],
+      "r": 100,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "glow",
+      "at": [
+        664,
+        430
+      ],
+      "r": 56,
+      "c": "ember",
+      "flicker": true
+    },
+    {
+      "op": "emoji",
+      "at": [
+        128,
+        300
+      ],
+      "size": 26,
+      "t": "🕯️"
+    },
+    {
+      "op": "emoji",
+      "at": [
+        664,
+        412
+      ],
+      "size": 26,
+      "t": "🕯️"
+    },
+    {
+      "op": "rect",
+      "r": [
+        148,
+        230,
+        424,
+        296
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        158,
+        240,
+        404,
+        276
+      ],
+      "c": "felt_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        148,
+        234
+      ],
+      "b": [
+        572,
+        234
+      ],
+      "w": 5,
+      "c": "brass"
+    },
+    {
+      "op": "rect",
+      "r": [
+        515,
+        302,
+        120,
+        258
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        525,
+        312,
+        100,
+        248
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "line",
+      "a": [
+        575,
+        315
+      ],
+      "b": [
+        575,
+        455
+      ],
+      "w": 2,
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        612,
+        440
+      ],
+      "rx": 5,
+      "ry": 5,
+      "c": "brass_hi"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        230,
+        806
+      ],
+      "rx": 175,
+      "ry": 14,
+      "c": "shadow"
+    },
+    {
+      "op": "rect",
+      "r": [
+        60,
+        690,
+        360,
+        20
+      ],
+      "c": "walnut_hi"
+    },
+    {
+      "op": "rect",
+      "r": [
+        60,
+        710,
+        360,
+        14
+      ],
+      "c": "walnut"
+    },
+    {
+      "op": "rect",
+      "r": [
+        72,
+        724,
+        16,
+        80
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "rect",
+      "r": [
+        392,
+        724,
+        16,
+        80
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        272,
+        684
+      ],
+      "rx": 11,
+      "ry": 8,
+      "c": "ink"
+    },
+    {
+      "op": "line",
+      "a": [
+        274,
+        682
+      ],
+      "b": [
+        288,
+        640
+      ],
+      "w": 2,
+      "c": "parch"
+    },
+    {
+      "op": "rect",
+      "r": [
+        470,
+        700,
+        110,
+        70
+      ],
+      "c": "walnut_lo"
+    },
+    {
+      "op": "line",
+      "a": [
+        470,
+        726
+      ],
+      "b": [
+        580,
+        726
+      ],
+      "w": 4,
+      "c": "brass_lo"
+    },
+    {
+      "op": "ellipse",
+      "at": [
+        525,
+        744
+      ],
+      "rx": 8,
+      "ry": 8,
+      "c": "brass_hi"
+    },
+    {
+      "op": "text",
+      "r": [
+        470,
+        704,
+        110,
+        16
+      ],
+      "size": 12,
+      "t": "DUES",
+      "c": "brass_hi",
+      "center": true
+    }
+  ],
+  "wander": [
+    58,
+    800,
+    604,
+    168
+  ],
+  "npcs": [
+    {
+      "t": "🧔",
+      "name": "Guild Clerk",
+      "at": [
+        330,
+        680
+      ],
+      "size": 46,
+      "wander": false
+    },
+    {
+      "t": "💂",
+      "name": "Waiting Sellsword",
+      "at": [
+        520,
+        890
+      ],
+      "size": 44,
+      "wander": true
+    }
+  ],
+  "props": [
+    {
+      "id": "ledger",
+      "t": "📜",
+      "at": [
+        120,
+        595
+      ],
+      "size": 40,
+      "label": "Company Ledger",
+      "sub": "review the crew",
+      "act": "roster"
+    },
+    {
+      "id": "door",
+      "t": "🚪",
+      "at": [
+        575,
+        490
+      ],
+      "size": 44,
+      "label": "Hall Door",
+      "sub": "back to the tavern",
+      "act": "goto:tavern"
+    }
+  ]
+}
