@@ -120,8 +120,9 @@ func _run() -> void:
 	_ck("the purse was charged once", host.treasury == t1 - int(host.shop_stock[card_i]["cost"]),
 		"%d -> %d" % [t1, host.treasury])
 
-	# ⚠ int("2:1") == 2 in GDScript: a reader that forgot to split would buy the right good for the
-	# WRONG dwarf and never error. A malformed arg must open no ring at all.
+	# ⚠ int("2:1") == 21 in GDScript (measured): it drops the separator and concatenates the digit
+	# runs rather than erroring, so a forgotten split yields a plausible index, not a crash. A
+	# malformed arg must therefore open no ring at all.
 	_ck("a malformed buy arg opens no ring", not host._is_ring("shop", str(card_i)))
 	_ck("an out-of-range recipient opens no ring", not host._is_ring("shop", "%d:99" % card_i))
 
@@ -235,6 +236,66 @@ func _run() -> void:
 	await _wait(1.0)
 	_ck("a client cannot propose a teleport", host.ring.is_empty(), str(host.ring))
 	_ck("the crew did not move", host.hex_cur == cur_before, "%s -> %s" % [cur_before, host.hex_cur])
+
+	print("\n--- 5b4. an EVENT tile must not deadlock the expedition -----------")
+	# _enter_hex sets busy=true for the march; the event arm returns without resolving, and only
+	# _resume_hex clears it. The event choice is a RING, and _ring_intent's first line is
+	# `if busy: return` -- so every seat's vote was swallowed, forever, with no way off the tile.
+	var ev := ""
+	for k: String in host._hex_neighbors(host.hex_cur):
+		if str(host.hexes[k]["kind"]) != "wall":
+			ev = k
+			break
+	_ck("found a neighbour to make an event of", ev != "", ev)
+	host.hexes[ev]["kind"] = "event"
+	host.hexes[ev]["resolved"] = false
+	host._push()
+	await _wait(0.5)
+	client._intent("hex", ev)
+	await _wait(0.4)
+	host._intent("hex", ev)
+	await _wait(2.2)
+	_ck("the crew is on the event tile", host.state == "HEXEVENT", host.state)
+	_ck("waiting for a choice is NOT busy", not host.busy, str(host.busy))
+	var gold0: int = int(host.exp_loot_gold)
+	client._intent("event", "safe")
+	await _wait(1.0)
+	_ck("a seat's event vote OPENS a ring", not host.ring.is_empty()
+		and str(host.ring.get("kind", "")) == "event", str(host.ring))
+	host._intent("event", "safe")
+	await _wait(2.0)
+	_ck("the table resolved the event", host.state == "HEX", host.state)
+	_ck("the safe choice paid out", int(host.exp_loot_gold) > gold0,
+		"%d -> %d" % [gold0, int(host.exp_loot_gold)])
+
+	print("\n--- 5b5. the wagon: two survivors from ONE seat, nobody deleted --")
+	# The original goes down on one tile and its heir on another, so seat 1 has TWO dwarves on the
+	# wagon. _wagon_home used to write roster[seat] for each, so the second silently deleted the
+	# first -- a living dwarf and every card ever bought into its deck.
+	var keep_a := {"name": "Wagon A", "cls": "warrior", "status": "ready", "recover": 0,
+		"hp": 0, "max_hp": 30, "deck": ["strike", "strike"], "downed": true, "stable": true,
+		"ds_success": 3, "ds_fail": 0, "seat": 1}
+	var keep_b := {"name": "Wagon B", "cls": "warrior", "status": "ready", "recover": 0,
+		"hp": 0, "max_hp": 30, "deck": ["guard"], "downed": true, "stable": true,
+		"ds_success": 3, "ds_fail": 0, "seat": 1}
+	var roster_n0: int = host.roster.size()
+	host.carried = [keep_a, keep_b]
+	host._wagon_home("extract")
+	var names: Array = []
+	for d2: Dictionary in host.roster:
+		names.append(str(d2["name"]))
+	_ck("both survivors are on the books", names.has("Wagon A") and names.has("Wagon B"), str(names))
+	_ck("the pool grew rather than overwrote", host.roster.size() == roster_n0 + 1,
+		"%d -> %d" % [roster_n0, host.roster.size()])
+	_ck("the reclaimed dwarf kept its deck",
+		names.has("Wagon A") and (host.roster[1]["deck"] as Array).size() == 2,
+		str(host.roster[1].get("deck", [])))
+	# put the board back for the sections that follow
+	while host.roster.size() > roster_n0:
+		host.roster.pop_back()
+	host.carried = []
+	host._push()
+	await _wait(0.6)
 
 	print("\n--- 5b2. M3b: the client REPLAYS the flag march + counts the purse -")
 	# A client never runs _enter_hex (it returns at _on_hex_input / _intent), so it can only have

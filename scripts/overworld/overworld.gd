@@ -648,7 +648,7 @@ func _enter_dashboard() -> void:
 		return
 	selected_contract = -1
 	state = "DASHBOARD"
-	sheet_key = ""
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
 	shop_sel = -1
 	_clear_screen()
 	_build_dashboard()
@@ -665,7 +665,7 @@ func _on_view_contracts() -> void:
 
 func _do_view_contracts() -> void:
 	selected_contract = -1
-	sheet_key = ""
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
 	state = "CONTRACTS"
 	_clear_screen()
 	_build_contracts()
@@ -2219,7 +2219,11 @@ func _hex_combat(danger: int, e: int) -> void:
 	_msg("The ambush is broken — the crew patches up." if result["success"] else "The crew is overrun…")
 
 # ---------------------------------------------------------- Reward tile (loot -> loot bag / a card)
+## Same shape as _open_hex_event: we stop and wait for a player. Loot only escaped the deadlock by
+## accident — it rides `_apply_free`, which has no busy guard — so clearing it here makes `busy` mean
+## one thing on every waiting screen instead of two.
 func _open_hex_reward(e: int) -> void:
+	busy = false
 	if randf() < 0.35:                    # a coin cache instead of a card
 		var g := HEX_REWARD_GOLD + (randi() % 12)
 		exp_loot_gold += g
@@ -2365,6 +2369,13 @@ func _do_hexloot_skip() -> void:
 
 # ---------------------------------------------------------- Event tile
 func _open_hex_event(_e: int) -> void:
+	# ⚠ CLEARING busy IS LOAD-BEARING, and its absence was a hard co-op lock. `_enter_hex` sets
+	# busy=true for the march, and this arm RETURNS without resolving anything — only `_resume_hex`
+	# clears it, and we never reach it. The event choice is a RING, and `_ring_intent`'s first line
+	# is `if busy: return`, so every seat's vote was swallowed silently, forever: no pip, no message,
+	# and HEXEVENT has no extract button to leave by. `busy` means "a resolution is in flight", not
+	# "a screen is open" — waiting on a decision is the opposite of busy.
+	busy = false
 	state = "HEXEVENT"   # choices re-capture run_epoch on click
 	_clear_screen()
 	_build_hex_event()
@@ -2807,7 +2818,18 @@ func _apply_snap(s: Dictionary) -> void:
 	months_survived = int(s.get("months_survived", 0))
 	campaigns_left = int(s.get("campaigns_left", 0))
 	busy = bool(s.get("busy", false))
+	var prev_state := state
 	state = str(s.get("state", ""))
+	if state != prev_state:
+		# LOCAL VIEW STATE IS STALE THE MOMENT THE BOARD CHANGES SCREEN. Only the host runs
+		# _enter_venue, so its disarm never happens here — a client that armed a purchase in the
+		# Market and then followed the table to the Tavern kept `shop_sel` set, and the next tap on a
+		# dwarf (to read their deck) silently proposed a shared-gold spend nobody asked for.
+		# `sheet_arg` indexes contracts/roster, and a snapshot can resize both underneath it.
+		shop_sel = -1
+		sheet_key = ""
+		sheet_arg = -1
+		_refresh_sheet()
 	over_kind = str(s.get("over", ""))
 	roster = _norm(s.get("roster", []))
 	carried = _norm(s.get("carried", []))
@@ -2952,9 +2974,11 @@ func _authority_intent(p: Dictionary) -> void:
 ## yours alone until it eats the rent money, and then it is everybody's problem.
 ## A voted purchase has to name BOTH the good and who gets it: with one shared pool of dwarves the
 ## proposer is not automatically the owner, so the table is agreeing to "this, for them".
-## ⚠ `int("2:1")` is 2 in GDScript — it parses the leading digits and does not error. A reader that
-## forgot to split would therefore buy the right thing for the WRONG dwarf, silently. Every reader
-## of a buy arg goes through here so there is only one place to forget.
+## ⚠ MEASURED, not assumed: `int("2:1")` is **21** in GDScript — it discards the separator and
+## CONCATENATES the digit runs, and it does not error. A reader that forgot to split therefore gets a
+## plausible-looking index rather than a crash: usually out of range and so dropped, but on a longer
+## stock `int("1:2") == 12` is a real slot and the wrong good is bought silently. Every reader of a
+## buy arg goes through here, so there is exactly one place to forget.
 func _parse_buy(arg: String) -> Vector2i:
 	var parts := arg.split(":")
 	if parts.size() != 2:
@@ -3301,10 +3325,16 @@ func _room_spec(key: String) -> Dictionary:
 ## room's own NPCs come from the spec and carry nothing, because they hold no state.
 func _room_dwarves() -> Array:
 	var out: Array = []
-	for d in roster:
+	for i in range(roster.size()):
+		var d: Dictionary = roster[i]
 		if str(d.get("status", "")) == "lost":
 			continue
 		out.append({
+			# ⚠ `ri` is the ROSTER index and it is the whole reason this loop is indexed. The list is
+			# FILTERED (the lost are not drawn), so the position in this array stops matching the
+			# position in `roster` the moment anyone dies — and the tap handler spends gold and opens
+			# decks by that index. Without `ri`, tapping the dwarf at 4 HP heals a different one.
+			"ri": i,
 			"emoji": str(Db.CLASSES[d["cls"]]["emoji"]), "name": str(d["name"]),
 			"hp": int(d["hp"]), "max_hp": int(d["max_hp"]),
 			"status": str(d["status"]), "recover": int(d.get("recover", 0)),
@@ -3434,6 +3464,14 @@ func _on_room_dwarf_tapped(idx: int) -> void:
 	# A dwarf tapped while a good is armed IS the purchase target — the two-tap grammar the shop
 	# already used, moved into the room.
 	if shop_sel >= 0 and shop_sel < shop_stock.size():
+		# Re-check SOLD before proposing: an arm can outlive the vote that bought the slot, and
+		# _is_ring only range-checks indices — so without this the table burns a unanimous vote on a
+		# purchase _buy_shop refuses on its first line.
+		if bool(shop_stock[shop_sel].get("sold", false)):
+			shop_sel = -1
+			_msg("Someone already took that one.")
+			_rebuild_current()
+			return
 		# The list shop only ever OFFERED eligible targets, so it could not sell you a bandage for a
 		# dwarf who has nothing to mend. A room offers every dwarf standing in it, so the filter has
 		# to move here or the same 25g quietly buys nothing.
@@ -3894,7 +3932,7 @@ func _on_venue(key: String) -> void:
 func _enter_venue(key: String) -> void:
 	# Walking out of a room closes whatever sub-menu was open in it, and disarms a good you armed
 	# but never gave to anyone — an armed purchase must not follow you into the next building.
-	sheet_key = ""
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
 	shop_sel = -1
 	match key:
 		# "guild" is the ROOM's name and "contracts" is the VENUE's; the town map's prop says
@@ -4149,7 +4187,7 @@ func _build_recruit() -> void:
 func _on_hire(i: int) -> void:
 	if busy or mode != Mode.SOLO:
 		return
-	sheet_key = ""
+	_close_sheet()   # not a bare assignment: only _refresh_sheet takes the scrim down
 	_buy_recruit(i)
 
 # ---------------------------------------------------------------- The nested fight
@@ -4265,6 +4303,12 @@ func _clear_ds(d: Dictionary) -> void:
 ## from the stand-in. Whoever did not is gone — but their SEAT is never left with a corpse in it,
 ## because a player staring at a corpse for the rest of the campaign is not playing the game.
 func _wagon_home(kind: String) -> void:
+	# ⚠ One seat can put MORE THAN ONE dwarf on the wagon in a single expedition: the original goes
+	# down on tile 2, its heir goes down on tile 4, and both ride home. This loop used to write
+	# `roster[si] = d` unconditionally, so the second survivor SILENTLY DELETED the first — a living
+	# dwarf and every card ever bought into its deck, while the log cheerfully announced it was back
+	# in the line. The pool is shared, so a second survivor from one seat simply JOINS it.
+	var reclaimed: Dictionary = {}
 	for d: Dictionary in carried:
 		if kind == "wipe":
 			_finish_saves(d)   # a wipe gives the dying no more time
@@ -4276,6 +4320,11 @@ func _wagon_home(kind: String) -> void:
 			continue
 		_clear_ds(d)
 		d["hp"] = maxi(1, int(round(float(d["max_hp"]) * STABLE_HP_FRAC)))
+		if reclaimed.has(si):
+			roster.append(d)
+			_msg("%s walked home too — back on the company's books." % d["name"])
+			continue
+		reclaimed[si] = true
 		roster[si] = d   # back on their feet, deck intact — the heir steps aside
 		_msg("%s is patched up and back in the line." % d["name"])
 	carried = []

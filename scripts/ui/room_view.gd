@@ -74,7 +74,9 @@ func configure(s: Dictionary, dwarves: Array) -> void:
 		# including for the still ones, which used to be parked in a fixed corner and therefore
 		# stood on top of whoever owned the first lane.
 		var still := str(d.get("status", "ready")) != "ready"
-		_spawn(str(d.get("emoji", "🛡️")), 54, wr.position, not still, true, d, i)
+		# The caller's OWN index for this dwarf (`ri`), never our position in this array — the list
+		# it hands us may be filtered, and `dwarf_tapped` is used to index the caller's roster.
+		_spawn(str(d.get("emoji", "🛡️")), 54, wr.position, not still, true, d, int(d.get("ri", i)))
 
 	for n in spec.get("npcs", []):
 		var at: Array = n.get("at", [360, 800])
