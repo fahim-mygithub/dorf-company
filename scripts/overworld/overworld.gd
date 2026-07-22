@@ -12,6 +12,8 @@ extends Control
 const Db := preload("res://scripts/combat/card_db.gd")
 const COMBAT_SCENE := preload("res://scenes/combat/combat.tscn")
 const HexTile := preload("res://scripts/ui/hex_tile.gd")
+const WritScene := preload("res://scripts/ui/writ_scene.gd")
+const TutorialScript := preload("res://scripts/overworld/tutorial_summoning.gd")
 
 # ============================================================ Economy (tunable)
 const START_TREASURY := 80    # Phase 0 retune: with PAYOUT.low 25, a Low-only "safe" grind can NO
@@ -224,6 +226,8 @@ var _cur_fid := 0
 
 # ============================================================ UI refs
 var crew_bar: Control            # co-op: the seat pips + the open proposal (chrome; survives _clear_screen)
+var writ: Control                # THE SUMMONING and any future cutscene (chrome, topmost, modal)
+var _tut_done := false           # per NODE, so a restart never replays it but a fresh campaign does
 var screen_root: Control
 var hud: Control
 var overlay: ColorRect
@@ -372,6 +376,14 @@ func _build_chrome() -> void:
 	crew_bar.visible = mode != Mode.SOLO
 	add_child(crew_bar)
 
+	# Added LAST so it is topmost. It is full-screen MOUSE_FILTER_STOP while visible, which is what
+	# makes a focus beat safe: the highlighted control shows through the scrim hole but cannot be
+	# pressed. Sibling of screen_root, so _clear_screen and a client's _render never touch it.
+	writ = WritScene.new()
+	writ.visible = false
+	writ.finished.connect(_on_writ_finished)
+	add_child(writ)
+
 func _on_overlay_btn() -> void:
 	if mode == Mode.CLIENT:
 		_intent("restart", "")
@@ -465,6 +477,53 @@ func _new_run() -> void:
 	overlay.visible = false
 	_msg("Rent's due at each month's end and only climbs. Run up to 3 campaigns a month.")
 	_enter_dashboard()
+	_maybe_play_tutorial()
+
+# ============================================================ THE SUMMONING (opening cutscene)
+## Plays once when a fresh campaign opens. NOT awaited and NOT networked: the scene is linear, so
+## it has no shared state to agree on — every peer runs all 28 beats locally at its own reading
+## pace. The dashboard is already built underneath; the writ layer is modal, so nothing can be
+## touched until it finishes. Add a choice here and you inherit the ring, the pips and the deadlock
+## timer along with it.
+func _maybe_play_tutorial() -> void:
+	if _tut_done or not is_instance_valid(writ):
+		return
+	_tut_done = true
+	writ.play(TutorialScript.beats(), _writ_ctx())
+
+func _on_writ_finished() -> void:
+	_refresh_hud()
+
+## `@us` — resolved PER CLIENT, never sent. Solo has no single avatar (you run all three dorfs),
+## so it falls back to the human manager; in co-op it is THIS seat's own dorf, which is why every
+## player sees themselves holding the resume.
+func _writ_ctx() -> Dictionary:
+	var us_name := "You"
+	var us_art := "🧍"
+	var us_metal := C_COIN
+	if mode != Mode.SOLO:
+		for d in roster:
+			if int(d.get("seat", -1)) == my_seat:
+				us_name = str(d.get("name", "You"))
+				us_art = str(Db.CLASSES[d["cls"]]["emoji"])
+				us_metal = _class_col(str(d["cls"]))
+				break
+	return {"us_name": us_name, "us_art": us_art, "us_metal": us_metal,
+		"cast": TutorialScript.CAST, "focus_rects": _focus_rects()}
+
+## Named rects rather than coordinates in the script, so a layout change moves the spotlight
+## instead of breaking it. A name with no entry here degrades to a plain un-highlighted beat,
+## which is how a beat pointing at another screen still reads.
+func _focus_rects() -> Dictionary:
+	var r := {
+		"hud_treasury": Rect2(8, 16, 300, 100),      # coin + the big number + the solvency band
+		"hud_rent": Rect2(348, 14, 292, 70),         # fee + "next due"
+	}
+	if state == "DASHBOARD":
+		r["roster"] = Rect2(30, 388, 660, 192)       # the dwarf tokens, all four columns
+		r["contract_board"] = Rect2(202, 1142, 336, 86)
+		r["end_month"] = Rect2(16, 1142, 196, 86)
+	return r
 
 ## Total by construction: a class added later renders grey instead of crashing the screen.
 func _class_col(cls: String) -> Color:
@@ -2545,6 +2604,12 @@ func _apply_snap(s: Dictionary) -> void:
 		_tween_treasury_from(tre_prev, treasury)
 	for f: Variant in (s.get("fx", []) as Array):
 		_replay_fx(f)
+	# A CLIENT never runs _new_run, so this is its equivalent trigger: the first snapshot is the one
+	# that fills the board, and month 0 tells a fresh campaign apart from a rejoin mid-run. It has to
+	# be here rather than earlier because @us reads the roster this snapshot just delivered — before
+	# this line the client does not yet know which dorf is its own.
+	if not had_board and month == 0 and months_survived == 0 and state == "DASHBOARD":
+		_maybe_play_tutorial()
 
 # ---------------------------------------------------------------- Wire
 func _on_net(event: String, p: Dictionary) -> void:
