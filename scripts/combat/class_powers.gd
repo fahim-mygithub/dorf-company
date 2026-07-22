@@ -228,7 +228,8 @@ static func _fire_metamagic(c, a: Dictionary, pick: String) -> void:
 	a["meta_pick"] = pick
 	a["meta_charge"] = 0
 	c._flash(a)
-	c._log("🌀 %s shapes the next spell: %s." % [a["name"], pick.capitalize()])
+	# 🧿, not 🌀 — Metamagic's glyph moved in the 2026-07-22 collision pass (see Db.POWERS.metamagic).
+	c._log("🧿 %s shapes the next spell: %s." % [a["name"], pick.capitalize()])
 
 static func _fire_assassins_mark(c, a: Dictionary, target: Dictionary) -> void:
 	# ONE mark at a time: clear this seat's old one wherever it sits.
